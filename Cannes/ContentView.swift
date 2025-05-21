@@ -17,6 +17,12 @@ struct Movie: Identifiable, Codable {
     /// Tracks how many times the movie has been reinforced through
     /// comparisons. A higher value means the score is more reliable.
     var confidenceLevel: Int = 1
+
+    /// Counts how often this movie ends up in the top quarter of the list.
+    var highRankCount: Int = 0
+
+    /// Counts how often this movie ends up in the bottom quarter of the list.
+    var lowRankCount: Int = 0
     
     init(id: UUID = UUID(), title: String, sentiment: MovieSentiment) {
         self.id = id
@@ -24,6 +30,8 @@ struct Movie: Identifiable, Codable {
         self.sentiment = sentiment
         self.comparisonsCount = 0
         self.confidenceLevel = 1
+        self.highRankCount = 0
+        self.lowRankCount = 0
         self.elo = 1500.0
     }
     
@@ -41,8 +49,14 @@ struct Movie: Identifiable, Codable {
         case .didntLikeIt:
             sentimentModifier = -2.0
         }
-        
-        return min(max(baseScore + sentimentModifier, 0), 10).rounded(toPlaces: 1)
+
+        // Reward movies that frequently rank near the top and penalise ones
+        // that often fall to the bottom. Each occurrence nudges the score by
+        // 0.1 either way.
+        let rankingModifier = Double(highRankCount - lowRankCount) * 0.1
+
+        return min(max(baseScore + sentimentModifier + rankingModifier, 0), 10)
+            .rounded(toPlaces: 1)
     }
 }
 
@@ -51,7 +65,7 @@ struct MovieComparison: Codable {
     let loserId: UUID
 }
 
-enum MovieSentiment: String, Codable {
+enum MovieSentiment: String, Codable, CaseIterable {
     case likedIt = "I liked it!"
     case itWasFine = "It was fine"
     case didntLikeIt = "I didn't like it"
@@ -72,15 +86,24 @@ struct ContentView: View {
     
     var body: some View {
         NavigationView {
-            List {
-                ForEach(movieStore.movies.sorted(by: { $0.displayScore > $1.displayScore })) { movie in
+            List(movieStore.movies.sorted(by: { $0.displayScore > $1.displayScore })) { movie in
+                NavigationLink(destination: MovieDetailView(movie: movie)) {
                     MovieRow(movie: movie)
                 }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        movieStore.deleteMovie(movie)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
-            .navigationTitle("My Movies")
+            .navigationTitle("Cannes Rankings")
             .toolbar {
-                Button(action: { showingAddMovie = true }) {
-                    Image(systemName: "plus")
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showingAddMovie = true }) {
+                        Image(systemName: "plus")
+                    }
                 }
             }
             .sheet(isPresented: $showingAddMovie) {
@@ -316,19 +339,28 @@ struct ComparisonView: View {
                 var orderedMovies = sortedMovies
                 orderedMovies.insert(newMovie, at: finalPosition)
                 
-                // Update scores for all movies
-                ForEach(Array(orderedMovies.enumerated()), id: \.element.id) { index, movie in
-                    let position = Double(index + 1)
-                    let total = Double(orderedMovies.count)
-                    let targetScore = movieStore.calculateTargetScore(position: position, total: total, sentiment: movie.sentiment)
-                    var updatedMovie = movie
-                    updatedMovie.elo = (targetScore * 200) + 1000
-                    updatedMovie.confidenceLevel += 1
-                    movieStore.updateMovie(updatedMovie)
-                }
-                .onAppear {
-                    onComplete()
-                }
+                // Update scores for all movies once the view appears
+                Color.clear
+                    .onAppear {
+                        for (index, movie) in orderedMovies.enumerated() {
+                            let position = Double(index + 1)
+                            let total = Double(orderedMovies.count)
+                            let targetScore = movieStore.calculateTargetScore(position: position, total: total, sentiment: movie.sentiment)
+                            var updatedMovie = movie
+                            updatedMovie.elo = (targetScore * 200) + 1000
+                            updatedMovie.confidenceLevel += 1
+
+                            let percentile = position / total
+                            if percentile <= 0.25 {
+                                updatedMovie.highRankCount += 1
+                            } else if percentile >= 0.75 {
+                                updatedMovie.lowRankCount += 1
+                            }
+
+                            movieStore.updateMovie(updatedMovie)
+                        }
+                        onComplete()
+                    }
             }
         }
         .padding()
@@ -391,14 +423,43 @@ struct ComparisonView: View {
 class MovieStore: ObservableObject {
     @Published var movies: [Movie] = []
     private let kFactor: Double = 32.0
+    private let saveURL: URL
+
+    init() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        self.saveURL = docs.appendingPathComponent("movies.json")
+        loadMovies()
+    }
+
+    private func loadMovies() {
+        guard let data = try? Data(contentsOf: saveURL) else { return }
+        if let decoded = try? JSONDecoder().decode([Movie].self, from: data) {
+            self.movies = decoded
+        }
+    }
+
+    private func saveMovies() {
+        if let data = try? JSONEncoder().encode(movies) {
+            try? data.write(to: saveURL)
+        }
+    }
     
     func addMovie(_ movie: Movie) {
         movies.append(movie)
+        saveMovies()
     }
-    
+
     func updateMovie(_ movie: Movie) {
         if let index = movies.firstIndex(where: { $0.id == movie.id }) {
             movies[index] = movie
+            saveMovies()
+        }
+    }
+
+    func deleteMovie(_ movie: Movie) {
+        if let index = movies.firstIndex(where: { $0.id == movie.id }) {
+            movies.remove(at: index)
+            saveMovies()
         }
     }
     
@@ -500,13 +561,51 @@ class MovieStore: ObservableObject {
     }
 }
 
+// MARK: - Movie Detail View
+struct MovieDetailView: View {
+    let movie: Movie
+
+    var body: some View {
+        Form {
+            Section(header: Text("Score")) {
+                Text(String(format: "%.1f", movie.displayScore))
+            }
+
+            Section(header: Text("Sentiment")) {
+                Text(movie.sentiment.rawValue)
+                    .foregroundColor(movie.sentiment.color)
+            }
+
+            Section(header: Text("Stats")) {
+                Text("Compared \(movie.comparisonsCount) times")
+                Text("Top placements: \(movie.highRankCount)")
+                Text("Bottom placements: \(movie.lowRankCount)")
+            }
+        }
+        .navigationTitle(movie.title)
+    }
+}
+
 // MARK: - Movie Row
 struct MovieRow: View {
     let movie: Movie
-    
+
+    private var starCount: Int {
+        Int((movie.displayScore / 2).rounded())
+    }
+
     var body: some View {
         HStack {
-            Text(movie.title)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(movie.title)
+                HStack(spacing: 2) {
+                    ForEach(0..<5, id: \.self) { index in
+                        Image(systemName: index < starCount ? "star.fill" : "star")
+                            .foregroundColor(.yellow)
+                            .font(.caption)
+                    }
+                }
+            }
             Spacer()
             Text(String(format: "%.1f", movie.displayScore))
                 .bold()
