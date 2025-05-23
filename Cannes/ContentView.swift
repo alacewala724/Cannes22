@@ -58,6 +58,41 @@ struct MovieComparison: Codable {
 // MARK: - Store
 final class MovieStore: ObservableObject {
     @Published private(set) var movies: [Movie] = []
+    private let saveKey = "movies.json"
+    
+    init() {
+        loadMovies()
+    }
+    
+    private func loadMovies() {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return
+        }
+        
+        let fileURL = documentsDirectory.appendingPathComponent(saveKey)
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            movies = try JSONDecoder().decode([Movie].self, from: data)
+        } catch {
+            print("Error loading movies: \(error)")
+        }
+    }
+    
+    private func saveMovies() {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return
+        }
+        
+        let fileURL = documentsDirectory.appendingPathComponent(saveKey)
+        
+        do {
+            let data = try JSONEncoder().encode(movies)
+            try data.write(to: fileURL)
+        } catch {
+            print("Error saving movies: \(error)")
+        }
+    }
 
     func insertNewMovie(_ movie: Movie, at finalRank: Int) {
         // Find the appropriate section for this sentiment
@@ -74,6 +109,7 @@ final class MovieStore: ObservableObject {
         
         movies.insert(movie, at: insertionIndex)
         recalculateScores()
+        saveMovies()
     }
 
     func recordComparison(winnerID: UUID, loserID: UUID) {
@@ -93,6 +129,7 @@ final class MovieStore: ObservableObject {
         movies[loseIdx].confidenceLevel  += 1
 
         recalculateScores()
+        saveMovies()
     }
 
     private func recalculateScores() {
@@ -127,7 +164,7 @@ final class MovieStore: ObservableObject {
             }
             idealScores[i] = posScore
         }
-
+        
         // Update scores with the new ideal scores
         for i in movies.indices {
             let movie = movies[i]
