@@ -1,63 +1,53 @@
-//
-//  ContentView.swift
-//  Cannes
-//
-//  Created by Aamir Lacewala on 5/19/25.
-//
-
 import SwiftUI
+import Foundation
 
-// MARK: - Models
-struct Movie: Identifiable, Codable {
+// MARK: - Sentiment
+enum MovieSentiment: String, Codable, CaseIterable, Identifiable {
+    case likedIt      = "I liked it!"
+    case itWasFine    = "It was fine"
+    case didntLikeIt  = "I didn't like it"
+
+    var id: String { self.rawValue }
+
+    var midpoint: Double {
+        switch self {
+        case .likedIt:      return 8.55
+        case .itWasFine:    return 5.85
+        case .didntLikeIt:  return 2.35
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .likedIt:      return .green
+        case .itWasFine:    return .gray
+        case .didntLikeIt:  return .red
+        }
+    }
+
+    static var allCasesOrdered: [MovieSentiment] { [.likedIt, .itWasFine, .didntLikeIt] }
+}
+
+// MARK: - Movie Model
+struct Movie: Identifiable, Codable, Equatable {
     let id: UUID
     let title: String
     var sentiment: MovieSentiment
-    var elo: Double
+
+    var score: Double
     var comparisonsCount: Int
-    /// Tracks how many times the movie has been reinforced through
-    /// comparisons. A higher value means the score is more reliable.
-    var confidenceLevel: Int = 1
+    var confidenceLevel: Int
 
-    /// Counts how often this movie ends up in the top quarter of the list.
-    var highRankCount: Int = 0
-
-    /// Counts how often this movie ends up in the bottom quarter of the list.
-    var lowRankCount: Int = 0
-    
     init(id: UUID = UUID(), title: String, sentiment: MovieSentiment) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
+        self.score = sentiment.midpoint
         self.comparisonsCount = 0
         self.confidenceLevel = 1
-        self.highRankCount = 0
-        self.lowRankCount = 0
-        self.elo = 1500.0
     }
-    
-    var displayScore: Double {
-        // Base score from ELO (0-10 range)
-        let baseScore = (elo - 1000) / 200  // Maps 1000-3000 to 0-10
-        
-        // Sentiment modifier (adds/subtracts up to 2 points)
-        let sentimentModifier: Double
-        switch sentiment {
-        case .likedIt:
-            sentimentModifier = 2.0
-        case .itWasFine:
-            sentimentModifier = 0.0
-        case .didntLikeIt:
-            sentimentModifier = -2.0
-        }
 
-        // Reward movies that frequently rank near the top and penalise ones
-        // that often fall to the bottom. Each occurrence nudges the score by
-        // 0.1 either way.
-        let rankingModifier = Double(highRankCount - lowRankCount) * 0.1
-
-        return min(max(baseScore + sentimentModifier + rankingModifier, 0), 10)
-            .rounded(toPlaces: 1)
-    }
+    var displayScore: Double { score.rounded(toPlaces: 1) }
 }
 
 struct MovieComparison: Codable {
@@ -65,556 +55,382 @@ struct MovieComparison: Codable {
     let loserId: UUID
 }
 
-enum MovieSentiment: String, Codable, CaseIterable {
-    case likedIt = "I liked it!"
-    case itWasFine = "It was fine"
-    case didntLikeIt = "I didn't like it"
-    
-    var color: Color {
-        switch self {
-        case .likedIt: return .green
-        case .itWasFine: return .gray
-        case .didntLikeIt: return .red
+// MARK: - Store
+final class MovieStore: ObservableObject {
+    @Published private(set) var movies: [Movie] = []
+
+    func insertNewMovie(_ movie: Movie, at finalRank: Int) {
+        // Find the appropriate section for this sentiment
+        let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
+        guard let sentimentIndex = sentimentSections.firstIndex(of: movie.sentiment) else { return }
+        
+        // Find the start and end indices for this sentiment section
+        let sectionStart = movies.firstIndex { $0.sentiment == movie.sentiment } ?? movies.count
+        let sectionEnd = movies.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? movies.count
+        
+        // Calculate the actual insertion index within the section
+        let sectionLength = sectionEnd - sectionStart
+        let insertionIndex = sectionStart + min(finalRank - 1, sectionLength)
+        
+        movies.insert(movie, at: insertionIndex)
+        recalculateScores()
+    }
+
+    func recordComparison(winnerID: UUID, loserID: UUID) {
+        guard
+            let winIdx = movies.firstIndex(where: { $0.id == winnerID }),
+            let loseIdx = movies.firstIndex(where: { $0.id == loserID })
+        else { return }
+
+        // Only allow comparisons within the same sentiment
+        guard movies[winIdx].sentiment == movies[loseIdx].sentiment else { return }
+
+        if winIdx > loseIdx { movies.swapAt(winIdx, loseIdx) }
+
+        movies[winIdx].comparisonsCount += 1
+        movies[winIdx].confidenceLevel  += 1
+        movies[loseIdx].comparisonsCount += 1
+        movies[loseIdx].confidenceLevel  += 1
+
+        recalculateScores()
+    }
+
+    private func recalculateScores() {
+        let n = movies.count
+        guard n > 0 else { return }
+
+        // Use current array order instead of sorting by scores
+        let (topAnchor, bottomAnchor): (Double, Double) = {
+            switch n {
+            case 1...3:   return (8.3, 5.0)
+            case 4...9:   return (9.0, 3.5)
+            default:      return (9.9, 1.5)
+            }
+        }()
+
+        let k = 4.0 / Double(n)
+        let flatCutoff = max(1, Int(round(Double(n) * 0.10)))
+        let sentimentWeight = 0.5
+
+        // Calculate ideal scores based on current array positions
+        var idealScores = [Double](repeating: 0, count: n)
+        for i in movies.indices {
+            let rank = i + 1
+            let posScore: Double
+            if rank <= flatCutoff {
+                let pct = Double(rank - 1) / Double(max(1, flatCutoff - 1))
+                posScore = topAnchor - pct * 0.6
+            } else {
+                let r = Double(rank)
+                let m = Double(n) * 0.5
+                posScore = bottomAnchor + (topAnchor - bottomAnchor) / (1 + exp(k * (r - m)))
+            }
+            idealScores[i] = posScore
         }
+
+        // Update scores with the new ideal scores
+        for i in movies.indices {
+            let movie = movies[i]
+            var newScore = (1 - sentimentWeight) * idealScores[i] + sentimentWeight * movie.sentiment.midpoint
+
+            if n <= 3 {
+                newScore = min(max(newScore, 6.0), 8.0)
+            } else if n <= 6 {
+                newScore = min(max(newScore, 5.0), 8.8)
+            }
+
+            newScore = (movie.score * Double(movie.confidenceLevel) + newScore) / Double(movie.confidenceLevel + 1)
+            movies[i].score = newScore
+        }
+
+        // Add small random variations to break ties
+        for i in 1..<movies.count {
+            if abs(movies[i].score - movies[i-1].score) < 0.0001 {
+                movies[i].score += Double.random(in: -0.075...0.075)
+            }
+        }
+
+        objectWillChange.send()
     }
 }
 
-// MARK: - Main View
-struct ContentView: View {
-    @StateObject private var movieStore = MovieStore()
-    @State private var showingAddMovie = false
-    
+// MARK: - Add Movie View
+struct AddMovieView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: MovieStore
+
+    @State private var title: String = ""
+    @State private var sentiment: MovieSentiment = .likedIt
+    @State private var currentStep = 1
+    @State private var newMovie: Movie? = nil
+
     var body: some View {
         NavigationView {
-            List(movieStore.movies.sorted(by: { $0.displayScore > $1.displayScore })) { movie in
-                NavigationLink(destination: MovieDetailView(movie: movie)) {
-                    MovieRow(movie: movie)
-                }
-                .swipeActions {
-                    Button(role: .destructive) {
-                        movieStore.deleteMovie(movie)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+            VStack(spacing: 40) {
+                // Content
+                Group {
+                    switch currentStep {
+                    case 1:
+                        titleStep
+                    case 2:
+                        sentimentStep
+                    case 3:
+                        comparisonStep
+                    default:
+                        EmptyView()
                     }
                 }
+                .transition(.opacity)
+                .animation(.easeInOut, value: currentStep)
+
+                Spacer()
             }
-            .navigationTitle("Cannes Rankings")
+            .navigationTitle("Add Movie")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddMovie = true }) {
-                        Image(systemName: "plus")
-                    }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: { dismiss() })
                 }
-            }
-            .sheet(isPresented: $showingAddMovie) {
-                MovieEntryFlow(movieStore: movieStore)
             }
         }
     }
-}
 
-// MARK: - Movie Entry Flow
-struct MovieEntryFlow: View {
-    @Environment(\.dismiss) var dismiss
-    @ObservedObject var movieStore: MovieStore
-    @State private var currentStep: EntryStep = .title
-    @State private var newMovieTitle = ""
-    @State private var selectedSentiment: MovieSentiment?
-    @State private var currentComparisonIndex = 0
-    @State private var comparisonResults: [MovieComparison] = []
-    
-    enum EntryStep {
-        case title
-        case sentiment
-        case comparison
-        case complete
-    }
-    
-    var body: some View {
-        NavigationView {
-            Group {
-                switch currentStep {
-                case .title:
-                    TitleEntryView(title: $newMovieTitle) {
-                        currentStep = .sentiment
-                    }
-                case .sentiment:
-                    SentimentSelectionView(movieTitle: newMovieTitle, selectedSentiment: $selectedSentiment) {
-                        if let sentiment = selectedSentiment {
-                            let newMovie = Movie(title: newMovieTitle, sentiment: sentiment)
-                            movieStore.addMovie(newMovie)
-                            
-                            // Check if there are any comparable movies with the same sentiment
-                            let comparableMovies = movieStore.movies.dropLast().filter { $0.sentiment == sentiment }
-                            if !comparableMovies.isEmpty {
-                                currentStep = .comparison
-                            } else {
-                                dismiss() // Skip comparison and return to list
-                            }
-                        }
-                    }
-                case .comparison:
-                    ComparisonView(
-                        newMovie: movieStore.movies.last!,
-                        existingMovies: Array(movieStore.movies.dropLast()),
-                        currentIndex: $currentComparisonIndex,
-                        onComplete: {
-                            dismiss() // Return to list after comparisons
-                        },
-                        movieStore: movieStore
-                    )
-                case .complete:
-                    Color.clear.onAppear {
-                        dismiss()
-                    }
-                }
-            }
-            .navigationBarItems(leading: Button("Cancel") {
-                dismiss()
-            })
-        }
-    }
-}
-
-// MARK: - Title Entry View
-struct TitleEntryView: View {
-    @Binding var title: String
-    let onSubmit: () -> Void
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Enter movie title")
+    private var titleStep: some View {
+        VStack(spacing: 30) {
+            Text("What movie did you watch?")
                 .font(.headline)
+                .fontWeight(.medium)
             
-            TextField("Movie title", text: $title)
+            TextField("Enter movie title", text: $title)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
+                .font(.headline)
                 .padding(.horizontal)
+                .submitLabel(.done)
+                .onSubmit {
+                    if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        withAnimation { currentStep = 2 }
+                    }
+                }
             
-            Button(action: onSubmit) {
-                Text("Continue")
+            Button(action: {
+                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    withAnimation { currentStep = 2 }
+                }
+            }) {
+                Text("Next")
+                    .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.blue)
                     .foregroundColor(.white)
-                    .cornerRadius(10)
+                    .cornerRadius(12)
             }
             .padding(.horizontal)
-            .disabled(title.isEmpty)
+            .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding()
     }
-}
 
-// MARK: - Sentiment Selection View
-struct SentimentSelectionView: View {
-    let movieTitle: String
-    @Binding var selectedSentiment: MovieSentiment?
-    let onComplete: () -> Void
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("How was \(movieTitle)?")
+    private var sentimentStep: some View {
+        VStack(spacing: 30) {
+            Text("How did you feel about it?")
                 .font(.headline)
-                .multilineTextAlignment(.center)
+                .fontWeight(.medium)
             
-            VStack(spacing: 15) {
-                ForEach([MovieSentiment.likedIt, .itWasFine, .didntLikeIt], id: \.self) { sentiment in
+            VStack(spacing: 16) {
+                ForEach(MovieSentiment.allCasesOrdered) { s in
                     Button(action: {
-                        selectedSentiment = sentiment
-                        onComplete()
+                        sentiment = s
+                        withAnimation {
+                            currentStep = 3
+                            let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                            newMovie = Movie(title: cleanTitle, sentiment: sentiment)
+                        }
                     }) {
-                        Text(sentiment.rawValue)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(sentiment.color.opacity(0.2))
-                            .foregroundColor(sentiment.color)
-                            .cornerRadius(10)
+                        HStack {
+                            Text(s.rawValue)
+                                .font(.headline)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.gray)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(s == sentiment ? s.color.opacity(0.2) : Color.gray.opacity(0.05))
+                        .cornerRadius(12)
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(.primary)
                 }
             }
             .padding(.horizontal)
         }
-        .padding()
+    }
+
+    private var comparisonStep: some View {
+        VStack {
+            if let movie = newMovie {
+                ComparisonView(store: store, newMovie: movie) {
+                    dismiss()
+                }
+            } else {
+                ProgressView()
+            }
+        }
     }
 }
 
 // MARK: - Comparison View
 struct ComparisonView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: MovieStore
     let newMovie: Movie
-    let existingMovies: [Movie]
-    @Binding var currentIndex: Int
-    let onComplete: () -> Void
-    @ObservedObject var movieStore: MovieStore
-    
-    // Sort all movies by sentiment and score
-    private var sortedMovies: [Movie] {
-        existingMovies.sorted {
-            if $0.sentiment == $1.sentiment {
-                return $0.displayScore > $1.displayScore
-            }
-            return $0.sentiment.rawValue > $1.sentiment.rawValue
-        }
+    var onComplete: () -> Void
+
+    @State private var left = 0
+    @State private var right = 0
+    @State private var mid = 0
+    @State private var searching = true
+
+    private var sortedMovies: [Movie] { 
+        store.movies.filter { $0.sentiment == newMovie.sentiment }
     }
-    
-    @State private var searchLeft: Int
-    @State private var searchRight: Int
-    @State private var isSearchingSentiment = true
-    
-    init(newMovie: Movie, existingMovies: [Movie], currentIndex: Binding<Int>, onComplete: @escaping () -> Void, movieStore: MovieStore) {
-        self.newMovie = newMovie
-        self.existingMovies = existingMovies
-        self._currentIndex = currentIndex
-        self.onComplete = onComplete
-        self.movieStore = movieStore
-        
-        let sortedMovies = existingMovies.sorted {
-            if $0.sentiment == $1.sentiment {
-                return $0.displayScore > $1.displayScore
-            }
-            return $0.sentiment.rawValue > $1.sentiment.rawValue
-        }
-        self._searchLeft = State(initialValue: 0)
-        self._searchRight = State(initialValue: sortedMovies.count)
-    }
-    
+
     var body: some View {
         VStack(spacing: 20) {
-            Text(isSearchingSentiment ? "Where does this movie belong?" : "Which did you prefer?")
-                .font(.headline)
-                .multilineTextAlignment(.center)
-            
-            if searchLeft < searchRight {
-                let mid = (searchLeft + searchRight) / 2
-                let comparisonMovie = sortedMovies[mid]
-                
-                VStack(spacing: 15) {
-                    if isSearchingSentiment {
-                        // Sentiment comparison
-                        HStack {
-                            Text(newMovie.sentiment.rawValue)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(newMovie.sentiment.color.opacity(0.2))
-                                .foregroundColor(newMovie.sentiment.color)
-                                .cornerRadius(10)
-                            
-                            Text(comparisonMovie.sentiment.rawValue)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(comparisonMovie.sentiment.color.opacity(0.2))
-                                .foregroundColor(comparisonMovie.sentiment.color)
-                                .cornerRadius(10)
-                        }
-                    } else {
-                        // Score comparison within sentiment
-                        ForEach([newMovie, comparisonMovie], id: \.id) { movie in
-                            Button(action: {
-                                handleComparison(selectedMovie: movie, midIndex: mid)
-                            }) {
-                                Text(movie.title)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue.opacity(0.1))
-                                    .foregroundColor(.blue)
-                                    .cornerRadius(10)
-                            }
-                        }
-                    }
-                    
-                    Button(action: {
-                        handleTooCloseToCall(midIndex: mid)
-                    }) {
-                        Text("Too Close to Call")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .foregroundColor(.gray)
-                            .cornerRadius(10)
-                    }
+            if sortedMovies.isEmpty {
+                Color.clear.onAppear {
+                    store.insertNewMovie(newMovie, at: 1)
+                    onComplete()
                 }
-                .padding(.horizontal)
+            } else if searching {
+                comparisonPrompt
             } else {
-                // Search complete, insert at searchLeft position
-                let finalPosition = searchLeft
-                var orderedMovies = sortedMovies
-                orderedMovies.insert(newMovie, at: finalPosition)
-                
-                // Update scores for all movies once the view appears
-                Color.clear
-                    .onAppear {
-                        for (index, movie) in orderedMovies.enumerated() {
-                            let position = Double(index + 1)
-                            let total = Double(orderedMovies.count)
-                            let targetScore = movieStore.calculateTargetScore(position: position, total: total, sentiment: movie.sentiment)
-                            var updatedMovie = movie
-                            updatedMovie.elo = (targetScore * 200) + 1000
-                            updatedMovie.confidenceLevel += 1
-
-                            let percentile = position / total
-                            if percentile <= 0.25 {
-                                updatedMovie.highRankCount += 1
-                            } else if percentile >= 0.75 {
-                                updatedMovie.lowRankCount += 1
-                            }
-
-                            movieStore.updateMovie(updatedMovie)
-                        }
-                        onComplete()
-                    }
+                Color.clear.onAppear {
+                    store.insertNewMovie(newMovie, at: left + 1)
+                    onComplete()
+                }
             }
         }
         .padding()
-    }
-    
-    private func handleComparison(selectedMovie: Movie, midIndex: Int) {
-        if isSearchingSentiment {
-            if selectedMovie.sentiment == newMovie.sentiment {
-                // Found sentiment group, now search within it
-                isSearchingSentiment = false
-                searchLeft = midIndex
-                searchRight = midIndex + 1
-                // Find the bounds of the sentiment group
-                while searchLeft > 0 && sortedMovies[searchLeft - 1].sentiment == newMovie.sentiment {
-                    searchLeft -= 1
-                }
-                while searchRight < sortedMovies.count && sortedMovies[searchRight].sentiment == newMovie.sentiment {
-                    searchRight += 1
-                }
-            } else {
-                // Continue searching for sentiment position
-                if selectedMovie.sentiment.rawValue > newMovie.sentiment.rawValue {
-                    searchRight = midIndex
-                } else {
-                    searchLeft = midIndex + 1
-                }
-            }
-        } else {
-            // Within sentiment group, compare scores
-            if selectedMovie.id == newMovie.id {
-                searchRight = midIndex
-            } else {
-                searchLeft = midIndex + 1
-            }
-        }
-    }
-    
-    private func handleTooCloseToCall(midIndex: Int) {
-        if isSearchingSentiment {
-            // If too close to call on sentiment, randomly choose
-            isSearchingSentiment = false
-            searchLeft = midIndex
-            searchRight = midIndex + 1
-            // Find the bounds of the sentiment group
-            while searchLeft > 0 && sortedMovies[searchLeft - 1].sentiment == newMovie.sentiment {
-                searchLeft -= 1
-            }
-            while searchRight < sortedMovies.count && sortedMovies[searchRight].sentiment == newMovie.sentiment {
-                searchRight += 1
-            }
-        } else {
-            // If too close to call on score, randomly choose position
-            searchLeft = midIndex + (Bool.random() ? 0 : 1)
-            searchRight = searchLeft
-        }
-    }
-}
-
-// MARK: - Movie Store
-class MovieStore: ObservableObject {
-    @Published var movies: [Movie] = []
-    private let kFactor: Double = 32.0
-    private let saveURL: URL
-
-    init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.saveURL = docs.appendingPathComponent("movies.json")
-        loadMovies()
-    }
-
-    private func loadMovies() {
-        guard let data = try? Data(contentsOf: saveURL) else { return }
-        if let decoded = try? JSONDecoder().decode([Movie].self, from: data) {
-            self.movies = decoded
+        .onAppear {
+            left = 0
+            right = sortedMovies.count - 1
+            mid = (left + right) / 2
         }
     }
 
-    private func saveMovies() {
-        if let data = try? JSONEncoder().encode(movies) {
-            try? data.write(to: saveURL)
-        }
-    }
-    
-    func addMovie(_ movie: Movie) {
-        movies.append(movie)
-        saveMovies()
-    }
-
-    func updateMovie(_ movie: Movie) {
-        if let index = movies.firstIndex(where: { $0.id == movie.id }) {
-            movies[index] = movie
-            saveMovies()
-        }
-    }
-
-    func deleteMovie(_ movie: Movie) {
-        if let index = movies.firstIndex(where: { $0.id == movie.id }) {
-            movies.remove(at: index)
-            saveMovies()
-        }
-    }
-    
-    // Find the optimal movie to compare against
-    func findOptimalComparison(for newMovie: Movie, in movies: [Movie]) -> Movie? {
-        guard !movies.isEmpty else { return nil }
-        
-        // Sort movies by ELO to find the best comparison points
-        let sortedMovies = movies.sorted { $0.elo < $1.elo }
-        
-        // If we have less than 3 movies, compare with the middle one
-        if sortedMovies.count < 3 {
-            return sortedMovies[sortedMovies.count / 2]
-        }
-        
-        // For 3+ movies, use binary search approach to find optimal comparison
-        let targetElo = newMovie.elo
-        var left = 0
-        var right = sortedMovies.count - 1
-        
-        while left <= right {
-            let mid = (left + right) / 2
-            let midMovie = sortedMovies[mid]
+    private var comparisonPrompt: some View {
+        VStack(spacing: 24) {
+            Text("Which movie is better?")
+                .font(.headline)
+                .fontWeight(.medium)
             
-            // If we find a close match, use it
-            if abs(midMovie.elo - targetElo) < 100 {
-                return midMovie
+            VStack(spacing: 20) {
+                Button(action: {
+                    store.recordComparison(winnerID: sortedMovies[mid].id, loserID: newMovie.id)
+                    left = mid + 1
+                    updateMidOrFinish()
+                }) {
+                    Text(sortedMovies[mid].title)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    store.recordComparison(winnerID: newMovie.id, loserID: sortedMovies[mid].id)
+                    right = mid - 1
+                    updateMidOrFinish()
+                }) {
+                    Text(newMovie.title)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            
-            if midMovie.elo < targetElo {
+            .padding(.horizontal)
+
+            Button("Too close to call") {
                 left = mid + 1
-            } else {
-                right = mid - 1
+                updateMidOrFinish()
             }
+            .font(.headline)
+            .foregroundColor(.gray)
+            .padding(.top, 8)
         }
-        
-        // If no close match, return the movie closest to the target ELO
-        let closestIndex = min(max(left, 0), sortedMovies.count - 1)
-        return sortedMovies[closestIndex]
-    }
-    
-    func recordComparison(winner: Movie, loser: Movie) {
-        var updatedWinner = winner
-        var updatedLoser = loser
-        
-        // Calculate expected win probability
-        let expectedWin = 1 / (1 + pow(10, (loser.elo - winner.elo) / 400))
-        
-        // Use a larger K-factor since we're doing fewer comparisons
-        let kFactor = 64.0
-        
-        // Calculate and apply changes
-        let delta = kFactor * (1 - expectedWin)
-        updatedWinner.elo += delta
-        updatedLoser.elo -= delta
-        
-        // Update comparison counts
-        updatedWinner.comparisonsCount += 1
-        updatedLoser.comparisonsCount += 1
-        
-        // Update movies in store
-        updateMovie(updatedWinner)
-        updateMovie(updatedLoser)
     }
 
-    /// Calculate the desired 0-10 score for a movie given its
-    /// ranking position within its sentiment group. The scoring
-    /// band expands as more movies are added so that eventually
-    /// movies can occupy the full 0-10 range. A small random
-    /// adjustment keeps scores from clumping together.
-    func calculateTargetScore(position: Double, total: Double, sentiment: MovieSentiment) -> Double {
-        // Base starting range
-        let initialMin = 5.1
-        let initialMax = 7.9
-
-        // Expand range as more movies are ranked. Each additional movie
-        // widens the band by 0.15 up to the extremes of 0 and 10.
-        let expansion = min(5.0, max(0, (total - 1)) * 0.15)
-        let minScore = max(0.0, initialMin - expansion)
-        let maxScore = min(10.0, initialMax + expansion)
-
-        let rankNormalized: Double
-        if total <= 1 {
-            rankNormalized = 0
+    private func updateMidOrFinish() {
+        if left > right {
+            searching = false
         } else {
-            rankNormalized = (position - 1) / (total - 1)
+            mid = (left + right) / 2
         }
-
-        var score = minScore + (maxScore - minScore) * rankNormalized
-
-        // Good movies should never fall below 7.2
-        if sentiment == .likedIt {
-            score = max(score, 7.2)
-        }
-
-        // Apply a small random wiggle so that scores aren't identical
-        score += Double.random(in: -0.15...0.15)
-        return max(0, min(10, score))
     }
 }
 
-// MARK: - Movie Detail View
-struct MovieDetailView: View {
-    let movie: Movie
+// MARK: - Content View
+struct ContentView: View {
+    @StateObject private var store = MovieStore()
+    @State private var showingAdd = false
 
     var body: some View {
-        Form {
-            Section(header: Text("Score")) {
-                Text(String(format: "%.1f", movie.displayScore))
+        NavigationView {
+            List {
+                ForEach(store.movies) { movie in
+                    MovieRow(movie: movie, position: store.movies.firstIndex(of: movie)! + 1)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
             }
-
-            Section(header: Text("Sentiment")) {
-                Text(movie.sentiment.rawValue)
-                    .foregroundColor(movie.sentiment.color)
+            .listStyle(.plain)
+            .navigationTitle("Cannes")
+            .toolbar {
+                Button(action: { showingAdd = true }) {
+                    Image(systemName: "plus")
+                }
             }
-
-            Section(header: Text("Stats")) {
-                Text("Compared \(movie.comparisonsCount) times")
-                Text("Top placements: \(movie.highRankCount)")
-                Text("Bottom placements: \(movie.lowRankCount)")
+            .sheet(isPresented: $showingAdd) {
+                AddMovieView(store: store)
             }
         }
-        .navigationTitle(movie.title)
     }
 }
 
-// MARK: - Movie Row
 struct MovieRow: View {
     let movie: Movie
-
-    private var starCount: Int {
-        Int((movie.displayScore / 2).rounded())
-    }
-
+    let position: Int
+    
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(movie.title)
-                HStack(spacing: 2) {
-                    ForEach(0..<5, id: \.self) { index in
-                        Image(systemName: index < starCount ? "star.fill" : "star")
-                            .foregroundColor(.yellow)
-                            .font(.caption)
-                    }
-                }
-            }
+            Text("\(position)")
+                .font(.headline)
+                .foregroundColor(.gray)
+                .frame(width: 30)
+            Text(movie.title)
+                .font(.headline)
             Spacer()
             Text(String(format: "%.1f", movie.displayScore))
+                .font(.headline)
                 .bold()
+                .foregroundColor(movie.sentiment.color)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 12)
+        .background(Color.gray.opacity(0.05))
+        .cornerRadius(12)
     }
 }
 
-// MARK: - Double Extension
+// MARK: - Double convenience
 extension Double {
     func rounded(toPlaces places: Int) -> Double {
         let divisor = pow(10.0, Double(places))
@@ -622,6 +438,11 @@ extension Double {
     }
 }
 
-#Preview {
-    ContentView()
+#if DEBUG
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()          // <-- your root view
+    }
 }
+#endif
+
