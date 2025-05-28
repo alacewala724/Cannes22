@@ -309,6 +309,10 @@ struct AddMovieView: View {
                                     } catch {
                                         if !(error is CancellationError) {
                                             print("Search error: \(error)")
+                                            await MainActor.run {
+                                                searchResults = []
+                                                isSearching = false
+                                            }
                                         }
                                     }
                                 }
@@ -639,6 +643,12 @@ struct ComparisonView: View {
             searching = false
         } else {
             mid = (left + right) / 2
+            // Ensure mid is within bounds
+            if mid >= 0 && mid < sortedMovies.count {
+                searching = true
+            } else {
+                searching = false
+            }
         }
     }
 }
