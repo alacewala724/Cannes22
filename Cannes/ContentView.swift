@@ -1022,6 +1022,7 @@ struct ContentView: View {
     @State private var selectedMediaType: AppModels.MediaType?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
+    @EnvironmentObject var authService: FirebaseAuthService
 
     private var filteredMovies: [Movie] {
         store.movies.filter { movie in
@@ -1099,6 +1100,13 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     EditButton()
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        try? authService.signOut()
+                    }) {
+                        Text("Sign Out")
+                    }
                 }
             }
             .environment(\.editMode, $editMode)
