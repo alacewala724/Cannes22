@@ -59,7 +59,11 @@ enum AppModels {
         }
         
         var mediaType: MediaType {
-            media_type == "tv" ? .tv : .movie
+            if media_type?.lowercased() == "tv" {
+                return .tv
+            } else {
+                return .movie
+            }
         }
     }
     
@@ -226,8 +230,14 @@ struct AddMovieView: View {
     @State private var newMovie: Movie? = nil
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedMovie: AppModels.Movie?
+    @State private var searchType: SearchType = .movie
     
     private let tmdbService = TMDBService()
+    
+    enum SearchType {
+        case movie
+        case tvShow
+    }
     
     var body: some View {
         NavigationView {
@@ -261,18 +271,17 @@ struct AddMovieView: View {
     
     private var searchStep: some View {
         VStack(spacing: UI.vGap) {
-            Text("What movie did you watch?")
+            Text("What did you watch?")
                 .font(.headline)
                 .fontWeight(.medium)
             
             VStack {
                 Button(action: {
-                    // Focus the text field when tapped
                     UIApplication.shared.sendAction(#selector(UIResponder.becomeFirstResponder),
                                                   to: nil, from: nil, for: nil)
                 }) {
                     HStack {
-                        TextField("Search for a movie", text: $searchText)
+                        TextField("Search for a \(searchType == .movie ? "movie" : "TV show")", text: $searchText)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .font(.headline)
                             .onChange(of: searchText) { newValue in
@@ -286,7 +295,7 @@ struct AddMovieView: View {
                                     do {
                                         try await Task.sleep(for: .milliseconds(350))
                                         try Task.checkCancellation()
-                                        await searchMovies(query: newValue)
+                                        await searchContent(query: newValue)
                                     } catch {
                                         if !(error is CancellationError) {
                                             print("Search error: \(error)")
@@ -298,7 +307,7 @@ struct AddMovieView: View {
                             .onSubmit {
                                 searchTask?.cancel()
                                 Task {
-                                    await searchMovies(query: searchText)
+                                    await searchContent(query: searchText)
                                 }
                             }
                             .frame(maxWidth: .infinity)
@@ -312,6 +321,22 @@ struct AddMovieView: View {
                 .buttonStyle(PlainButtonStyle())
                 .padding(.horizontal)
                 
+                // Add search type selector
+                Picker("Search Type", selection: $searchType) {
+                    Text("Movies").tag(SearchType.movie)
+                    Text("TV Shows").tag(SearchType.tvShow)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .onChange(of: searchType) { _ in
+                    searchResults = []
+                    if !searchText.isEmpty {
+                        Task {
+                            await searchContent(query: searchText)
+                        }
+                    }
+                }
+                
                 if !searchResults.isEmpty {
                     ResultsList(movies: searchResults) { movie in
                         selectedMovie = movie
@@ -323,7 +348,7 @@ struct AddMovieView: View {
         }
     }
     
-    private func searchMovies(query: String) async {
+    private func searchContent(query: String) async {
         guard !query.isEmpty else {
             await MainActor.run {
                 searchResults = []
@@ -335,11 +360,18 @@ struct AddMovieView: View {
         await MainActor.run { isSearching = true }
         
         do {
-            let results = try await tmdbService.searchMovies(query: query)
+            let results: [TMDBMovie]
+            if searchType == .movie {
+                results = try await tmdbService.searchMovies(query: query)
+            } else {
+                results = try await tmdbService.searchTVShows(query: query)
+            }
+            
             if Task.isCancelled { return }
+            
             await MainActor.run {
                 searchResults = results.map { tmdbMovie in
-                    return AppModels.Movie(
+                    AppModels.Movie(
                         id: tmdbMovie.id,
                         title: tmdbMovie.title,
                         name: tmdbMovie.name,
@@ -350,7 +382,7 @@ struct AddMovieView: View {
                         vote_average: tmdbMovie.voteAverage,
                         vote_count: tmdbMovie.voteCount,
                         genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
-                        media_type: tmdbMovie.mediaType
+                        media_type: searchType == .movie ? "movie" : "tv"
                     )
                 }
                 isSearching = false
@@ -383,7 +415,12 @@ struct AddMovieView: View {
                             Task {
                                 if let tmdbId = selectedMovie?.id {
                                     do {
-                                        let details = try await tmdbService.getMovieDetails(id: tmdbId)
+                                        let details: TMDBMovie
+                                        if selectedMovie?.mediaType == .tv {
+                                            details = try await tmdbService.getTVShowDetails(id: tmdbId)
+                                        } else {
+                                            details = try await tmdbService.getMovieDetails(id: tmdbId)
+                                        }
                                         await MainActor.run {
                                             newMovie = Movie(
                                                 title: selectedMovie?.displayTitle ?? searchText,
@@ -394,7 +431,7 @@ struct AddMovieView: View {
                                             )
                                         }
                                     } catch {
-                                        print("Error fetching movie details: \(error)")
+                                        print("Error fetching details: \(error)")
                                         // Fallback to creating movie without genres
                                         await MainActor.run {
                                             newMovie = Movie(
@@ -668,7 +705,7 @@ struct TMDBMovieDetailView: View {
                         }
                         
                         // Rating
-                        if let rating = details.vote_average {
+                        if let rating = details.vote_average, rating > 0 {
                             HStack {
                                 Image(systemName: "star.fill")
                                     .foregroundColor(.yellow)
