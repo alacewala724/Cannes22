@@ -2,8 +2,10 @@ import Firebase
 import FirebaseAuth
 
 class FirebaseAuthService: ObservableObject {
+    static let shared = FirebaseAuthService()
     @Published var user: User?
     @Published var isAuthenticated = false
+    let firestoreService = FirestoreService()
     
     init() {
         Auth.auth().addStateDidChangeListener { [weak self] _, user in

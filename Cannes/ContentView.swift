@@ -1,5 +1,7 @@
 import SwiftUI
 import Foundation
+import FirebaseFirestore
+import FirebaseAuth
 
 // MARK: - UI Constants
 enum UI {
@@ -101,16 +103,24 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     var comparisonsCount: Int
     var confidenceLevel: Int
 
-    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = []) {
+    init(id: UUID = UUID(), 
+         title: String, 
+         sentiment: MovieSentiment, 
+         tmdbId: Int? = nil, 
+         mediaType: AppModels.MediaType = .movie, 
+         genres: [AppModels.Genre] = [],
+         score: Double? = nil,
+         comparisonsCount: Int = 0,
+         confidenceLevel: Int = 1) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
         self.tmdbId = tmdbId
         self.mediaType = mediaType
         self.genres = genres
-        self.score = sentiment.midpoint
-        self.comparisonsCount = 0
-        self.confidenceLevel = 1
+        self.score = score ?? sentiment.midpoint
+        self.comparisonsCount = comparisonsCount
+        self.confidenceLevel = confidenceLevel
     }
 
     var displayScore: Double { score.rounded(toPlaces: 1) }
@@ -123,6 +133,9 @@ struct MovieComparison: Codable {
 
 // MARK: - Store
 final class MovieStore: ObservableObject {
+    private let firestoreService = FirestoreService()
+    @Published var movies: [Movie] = []
+    
     private struct Band {
         let min: Double
         let max: Double
@@ -135,31 +148,28 @@ final class MovieStore: ObservableObject {
         .itWasFine   : Band(min: 4.0, max: 6.8),
         .likedIt     : Band(min: 6.9, max: 10.0)
     ]
-
-    @Published var movies: [Movie] = [] {
-        didSet {
-            saveMovies()
-        }
-    }
     
     init() {
-        loadMovies()
-    }
-    
-    private func saveMovies() {
-        if let encoded = try? JSONEncoder().encode(movies) {
-            UserDefaults.standard.set(encoded, forKey: "savedMovies")
+        Task {
+            await loadMovies()
         }
     }
     
-    private func loadMovies() {
-        if let savedMovies = UserDefaults.standard.data(forKey: "savedMovies"),
-           let decodedMovies = try? JSONDecoder().decode([Movie].self, from: savedMovies) {
-            movies = decodedMovies
+    private func loadMovies() async {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        do {
+            let rankings = try await firestoreService.getUserRankings(userId: userId)
+            await MainActor.run {
+                self.movies = rankings
+            }
+        } catch {
+            print("Error loading movies: \(error)")
         }
     }
-
+    
     func insertNewMovie(_ movie: Movie, at finalRank: Int) {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        
         // Find the appropriate section for this sentiment
         let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
         guard let sentimentIndex = sentimentSections.firstIndex(of: movie.sentiment) else { return }
@@ -179,6 +189,34 @@ final class MovieStore: ObservableObject {
         
         movies.insert(movie, at: insertionIndex)
         recalculateScores()
+        
+        // Save to Firestore
+        Task {
+            do {
+                try await firestoreService.updateMovieRanking(userId: userId, movie: movie)
+            } catch {
+                print("Error saving movie: \(error)")
+            }
+        }
+    }
+    
+    func deleteMovies(at offsets: IndexSet) {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        
+        withAnimation {
+            for index in offsets {
+                let movie = movies[index]
+                Task {
+                    do {
+                        try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
+                    } catch {
+                        print("Error deleting movie: \(error)")
+                    }
+                }
+            }
+            movies.remove(atOffsets: offsets)
+            recalculateScores()
+        }
     }
 
     func recordComparison(winnerID: UUID, loserID: UUID) {
@@ -212,18 +250,23 @@ final class MovieStore: ObservableObject {
 
             for (rank, arrayIndex) in idxs.enumerated() {
                 let offset = centre - Double(rank)    // Changed: now rank 0 gives +centre
-                movies[arrayIndex].score = band.mid + offset * step
+                let newScore = band.mid + offset * step
+                movies[arrayIndex].score = newScore
+                
+                // Save the new score to Firestore
+                if let userId = FirebaseAuthService.shared.user?.uid {
+                    Task {
+                        do {
+                            try await firestoreService.updateMovieRanking(userId: userId, movie: movies[arrayIndex])
+                        } catch {
+                            print("Error updating score: \(error)")
+                        }
+                    }
+                }
             }
         }
 
         objectWillChange.send()
-    }
-
-    func deleteMovies(at offsets: IndexSet) {
-        withAnimation {
-            movies.remove(atOffsets: offsets)
-            recalculateScores()
-        }
     }
 }
 
@@ -444,7 +487,10 @@ struct AddMovieView: View {
                                             sentiment: self.sentiment,
                                             tmdbId: tmdbId,
                                             mediaType: selectedMovie?.mediaType ?? .movie,
-                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? []
+                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                                            score: details?.voteAverage,
+                                            comparisonsCount: 0,
+                                            confidenceLevel: 1
                                         )
                                     }
                                 } else {
