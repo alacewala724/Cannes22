@@ -49,6 +49,8 @@ enum AppModels {
         let vote_count: Int?
         let genres: [Genre]?
         let media_type: String?
+        let runtime: Int?  // For movies
+        let episode_run_time: [Int]?  // For TV shows
 
         var displayTitle: String {
             title ?? name ?? "Untitled"
@@ -56,6 +58,15 @@ enum AppModels {
         
         var displayDate: String? {
             release_date ?? first_air_date
+        }
+        
+        var displayRuntime: String? {
+            if let runtime = runtime {
+                return "\(runtime) min"
+            } else if let runTimes = episode_run_time, let firstRuntime = runTimes.first {
+                return "\(firstRuntime) min"
+            }
+            return nil
         }
         
         var mediaType: MediaType {
@@ -86,7 +97,6 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     let tmdbId: Int?
     let mediaType: AppModels.MediaType
     let genres: [AppModels.Genre]
-
     var score: Double
     var comparisonsCount: Int
     var confidenceLevel: Int
@@ -382,7 +392,9 @@ struct AddMovieView: View {
                         vote_average: tmdbMovie.voteAverage,
                         vote_count: tmdbMovie.voteCount,
                         genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
-                        media_type: searchType == .movie ? "movie" : "tv"
+                        media_type: searchType == .movie ? "movie" : "tv",
+                        runtime: tmdbMovie.runtime,
+                        episode_run_time: tmdbMovie.episodeRunTime
                     )
                 }
                 isSearching = false
@@ -404,57 +416,52 @@ struct AddMovieView: View {
                 .fontWeight(.medium)
             
             VStack(spacing: 16) {
-                ForEach(MovieSentiment.allCasesOrdered) { s in
+                ForEach(MovieSentiment.allCasesOrdered) { sentiment in
                     Button(action: {
                         let generator = UIImpactFeedbackGenerator(style: .medium)
                         generator.impactOccurred()
-                        sentiment = s
+                        self.sentiment = sentiment
                         withAnimation {
                             currentStep = 3
                             // Fetch movie details before creating new movie
                             Task {
+                                var details: TMDBMovie? = nil
+                                
                                 if let tmdbId = selectedMovie?.id {
                                     do {
-                                        let details: TMDBMovie
                                         if selectedMovie?.mediaType == .tv {
                                             details = try await tmdbService.getTVShowDetails(id: tmdbId)
                                         } else {
                                             details = try await tmdbService.getMovieDetails(id: tmdbId)
                                         }
-                                        await MainActor.run {
-                                            newMovie = Movie(
-                                                title: selectedMovie?.displayTitle ?? searchText,
-                                                sentiment: sentiment,
-                                                tmdbId: tmdbId,
-                                                mediaType: selectedMovie?.mediaType ?? .movie,
-                                                genres: details.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? []
-                                            )
-                                        }
                                     } catch {
                                         print("Error fetching details: \(error)")
-                                        // Fallback to creating movie without genres
-                                        await MainActor.run {
-                                            newMovie = Movie(
-                                                title: selectedMovie?.displayTitle ?? searchText,
-                                                sentiment: sentiment,
-                                                tmdbId: tmdbId,
-                                                mediaType: selectedMovie?.mediaType ?? .movie
-                                            )
-                                        }
+                                    }
+                                    
+                                    await MainActor.run {
+                                        newMovie = Movie(
+                                            title: selectedMovie?.displayTitle ?? searchText,
+                                            sentiment: self.sentiment,
+                                            tmdbId: tmdbId,
+                                            mediaType: selectedMovie?.mediaType ?? .movie,
+                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? []
+                                        )
                                     }
                                 } else {
                                     // Handle case where there's no TMDB ID
-                                    newMovie = Movie(
-                                        title: selectedMovie?.displayTitle ?? searchText,
-                                        sentiment: sentiment,
-                                        mediaType: selectedMovie?.mediaType ?? .movie
-                                    )
+                                    await MainActor.run {
+                                        newMovie = Movie(
+                                            title: selectedMovie?.displayTitle ?? searchText,
+                                            sentiment: self.sentiment,
+                                            mediaType: selectedMovie?.mediaType ?? .movie
+                                        )
+                                    }
                                 }
                             }
                         }
                     }) {
                         HStack {
-                            Text(s.rawValue)
+                            Text(sentiment.rawValue)
                                 .font(.headline)
                                 .fontWeight(.medium)
                             Spacer()
@@ -463,7 +470,7 @@ struct AddMovieView: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(s.color.opacity(0.15))
+                        .background(sentiment.color.opacity(0.15))
                         .cornerRadius(12)
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -644,148 +651,20 @@ struct TMDBMovieDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isAppearing = false
+    @State private var seasons: [TMDBSeason] = []
+    @State private var selectedSeason: TMDBSeason?
+    @State private var episodes: [TMDBEpisode] = []
     
     private let tmdbService = TMDBService()
     
     var body: some View {
         ScrollView {
             if isLoading {
-                VStack(spacing: 16) {
-                    ProgressView()
-                    Text("Loading movie details...")
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-                .transition(.opacity)
+                loadingView
             } else if let error = errorMessage {
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundColor(.orange)
-                    Text("Couldn't load movie details")
-                        .font(.headline)
-                    Text(error)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("Try Again") {
-                        loadMovieDetails()
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding()
-                .transition(.opacity)
+                errorView(message: error)
             } else if let details = movieDetails {
-                VStack(spacing: 20) {
-                    // Poster
-                    if let posterPath = details.poster_path {
-                        AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { image in
-                            image.resizable()
-                                .aspectRatio(contentMode: .fit)
-                        } placeholder: {
-                            Color.gray
-                        }
-                        .frame(maxHeight: 400)
-                        .cornerRadius(12)
-                        .transition(.opacity.combined(with: .scale))
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 16) {
-                        // Title and Release Date
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(details.displayTitle)
-                                .font(.title)
-                                .fontWeight(.bold)
-                            
-                            if let releaseDate = details.displayDate {
-                                Text("Released: \(formatDate(releaseDate))")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        // Rating
-                        if let rating = details.vote_average, rating > 0 {
-                            HStack {
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.yellow)
-                                Text(String(format: "%.1f", rating))
-                                    .font(.headline)
-                                if let votes = details.vote_count {
-                                    Text("(\(votes) votes)")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        
-                        // Genres
-                        if let genres = details.genres, !genres.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Genres")
-                                    .font(.headline)
-                                    .padding(.top, 8)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.accentColor.opacity(0.1))
-                                    .cornerRadius(8)
-                                if #available(iOS 16.0, *) {
-                                    FlowLayout(spacing: 8) {
-                                        ForEach(genres) { genre in
-                                            Text(genre.name)
-                                                .font(.subheadline)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(Color.accentColor.opacity(0.1))
-                                                .cornerRadius(8)
-                                        }
-                                    }
-                                } else {
-                                    // Fallback for iOS 15 and earlier
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        ForEach(genres) { genre in
-                                            Text(genre.name)
-                                                .font(.subheadline)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(Color.accentColor.opacity(0.1))
-                                                .cornerRadius(8)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                         
-                        // Overview
-                        if let overview = details.overview, !overview.isEmpty {
-                            Text("Overview")
-                                .font(.headline)
-                                .padding(.top, 8)
-                            Text(overview)
-                                .font(.body)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        // Your Rating
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Your Rating")
-                                .font(.headline)
-                                .padding(.top, 8)
-                            HStack {
-                                Text(movie.sentiment.rawValue)
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(movie.sentiment.color.opacity(0.15))
-                                    .cornerRadius(8)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical)
-                .opacity(isAppearing ? 1 : 0)
-                .animation(.easeOut(duration: 0.3), value: isAppearing)
+                detailView(details: details)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -808,6 +687,225 @@ struct TMDBMovieDetailView: View {
         }
     }
     
+    private var loadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Loading movie details...")
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .transition(.opacity)
+    }
+    
+    private func errorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundColor(.orange)
+            Text("Couldn't load movie details")
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again") {
+                loadMovieDetails()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .transition(.opacity)
+    }
+    
+    private func detailView(details: AppModels.Movie) -> some View {
+        VStack(spacing: 20) {
+            // Poster
+            if let posterPath = details.poster_path {
+                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fit)
+                } placeholder: {
+                    Color.gray
+                }
+                .frame(maxHeight: 400)
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .scale))
+            }
+            
+            VStack(alignment: .leading, spacing: 16) {
+                // Title and Release Date
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(details.displayTitle)
+                        .font(.title)
+                        .fontWeight(.bold)
+                    
+                    if let releaseDate = details.displayDate {
+                        Text("Released: \(formatDate(releaseDate))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // Runtime
+                if let runtime = details.displayRuntime {
+                    HStack {
+                        Image(systemName: "clock")
+                        Text(formatRuntime(runtime))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                }
+                
+                // Rating
+                if let rating = details.vote_average, rating > 0 {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text(String(format: "%.1f", rating))
+                            .font(.headline)
+                        if let votes = details.vote_count {
+                            Text("(\(votes) votes)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                // Genres
+                if let genres = details.genres, !genres.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Genres")
+                            .font(.headline)
+                            .padding(.top, 8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.1))
+                            .cornerRadius(8)
+                        if #available(iOS 16.0, *) {
+                            FlowLayout(spacing: 8) {
+                                ForEach(genres) { genre in
+                                    Text(genre.name)
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.accentColor.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(genres) { genre in
+                                    Text(genre.name)
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.accentColor.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // TV Show specific content
+                if movie.mediaType == .tv {
+                    tvShowContent
+                }
+                
+                // Overview
+                if let overview = details.overview, !overview.isEmpty {
+                    Text("Overview")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    Text(overview)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Your Rating
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Your Rating")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    HStack {
+                        Text(movie.sentiment.rawValue)
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(movie.sentiment.color.opacity(0.15))
+                            .cornerRadius(8)
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical)
+        .opacity(isAppearing ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: isAppearing)
+    }
+    
+    private var tvShowContent: some View {
+        Group {
+            if !seasons.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Seasons")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(seasons) { season in
+                                Button(action: {
+                                    selectedSeason = season
+                                    loadEpisodes(for: season)
+                                }) {
+                                    VStack {
+                                        if let posterPath = season.posterPath {
+                                            AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w200\(posterPath)")) { image in
+                                                image.resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                            } placeholder: {
+                                                Color.gray
+                                            }
+                                            .frame(width: 100, height: 150)
+                                            .cornerRadius(8)
+                                        }
+                                        Text(season.name)
+                                            .font(.caption)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if let season = selectedSeason, !episodes.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Episodes")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    ForEach(episodes) { episode in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(episode.episodeNumber). \(episode.name)")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            if !episode.overview.isEmpty {
+                                Text(episode.overview)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+    
     private func loadMovieDetails() {
         guard let tmdbId = movie.tmdbId else {
             errorMessage = "No TMDB ID available for this movie"
@@ -820,27 +918,70 @@ struct TMDBMovieDetailView: View {
         
         Task {
             do {
-                let tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
-                // Convert TMDBMovie to AppModels.Movie
-                movieDetails = AppModels.Movie(
-                    id: tmdbMovie.id,
-                    title: tmdbMovie.title,
-                    name: tmdbMovie.name,
-                    overview: tmdbMovie.overview,
-                    poster_path: tmdbMovie.posterPath,
-                    release_date: tmdbMovie.releaseDate,
-                    first_air_date: tmdbMovie.firstAirDate,
-                    vote_average: tmdbMovie.voteAverage,
-                    vote_count: tmdbMovie.voteCount,
-                    genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
-                    media_type: tmdbMovie.mediaType
-                )
+                let tmdbMovie: TMDBMovie
+                if movie.mediaType == .tv {
+                    tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                    // Load seasons for TV shows
+                    let seasonsData = try await tmdbService.getTVShowSeasons(id: tmdbId)
+                    await MainActor.run {
+                        seasons = seasonsData
+                        if selectedSeason == nil, let firstSeason = seasonsData.first {
+                            selectedSeason = firstSeason
+                            loadEpisodes(for: firstSeason)
+                        } else if selectedSeason != nil {
+                            if let currentSeason = selectedSeason {
+                                loadEpisodes(for: currentSeason)
+                            }
+                        }
+                    }
+                } else {
+                    tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                }
+                
+                await MainActor.run {
+                    movieDetails = AppModels.Movie(
+                        id: tmdbMovie.id,
+                        title: tmdbMovie.title,
+                        name: tmdbMovie.name,
+                        overview: tmdbMovie.overview,
+                        poster_path: tmdbMovie.posterPath,
+                        release_date: tmdbMovie.releaseDate,
+                        first_air_date: tmdbMovie.firstAirDate,
+                        vote_average: tmdbMovie.voteAverage,
+                        vote_count: tmdbMovie.voteCount,
+                        genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
+                        media_type: tmdbMovie.mediaType,
+                        runtime: tmdbMovie.runtime,
+                        episode_run_time: tmdbMovie.episodeRunTime
+                    )
+                    isLoading = false
+                }
             } catch {
                 if (error as NSError).code != NSURLErrorCancelled {
-                    errorMessage = error.localizedDescription
+                    await MainActor.run {
+                        errorMessage = error.localizedDescription
+                        isLoading = false
+                    }
                 }
             }
-            isLoading = false
+        }
+    }
+    
+    private func loadEpisodes(for season: TMDBSeason) {
+        guard let tmdbId = movie.tmdbId else { return }
+        
+        Task {
+            do {
+                let episodes = try await tmdbService.getEpisodes(tvId: tmdbId, season: season.seasonNumber)
+                await MainActor.run {
+                    self.episodes = episodes
+                }
+            } catch {
+                print("Error loading episodes: \(error)")
+                await MainActor.run {
+                    self.episodes = []
+                }
+            }
         }
     }
     
@@ -855,6 +996,20 @@ struct TMDBMovieDetailView: View {
             return outputFormatter.string(from: date)
         }
         return dateString
+    }
+    
+    private func formatRuntime(_ runtime: String) -> String {
+        // Extract the number from the string (e.g., "120 min" -> 120)
+        if let minutes = Int(runtime.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if hours > 0 {
+                return "\(hours)h \(remainingMinutes)m"
+            } else {
+                return "\(remainingMinutes)m"
+            }
+        }
+        return runtime // Return original string if parsing fails
     }
 }
 
@@ -1159,4 +1314,3 @@ struct ContentView_Previews: PreviewProvider {
     }
 }
 #endif
-
