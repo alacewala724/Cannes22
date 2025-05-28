@@ -1015,6 +1015,7 @@ struct TMDBMovieDetailView: View {
 
 // MARK: - Content View
 struct ContentView: View {
+    @StateObject private var authService = AuthenticationService()
     @StateObject private var store = MovieStore()
     @State private var showingAddMovie = false
     @State private var editMode: EditMode = .inactive
@@ -1037,86 +1038,102 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Filter bar
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Button(action: { showingFilters = true }) {
-                            HStack {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
-                                Text("Filters")
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        
-                        if selectedMediaType != nil || !selectedGenres.isEmpty {
-                            Button(action: { clearFilters() }) {
-                                Text("Clear")
+        Group {
+            if authService.currentUser != nil {
+                NavigationView {
+                    VStack(spacing: 0) {
+                        // Filter bar
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Button(action: { showingFilters = true }) {
+                                    HStack {
+                                        Image(systemName: "line.3.horizontal.decrease.circle")
+                                        Text("Filters")
+                                    }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Color.gray.opacity(0.1))
+                                    .background(Color.accentColor.opacity(0.1))
                                     .cornerRadius(8)
+                                }
+                                
+                                if selectedMediaType != nil || !selectedGenres.isEmpty {
+                                    Button(action: { clearFilters() }) {
+                                        Text("Clear")
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(Color.gray.opacity(0.1))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, UI.hPad)
+                            .padding(.vertical, 8)
+                        }
+                        .background(Color(.systemBackground))
+
+                        List {
+                            ForEach(filteredMovies) { movie in
+                                MovieRow(
+                                    movie: movie,
+                                    position: filteredMovies.firstIndex(of: movie)! + 1,
+                                    accessory: accessory(for: movie),
+                                    onTap: {
+                                        if editMode.isEditing == false {
+                                            selectedMovie = movie
+                                        }
+                                    },
+                                    editMode: editMode
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(
+                                    EdgeInsets(top: UI.vGap, leading: UI.hPad,
+                                               bottom: UI.vGap, trailing: UI.hPad))
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
+                    .navigationTitle("My Movies")
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: { showingAddMovie = true }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title2)
+                            }
+                        }
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            EditButton()
+                        }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: {
+                                do {
+                                    try authService.signOut()
+                                } catch {
+                                    print("Error signing out: \(error)")
+                                }
+                            }) {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
                             }
                         }
                     }
-                    .padding(.horizontal, UI.hPad)
-                    .padding(.vertical, 8)
-                }
-                .background(Color(.systemBackground))
-
-                List {
-                    ForEach(filteredMovies) { movie in
-                        MovieRow(
-                            movie: movie,
-                            position: filteredMovies.firstIndex(of: movie)! + 1,
-                            accessory: accessory(for: movie),
-                            onTap: {
-                                if editMode.isEditing == false {
-                                    selectedMovie = movie
-                                }
-                            },
-                            editMode: editMode
+                    .environment(\.editMode, $editMode)
+                    .sheet(isPresented: $showingAddMovie) {
+                        AddMovieView(store: store)
+                    }
+                    .sheet(isPresented: $showingFilters) {
+                        FilterView(
+                            selectedMediaType: $selectedMediaType,
+                            selectedGenres: $selectedGenres,
+                            availableGenres: availableGenres
                         )
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(
-                            EdgeInsets(top: UI.vGap, leading: UI.hPad,
-                                       bottom: UI.vGap, trailing: UI.hPad))
+                    }
+                    .navigationDestination(item: $selectedMovie) { movie in
+                        TMDBMovieDetailView(movie: movie)
                     }
                 }
-                .listStyle(.plain)
-            }
-            .navigationTitle("My Movies")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddMovie = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                    }
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
-                }
-            }
-            .environment(\.editMode, $editMode)
-            .sheet(isPresented: $showingAddMovie) {
-                AddMovieView(store: store)
-            }
-            .sheet(isPresented: $showingFilters) {
-                FilterView(
-                    selectedMediaType: $selectedMediaType,
-                    selectedGenres: $selectedGenres,
-                    availableGenres: availableGenres
-                )
-            }
-            .navigationDestination(item: $selectedMovie) { movie in
-                TMDBMovieDetailView(movie: movie)
+            } else {
+                AuthView()
             }
         }
-        .navigationViewStyle(.stack)
     }
 
     private func clearFilters() {
