@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
+import Combine
 
 // MARK: - UI Constants
 enum UI {
@@ -135,6 +136,8 @@ struct MovieComparison: Codable {
 final class MovieStore: ObservableObject {
     private let firestoreService = FirestoreService()
     @Published var movies: [Movie] = []
+    @Published var tvShows: [Movie] = []
+    @Published var selectedMediaType: AppModels.MediaType = .movie
     
     private struct Band {
         let min: Double
@@ -150,17 +153,30 @@ final class MovieStore: ObservableObject {
     ]
     
     init() {
-        Task {
-            await loadMovies()
-        }
+        // Listen for auth state changes
+        FirebaseAuthService.shared.$user
+            .sink { [weak self] user in
+                if user != nil {
+                    Task {
+                        await self?.loadMovies()
+                    }
+                } else {
+                    self?.movies = []
+                    self?.tvShows = []
+                }
+            }
+            .store(in: &cancellables)
     }
+    
+    private var cancellables = Set<AnyCancellable>()
     
     private func loadMovies() async {
         guard let userId = FirebaseAuthService.shared.user?.uid else { return }
         do {
             let rankings = try await firestoreService.getUserRankings(userId: userId)
             await MainActor.run {
-                self.movies = rankings
+                self.movies = rankings.filter { $0.mediaType == .movie }
+                self.tvShows = rankings.filter { $0.mediaType == .tv }
             }
         } catch {
             print("Error loading movies: \(error)")
@@ -174,20 +190,31 @@ final class MovieStore: ObservableObject {
         let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
         guard let sentimentIndex = sentimentSections.firstIndex(of: movie.sentiment) else { return }
         
+        // Get the appropriate list based on media type
+        var targetList = movie.mediaType == .movie ? movies : tvShows
+        
         // Find the start and end indices for this sentiment section
-        let sectionStart = movies.firstIndex { $0.sentiment == movie.sentiment } ?? movies.count
+        let sectionStart = targetList.firstIndex { $0.sentiment == movie.sentiment } ?? targetList.count
         let sectionEnd: Int
         if sentimentIndex < sentimentSections.count - 1 {
-            sectionEnd = movies.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? movies.count
+            sectionEnd = targetList.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? targetList.count
         } else {
-            sectionEnd = movies.count
+            sectionEnd = targetList.count
         }
         
         // Calculate the actual insertion index within the section
         let sectionLength = sectionEnd - sectionStart
         let insertionIndex = sectionStart + min(finalRank - 1, sectionLength)
         
-        movies.insert(movie, at: insertionIndex)
+        targetList.insert(movie, at: insertionIndex)
+        
+        // Update the appropriate list
+        if movie.mediaType == .movie {
+            movies = targetList
+        } else {
+            tvShows = targetList
+        }
+        
         recalculateScores()
         
         // Save to Firestore
@@ -204,8 +231,10 @@ final class MovieStore: ObservableObject {
         guard let userId = FirebaseAuthService.shared.user?.uid else { return }
         
         withAnimation {
+            var targetList = selectedMediaType == .movie ? movies : tvShows
+            
             for index in offsets {
-                let movie = movies[index]
+                let movie = targetList[index]
                 Task {
                     do {
                         try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
@@ -214,34 +243,25 @@ final class MovieStore: ObservableObject {
                     }
                 }
             }
-            movies.remove(atOffsets: offsets)
-            recalculateScores()
+            targetList.remove(atOffsets: offsets)
+            
+            // Update the appropriate list
+            if selectedMediaType == .movie {
+                movies = targetList
+            } else {
+                tvShows = targetList
+            }
+            
+            // Recalculate scores for both lists
+            recalculateScoresForList(&movies)
+            recalculateScoresForList(&tvShows)
         }
     }
 
-    func recordComparison(winnerID: UUID, loserID: UUID) {
-        guard
-            let winIdx = movies.firstIndex(where: { $0.id == winnerID }),
-            let loseIdx = movies.firstIndex(where: { $0.id == loserID })
-        else { return }
-
-        // Only allow comparisons within the same sentiment
-        guard movies[winIdx].sentiment == movies[loseIdx].sentiment else { return }
-
-        if winIdx > loseIdx { movies.swapAt(winIdx, loseIdx) }
-
-        movies[winIdx].comparisonsCount += 1
-        movies[winIdx].confidenceLevel  += 1
-        movies[loseIdx].comparisonsCount += 1
-        movies[loseIdx].confidenceLevel  += 1
-
-        recalculateScores()
-    }
-
-    func recalculateScores() {
+    private func recalculateScoresForList(_ list: inout [Movie]) {
         for sentiment in MovieSentiment.allCasesOrdered {
             // 1. Slice the array in *display order* for this sentiment
-            let idxs = movies.indices.filter { movies[$0].sentiment == sentiment }
+            let idxs = list.indices.filter { list[$0].sentiment == sentiment }
             guard let band = bands[sentiment], !idxs.isEmpty else { continue }
 
             let n       = Double(idxs.count)          // #movies in band
@@ -251,13 +271,16 @@ final class MovieStore: ObservableObject {
             for (rank, arrayIndex) in idxs.enumerated() {
                 let offset = centre - Double(rank)    // Changed: now rank 0 gives +centre
                 let newScore = band.mid + offset * step
-                movies[arrayIndex].score = newScore
+                list[arrayIndex].score = newScore
+                
+                // Create a copy of the movie to avoid capturing the inout parameter
+                let movieToUpdate = list[arrayIndex]
                 
                 // Save the new score to Firestore
                 if let userId = FirebaseAuthService.shared.user?.uid {
                     Task {
                         do {
-                            try await firestoreService.updateMovieRanking(userId: userId, movie: movies[arrayIndex])
+                            try await firestoreService.updateMovieRanking(userId: userId, movie: movieToUpdate)
                         } catch {
                             print("Error updating score: \(error)")
                         }
@@ -265,8 +288,40 @@ final class MovieStore: ObservableObject {
                 }
             }
         }
+    }
 
+    func recalculateScores() {
+        recalculateScoresForList(&movies)
+        recalculateScoresForList(&tvShows)
         objectWillChange.send()
+    }
+
+    func recordComparison(winnerID: UUID, loserID: UUID) {
+        var targetList = selectedMediaType == .movie ? movies : tvShows
+        
+        guard
+            let winIdx = targetList.firstIndex(where: { $0.id == winnerID }),
+            let loseIdx = targetList.firstIndex(where: { $0.id == loserID })
+        else { return }
+
+        // Only allow comparisons within the same sentiment
+        guard targetList[winIdx].sentiment == targetList[loseIdx].sentiment else { return }
+
+        if winIdx > loseIdx { targetList.swapAt(winIdx, loseIdx) }
+
+        targetList[winIdx].comparisonsCount += 1
+        targetList[winIdx].confidenceLevel  += 1
+        targetList[loseIdx].comparisonsCount += 1
+        targetList[loseIdx].confidenceLevel  += 1
+
+        // Update the appropriate list
+        if selectedMediaType == .movie {
+            movies = targetList
+        } else {
+            tvShows = targetList
+        }
+
+        recalculateScores()
     }
 }
 
@@ -598,7 +653,8 @@ struct ComparisonView: View {
     @State private var searching = true
 
     private var sortedMovies: [Movie] { 
-        store.movies.filter { $0.sentiment == newMovie.sentiment }
+        let targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
+        return targetList.filter { $0.sentiment == newMovie.sentiment }
     }
 
     var body: some View {
@@ -1065,56 +1121,34 @@ struct ContentView: View {
     @State private var showingAddMovie = false
     @State private var editMode: EditMode = .inactive
     @State private var selectedMovie: Movie?
-    @State private var selectedMediaType: AppModels.MediaType?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
     @EnvironmentObject var authService: FirebaseAuthService
 
     private var filteredMovies: [Movie] {
-        store.movies.filter { movie in
-            let mediaTypeMatch = selectedMediaType == nil || movie.mediaType == selectedMediaType
+        let targetList = store.selectedMediaType == .movie ? store.movies : store.tvShows
+        return targetList.filter { movie in
             let genreMatch = selectedGenres.isEmpty || !Set(movie.genres).isDisjoint(with: selectedGenres)
-            return mediaTypeMatch && genreMatch
+            return genreMatch
         }
     }
 
     private var availableGenres: [AppModels.Genre] {
-        let genres = Array(Set(store.movies.flatMap { $0.genres })).sorted { $0.name < $1.name }
+        let targetList = store.selectedMediaType == .movie ? store.movies : store.tvShows
+        let genres = Array(Set(targetList.flatMap { $0.genres })).sorted { $0.name < $1.name }
         return genres
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Filter bar
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Button(action: { showingFilters = true }) {
-                            HStack {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
-                                Text("Filters")
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        
-                        if selectedMediaType != nil || !selectedGenres.isEmpty {
-                            Button(action: { clearFilters() }) {
-                                Text("Clear")
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.gray.opacity(0.1))
-                                    .cornerRadius(8)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, UI.hPad)
-                    .padding(.vertical, 8)
+                Picker("Media Type", selection: $store.selectedMediaType) {
+                    Text("Movies").tag(AppModels.MediaType.movie)
+                    Text("TV Shows").tag(AppModels.MediaType.tv)
                 }
-                .background(Color(.systemBackground))
-
+                .pickerStyle(.segmented)
+                .padding()
+                
                 List {
                     ForEach(filteredMovies) { movie in
                         MovieRow(
@@ -1148,6 +1182,12 @@ struct ContentView: View {
                     EditButton()
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showingFilters = true }) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.title2)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         try? authService.signOut()
                     }) {
@@ -1161,7 +1201,6 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingFilters) {
                 FilterView(
-                    selectedMediaType: $selectedMediaType,
                     selectedGenres: $selectedGenres,
                     availableGenres: availableGenres
                 )
@@ -1173,16 +1212,11 @@ struct ContentView: View {
         .navigationViewStyle(.stack)
     }
 
-    private func clearFilters() {
-        selectedMediaType = nil
-        selectedGenres.removeAll()
-    }
-
     private func accessory(for movie: Movie) -> AnyView {
         if editMode.isEditing {
             return AnyView(
                 Button(role: .destructive) {
-                    if let idx = store.movies.firstIndex(of: movie) {
+                    if let idx = (store.selectedMediaType == .movie ? store.movies : store.tvShows).firstIndex(of: movie) {
                         store.deleteMovies(at: IndexSet(integer: idx))
                     }
                 } label: {
@@ -1251,30 +1285,12 @@ struct MovieRow: View {
 
 struct FilterView: View {
     @Environment(\.dismiss) private var dismiss
-    @Binding var selectedMediaType: AppModels.MediaType?
     @Binding var selectedGenres: Set<AppModels.Genre>
     let availableGenres: [AppModels.Genre]
     
     var body: some View {
         NavigationView {
             List {
-                Section("Media Type") {
-                    ForEach(AppModels.MediaType.allCases, id: \.self) { type in
-                        Button(action: {
-                            selectedMediaType = selectedMediaType == type ? nil : type
-                        }) {
-                            HStack {
-                                Text(type.rawValue)
-                                Spacer()
-                                if selectedMediaType == type {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.accentColor)
-                                }
-                            }
-                        }
-                    }
-                }
-
                 Section("Genres") {
                     ForEach(availableGenres) { genre in
                         Button(action: {
