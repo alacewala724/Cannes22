@@ -1,5 +1,7 @@
 import SwiftUI
 import Foundation
+import FirebaseFirestore
+import FirebaseAuth
 
 // MARK: - UI Constants
 enum UI {
@@ -101,16 +103,24 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     var comparisonsCount: Int
     var confidenceLevel: Int
 
-    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = []) {
+    init(id: UUID = UUID(), 
+         title: String, 
+         sentiment: MovieSentiment, 
+         tmdbId: Int? = nil, 
+         mediaType: AppModels.MediaType = .movie, 
+         genres: [AppModels.Genre] = [],
+         score: Double? = nil,
+         comparisonsCount: Int = 0,
+         confidenceLevel: Int = 1) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
         self.tmdbId = tmdbId
         self.mediaType = mediaType
         self.genres = genres
-        self.score = sentiment.midpoint
-        self.comparisonsCount = 0
-        self.confidenceLevel = 1
+        self.score = score ?? sentiment.midpoint
+        self.comparisonsCount = comparisonsCount
+        self.confidenceLevel = confidenceLevel
     }
 
     var displayScore: Double { score.rounded(toPlaces: 1) }
@@ -123,6 +133,9 @@ struct MovieComparison: Codable {
 
 // MARK: - Store
 final class MovieStore: ObservableObject {
+    private let firestoreService = FirestoreService()
+    @Published var movies: [Movie] = []
+    
     private struct Band {
         let min: Double
         let max: Double
@@ -135,31 +148,28 @@ final class MovieStore: ObservableObject {
         .itWasFine   : Band(min: 4.0, max: 6.8),
         .likedIt     : Band(min: 6.9, max: 10.0)
     ]
-
-    @Published var movies: [Movie] = [] {
-        didSet {
-            saveMovies()
-        }
-    }
     
     init() {
-        loadMovies()
-    }
-    
-    private func saveMovies() {
-        if let encoded = try? JSONEncoder().encode(movies) {
-            UserDefaults.standard.set(encoded, forKey: "savedMovies")
+        Task {
+            await loadMovies()
         }
     }
     
-    private func loadMovies() {
-        if let savedMovies = UserDefaults.standard.data(forKey: "savedMovies"),
-           let decodedMovies = try? JSONDecoder().decode([Movie].self, from: savedMovies) {
-            movies = decodedMovies
+    private func loadMovies() async {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        do {
+            let rankings = try await firestoreService.getUserRankings(userId: userId)
+            await MainActor.run {
+                self.movies = rankings
+            }
+        } catch {
+            print("Error loading movies: \(error)")
         }
     }
-
+    
     func insertNewMovie(_ movie: Movie, at finalRank: Int) {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        
         // Find the appropriate section for this sentiment
         let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
         guard let sentimentIndex = sentimentSections.firstIndex(of: movie.sentiment) else { return }
@@ -179,6 +189,34 @@ final class MovieStore: ObservableObject {
         
         movies.insert(movie, at: insertionIndex)
         recalculateScores()
+        
+        // Save to Firestore
+        Task {
+            do {
+                try await firestoreService.updateMovieRanking(userId: userId, movie: movie)
+            } catch {
+                print("Error saving movie: \(error)")
+            }
+        }
+    }
+    
+    func deleteMovies(at offsets: IndexSet) {
+        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        
+        withAnimation {
+            for index in offsets {
+                let movie = movies[index]
+                Task {
+                    do {
+                        try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
+                    } catch {
+                        print("Error deleting movie: \(error)")
+                    }
+                }
+            }
+            movies.remove(atOffsets: offsets)
+            recalculateScores()
+        }
     }
 
     func recordComparison(winnerID: UUID, loserID: UUID) {
@@ -212,18 +250,23 @@ final class MovieStore: ObservableObject {
 
             for (rank, arrayIndex) in idxs.enumerated() {
                 let offset = centre - Double(rank)    // Changed: now rank 0 gives +centre
-                movies[arrayIndex].score = band.mid + offset * step
+                let newScore = band.mid + offset * step
+                movies[arrayIndex].score = newScore
+                
+                // Save the new score to Firestore
+                if let userId = FirebaseAuthService.shared.user?.uid {
+                    Task {
+                        do {
+                            try await firestoreService.updateMovieRanking(userId: userId, movie: movies[arrayIndex])
+                        } catch {
+                            print("Error updating score: \(error)")
+                        }
+                    }
+                }
             }
         }
 
         objectWillChange.send()
-    }
-
-    func deleteMovies(at offsets: IndexSet) {
-        withAnimation {
-            movies.remove(atOffsets: offsets)
-            recalculateScores()
-        }
     }
 }
 
@@ -309,10 +352,6 @@ struct AddMovieView: View {
                                     } catch {
                                         if !(error is CancellationError) {
                                             print("Search error: \(error)")
-                                            await MainActor.run {
-                                                searchResults = []
-                                                isSearching = false
-                                            }
                                         }
                                     }
                                 }
@@ -448,7 +487,10 @@ struct AddMovieView: View {
                                             sentiment: self.sentiment,
                                             tmdbId: tmdbId,
                                             mediaType: selectedMovie?.mediaType ?? .movie,
-                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? []
+                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                                            score: details?.voteAverage,
+                                            comparisonsCount: 0,
+                                            confidenceLevel: 1
                                         )
                                     }
                                 } else {
@@ -643,12 +685,6 @@ struct ComparisonView: View {
             searching = false
         } else {
             mid = (left + right) / 2
-            // Ensure mid is within bounds
-            if mid >= 0 && mid < sortedMovies.count {
-                searching = true
-            } else {
-                searching = false
-            }
         }
     }
 }
@@ -1025,7 +1061,6 @@ struct TMDBMovieDetailView: View {
 
 // MARK: - Content View
 struct ContentView: View {
-    @StateObject private var authService = AuthenticationService()
     @StateObject private var store = MovieStore()
     @State private var showingAddMovie = false
     @State private var editMode: EditMode = .inactive
@@ -1033,6 +1068,7 @@ struct ContentView: View {
     @State private var selectedMediaType: AppModels.MediaType?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
+    @EnvironmentObject var authService: FirebaseAuthService
 
     private var filteredMovies: [Movie] {
         store.movies.filter { movie in
@@ -1048,102 +1084,93 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if authService.currentUser != nil {
-                NavigationView {
-                    VStack(spacing: 0) {
-                        // Filter bar
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                Button(action: { showingFilters = true }) {
-                                    HStack {
-                                        Image(systemName: "line.3.horizontal.decrease.circle")
-                                        Text("Filters")
-                                    }
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Filter bar
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Button(action: { showingFilters = true }) {
+                            HStack {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                Text("Filters")
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        
+                        if selectedMediaType != nil || !selectedGenres.isEmpty {
+                            Button(action: { clearFilters() }) {
+                                Text("Clear")
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Color.accentColor.opacity(0.1))
+                                    .background(Color.gray.opacity(0.1))
                                     .cornerRadius(8)
-                                }
-                                
-                                if selectedMediaType != nil || !selectedGenres.isEmpty {
-                                    Button(action: { clearFilters() }) {
-                                        Text("Clear")
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .background(Color.gray.opacity(0.1))
-                                            .cornerRadius(8)
-                                    }
-                                }
                             }
-                            .padding(.horizontal, UI.hPad)
-                            .padding(.vertical, 8)
                         }
-                        .background(Color(.systemBackground))
+                    }
+                    .padding(.horizontal, UI.hPad)
+                    .padding(.vertical, 8)
+                }
+                .background(Color(.systemBackground))
 
-                        List {
-                            ForEach(filteredMovies) { movie in
-                                MovieRow(
-                                    movie: movie,
-                                    position: filteredMovies.firstIndex(of: movie)! + 1,
-                                    accessory: accessory(for: movie),
-                                    onTap: {
-                                        if editMode.isEditing == false {
-                                            selectedMovie = movie
-                                        }
-                                    },
-                                    editMode: editMode
-                                )
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(
-                                    EdgeInsets(top: UI.vGap, leading: UI.hPad,
-                                               bottom: UI.vGap, trailing: UI.hPad))
-                            }
-                        }
-                        .listStyle(.plain)
-                    }
-                    .navigationTitle("My Movies")
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(action: { showingAddMovie = true }) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.title2)
-                            }
-                        }
-                        ToolbarItem(placement: .navigationBarLeading) {
-                            EditButton()
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button(action: {
-                                do {
-                                    try authService.signOut()
-                                } catch {
-                                    print("Error signing out: \(error)")
+                List {
+                    ForEach(filteredMovies) { movie in
+                        MovieRow(
+                            movie: movie,
+                            position: filteredMovies.firstIndex(of: movie)! + 1,
+                            accessory: accessory(for: movie),
+                            onTap: {
+                                if editMode.isEditing == false {
+                                    selectedMovie = movie
                                 }
-                            }) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
-                            }
-                        }
-                    }
-                    .environment(\.editMode, $editMode)
-                    .sheet(isPresented: $showingAddMovie) {
-                        AddMovieView(store: store)
-                    }
-                    .sheet(isPresented: $showingFilters) {
-                        FilterView(
-                            selectedMediaType: $selectedMediaType,
-                            selectedGenres: $selectedGenres,
-                            availableGenres: availableGenres
+                            },
+                            editMode: editMode
                         )
-                    }
-                    .navigationDestination(item: $selectedMovie) { movie in
-                        TMDBMovieDetailView(movie: movie)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(
+                            EdgeInsets(top: UI.vGap, leading: UI.hPad,
+                                       bottom: UI.vGap, trailing: UI.hPad))
                     }
                 }
-            } else {
-                AuthView()
+                .listStyle(.plain)
+            }
+            .navigationTitle("My Movies")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showingAddMovie = true }) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    EditButton()
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        try? authService.signOut()
+                    }) {
+                        Text("Sign Out")
+                    }
+                }
+            }
+            .environment(\.editMode, $editMode)
+            .sheet(isPresented: $showingAddMovie) {
+                AddMovieView(store: store)
+            }
+            .sheet(isPresented: $showingFilters) {
+                FilterView(
+                    selectedMediaType: $selectedMediaType,
+                    selectedGenres: $selectedGenres,
+                    availableGenres: availableGenres
+                )
+            }
+            .navigationDestination(item: $selectedMovie) { movie in
+                TMDBMovieDetailView(movie: movie)
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     private func clearFilters() {
