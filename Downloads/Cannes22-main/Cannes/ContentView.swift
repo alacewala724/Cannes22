@@ -1132,76 +1132,92 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                Picker("Media Type", selection: $store.selectedMediaType) {
-                    Text("Movies").tag(AppModels.MediaType.movie)
-                    Text("TV Shows").tag(AppModels.MediaType.tv)
+        if !authService.isReady {
+            ProgressView("Loading...")
+        } else if authService.isAuthenticated {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    // Display the username with "@" symbol, left-aligned
+                    if let username = authService.username {
+                        HStack {
+                            Text("@\(username)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .padding(.leading, UI.hPad)
+                            Spacer()
+                        }
+                        .padding(.top, 4)
+                    }
+                    
+                    Picker("Media Type", selection: $store.selectedMediaType) {
+                        Text("Movies").tag(AppModels.MediaType.movie)
+                        Text("TV Shows").tag(AppModels.MediaType.tv)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding()
+                    
+                    List {
+                        ForEach(filteredMovies) { movie in
+                            MovieRow(
+                                movie: movie,
+                                position: filteredMovies.firstIndex(of: movie)! + 1,
+                                accessory: accessory(for: movie),
+                                onTap: {
+                                    if editMode.isEditing == false {
+                                        selectedMovie = movie
+                                    }
+                                },
+                                editMode: editMode
+                            )
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(
+                                EdgeInsets(top: UI.vGap, leading: UI.hPad,
+                                           bottom: UI.vGap, trailing: UI.hPad))
+                        }
+                    }
+                    .listStyle(.plain)
                 }
-                .pickerStyle(.segmented)
-                .padding()
-                
-                List {
-                    ForEach(filteredMovies) { movie in
-                        MovieRow(
-                            movie: movie,
-                            position: filteredMovies.firstIndex(of: movie)! + 1,
-                            accessory: accessory(for: movie),
-                            onTap: {
-                                if editMode.isEditing == false {
-                                    selectedMovie = movie
-                                }
-                            },
-                            editMode: editMode
-                        )
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(
-                            EdgeInsets(top: UI.vGap, leading: UI.hPad,
-                                       bottom: UI.vGap, trailing: UI.hPad))
+                .navigationTitle("My Cannes")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: { showingAddMovie = true }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        EditButton()
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: { showingFilters = true }) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.title2)
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            try? authService.signOut()
+                        }) {
+                            Text("Sign Out")
+                        }
                     }
                 }
-                .listStyle(.plain)
-            }
-            .navigationTitle("My Movies")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddMovie = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                    }
+                .environment(\.editMode, $editMode)
+                .sheet(isPresented: $showingAddMovie) {
+                    AddMovieView(store: store)
                 }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
+                .sheet(isPresented: $showingFilters) {
+                    FilterView(
+                        selectedGenres: $selectedGenres,
+                        availableGenres: availableGenres
+                    )
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingFilters = true }) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.title2)
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        try? authService.signOut()
-                    }) {
-                        Text("Sign Out")
-                    }
+                .navigationDestination(item: $selectedMovie) { movie in
+                    TMDBMovieDetailView(movie: movie)
                 }
             }
-            .environment(\.editMode, $editMode)
-            .sheet(isPresented: $showingAddMovie) {
-                AddMovieView(store: store)
-            }
-            .sheet(isPresented: $showingFilters) {
-                FilterView(
-                    selectedGenres: $selectedGenres,
-                    availableGenres: availableGenres
-                )
-            }
-            .navigationDestination(item: $selectedMovie) { movie in
-                TMDBMovieDetailView(movie: movie)
-            }
+            .navigationViewStyle(.stack)
         }
-        .navigationViewStyle(.stack)
     }
 
     private func accessory(for movie: Movie) -> AnyView {

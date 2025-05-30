@@ -15,10 +15,6 @@ struct AuthView: View {
     @State private var showResetAlert = false
     
     var isFormValid: Bool {
-        if isSignUp {
-            return !email.isEmpty && !password.isEmpty && !username.isEmpty && 
-                   password.count >= 6 && username.count >= 3
-        }
         return !email.isEmpty && !password.isEmpty && password.count >= 6
     }
     
@@ -34,13 +30,6 @@ struct AuthView: View {
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .textContentType(.emailAddress)
                         .autocapitalization(.none)
-                    
-                    if isSignUp {
-                        TextField("Username", text: $username)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .textContentType(.username)
-                            .autocapitalization(.none)
-                    }
                     
                     SecureField("Password", text: $password)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -106,18 +95,8 @@ struct AuthView: View {
         isLoading = true
         do {
             if isSignUp {
-                // Add timeout handling
                 try await withTimeout(seconds: 10) {
-                    try await authService.signUp(email: email, password: password, username: username)
-                    
-                    if let user = Auth.auth().currentUser {
-                        let db = Firestore.firestore()
-                        try await db.collection("users").document(user.uid).setData([
-                            "username": username,
-                            "email": email,
-                            "createdAt": FieldValue.serverTimestamp()
-                        ])
-                    }
+                    try await authService.signUp(email: email, password: password)
                 }
                 showVerificationAlert = true
                 try await authService.signOut()

@@ -1,5 +1,6 @@
 import Firebase
 import FirebaseFirestore
+import FirebaseAuth
 
 class FirestoreService: ObservableObject {
     private let db = Firestore.firestore()
@@ -62,5 +63,10 @@ class FirestoreService: ObservableObject {
             .collection("rankings")
             .document(movieId)
             .delete()
+    }
+    
+    func createUserDocumentIfNeeded(for user: FirebaseAuth.User) async throws {
+        guard user.isEmailVerified else { return }
+        // ... existing code to create user document ...
     }
 } 

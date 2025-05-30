@@ -10,49 +10,48 @@ struct SetUsernameView: View {
     @State private var errorMessage = ""
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Text("Choose a Username")
-                    .font(.title)
-                    .fontWeight(.bold)
-                
-                Text("This will be your unique identifier in the app")
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                
-                TextField("Username", text: $username)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .textContentType(.username)
-                    .autocapitalization(.none)
-                    .padding(.horizontal)
-                
-                Button(action: {
-                    Task {
-                        await setUsername()
-                    }
-                }) {
-                    if isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
-                        Text("Set Username")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(10)
-                .disabled(username.count < 3 || isLoading)
+        VStack {
+            Text("You've verified your email. Now set your username.")
+            Text("Choose a Username")
+                .font(.title)
+                .fontWeight(.bold)
+            
+            Text("This will be your unique identifier in the app")
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal)
+            
+            TextField("Username", text: $username)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .textContentType(.username)
+                .autocapitalization(.none)
+                .padding(.horizontal)
+            
+            Button(action: {
+                Task {
+                    await setUsername()
+                }
+            }) {
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                } else {
+                    Text("Set Username")
+                }
             }
+            .frame(maxWidth: .infinity)
             .padding()
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
+            .background(Color.blue)
+            .foregroundColor(.white)
+            .cornerRadius(10)
+            .disabled(username.count < 3 || isLoading)
+            .padding(.horizontal)
+        }
+        .padding()
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
         }
     }
     
@@ -74,9 +73,9 @@ struct SetUsernameView: View {
             }
             
             // Save username
-            try await Firestore.firestore().collection("users").document(userId).updateData([
+            try await Firestore.firestore().collection("users").document(userId).setData([
                 "username": username
-            ])
+            ], merge: true)
             
             await MainActor.run {
                 authService.username = username
