@@ -12,6 +12,7 @@ import FirebaseAuth
 @main
 struct CannesApp: App {
     @StateObject private var authService = AuthenticationService.shared
+    @State private var showUsernamePrompt = false
     
     init() {
         FirebaseApp.configure()
@@ -20,8 +21,12 @@ struct CannesApp: App {
     var body: some Scene {
         WindowGroup {
             if authService.isAuthenticated {
-                ContentView()
-                    .environmentObject(authService)
+                if authService.username == nil {
+                    SetUsernameView()
+                } else {
+                    ContentView()
+                        .environmentObject(authService)
+                }
             } else {
                 AuthView()
                     .environmentObject(authService)
