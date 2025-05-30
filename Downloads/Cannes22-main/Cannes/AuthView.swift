@@ -106,7 +106,11 @@ struct AuthView: View {
                 }
             }
         } catch {
-            print("Authentication error: \(error)")
+            if let err = error as? LocalizedError {
+                authService.errorMessage = err.errorDescription
+            } else {
+                authService.errorMessage = "Something went wrong. Please try again."
+            }
             showError = true
         }
         isLoading = false

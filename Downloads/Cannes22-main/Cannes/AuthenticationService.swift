@@ -23,7 +23,7 @@ class AuthenticationService: ObservableObject {
         }
         
         // Add a timeout for the auth state listener
-        let timeoutTask = Task {
+        _ = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
             if !isReady {
                 await MainActor.run {
@@ -34,25 +34,26 @@ class AuthenticationService: ObservableObject {
         }
         
         _ = auth.addStateDidChangeListener { [weak self] _, user in
-            Task {
+            Task { [weak self] in
+                guard let self = self else { return }
                 await MainActor.run {
-                    self?.currentUser = user
-                    self?.isAuthenticated = user != nil && user?.isEmailVerified == true
+                    self.currentUser = user
+                    self.isAuthenticated = user != nil && user?.isEmailVerified == true
                 }
 
                 if let user = user {
-                    await self?.ensureUserDocument(for: user)
+                    await self.ensureUserDocument(for: user)
 
                     if !user.isEmailVerified {
                         await MainActor.run {
-                            self?.isAuthenticated = false
-                            self?.errorMessage = "Please verify your email"
+                            self.isAuthenticated = false
+                            self.errorMessage = "Please verify your email"
                         }
                     }
                 }
 
                 await MainActor.run {
-                    self?.isReady = true
+                    self.isReady = true
                 }
             }
         }
@@ -94,9 +95,7 @@ class AuthenticationService: ObservableObject {
             
             if !user.isEmailVerified {
                 try await user.sendEmailVerification()
-                throw NSError(domain: "AuthenticationError",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Please verify your email. A new verification email has been sent."])
+                throw AuthError.custom("Please verify your email. A new verification email has been sent.")
             }
             
             await ensureUserDocument(for: user)
@@ -104,18 +103,8 @@ class AuthenticationService: ObservableObject {
                 self.currentUser = user
                 self.isAuthenticated = true
             }
-        } catch let error as NSError {
-            await MainActor.run {
-                switch AuthErrorCode(rawValue: error.code) {
-                case .userNotFound, .wrongPassword:
-                    self.errorMessage = "Incorrect email or password"
-                case .invalidEmail:
-                    self.errorMessage = "Invalid email format"
-                default:
-                    self.errorMessage = error.localizedDescription
-                }
-            }
-            throw error
+        } catch {
+            throw mapAuthError(error)
         }
     }
     
@@ -132,7 +121,7 @@ class AuthenticationService: ObservableObject {
                 self.currentUser = nil
             }
 
-            try auth.signOut() // 🚨 Ensure user is signed out
+            try auth.signOut()
 
         } catch {
             throw mapAuthError(error)
@@ -157,22 +146,38 @@ class AuthenticationService: ObservableObject {
     }
     
     private func mapAuthError(_ error: Error) -> Error {
-        if let errCode = AuthErrorCode(_bridgedNSError: error as NSError)?.code {
-            switch errCode {
-            case .invalidEmail:
-                return NSError(domain: "", code: errCode.rawValue, userInfo: [NSLocalizedDescriptionKey: "Invalid email format."])
-            case .emailAlreadyInUse:
-                return NSError(domain: "", code: errCode.rawValue, userInfo: [NSLocalizedDescriptionKey: "An account already exists with this email."])
-            case .weakPassword:
-                return NSError(domain: "", code: errCode.rawValue, userInfo: [NSLocalizedDescriptionKey: "Password must be at least 6 characters."])
-            default:
-                return error
-            }
+        let nsError = error as NSError
+
+        switch nsError.code {
+        case 17009, 17004:
+            return AuthError.custom("Incorrect email or password.")
+        case 17011:
+            return AuthError.custom("No user found with this email.")
+        case 17008:
+            return AuthError.custom("The email address is badly formatted.")
+        case 17007:
+            return AuthError.custom("An account already exists with this email.")
+        case 17026:
+            return AuthError.custom("Password must be at least 6 characters.")
+        case 17010:
+            return AuthError.custom("Too many login attempts. Try again later.")
+        default:
+            return AuthError.custom("Something went wrong. Please try again.")
         }
-        return error
     }
 }
 
 extension AuthErrorCode {
     static let networkError = AuthErrorCode(rawValue: -1009)
+}
+
+enum AuthError: LocalizedError {
+    case custom(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .custom(let message):
+            return message
+        }
+    }
 } 
