@@ -154,7 +154,7 @@ final class MovieStore: ObservableObject {
     
     init() {
         // Listen for auth state changes
-        FirebaseAuthService.shared.$user
+        AuthenticationService.shared.$currentUser
             .sink { [weak self] user in
                 if user != nil {
                     Task {
@@ -171,7 +171,7 @@ final class MovieStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     private func loadMovies() async {
-        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
         do {
             let rankings = try await firestoreService.getUserRankings(userId: userId)
             await MainActor.run {
@@ -184,7 +184,7 @@ final class MovieStore: ObservableObject {
     }
     
     func insertNewMovie(_ movie: Movie, at finalRank: Int) {
-        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
         
         // Find the appropriate section for this sentiment
         let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
@@ -228,7 +228,7 @@ final class MovieStore: ObservableObject {
     }
     
     func deleteMovies(at offsets: IndexSet) {
-        guard let userId = FirebaseAuthService.shared.user?.uid else { return }
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
         
         withAnimation {
             var targetList = selectedMediaType == .movie ? movies : tvShows
@@ -277,7 +277,7 @@ final class MovieStore: ObservableObject {
                 let movieToUpdate = list[arrayIndex]
                 
                 // Save the new score to Firestore
-                if let userId = FirebaseAuthService.shared.user?.uid {
+                if let userId = AuthenticationService.shared.currentUser?.uid {
                     Task {
                         do {
                             try await firestoreService.updateMovieRanking(userId: userId, movie: movieToUpdate)
@@ -1123,7 +1123,7 @@ struct ContentView: View {
     @State private var selectedMovie: Movie?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
-    @EnvironmentObject var authService: FirebaseAuthService
+    @EnvironmentObject var authService: AuthenticationService
 
     private var filteredMovies: [Movie] {
         let targetList = store.selectedMediaType == .movie ? store.movies : store.tvShows

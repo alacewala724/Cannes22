@@ -7,10 +7,11 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAuth
 
 @main
 struct CannesApp: App {
-    @StateObject private var authService = FirebaseAuthService()
+    @StateObject private var authService = AuthenticationService.shared
     
     init() {
         FirebaseApp.configure()
