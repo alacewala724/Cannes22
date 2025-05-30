@@ -57,7 +57,7 @@ class AuthenticationService: ObservableObject {
         }
     }
     
-    func signIn(email: String, password: String) async throws {
+    func signIn(email: String, password: String) async throws -> User {
         do {
             let result = try await Auth.auth().signIn(withEmail: email, password: password)
             await ensureUserDocument(for: result.user)
@@ -65,6 +65,7 @@ class AuthenticationService: ObservableObject {
                 self.currentUser = result.user
                 self.isAuthenticated = true
             }
+            return result.user
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
@@ -140,11 +141,8 @@ class AuthenticationService: ObservableObject {
         }
     }
     
-    var isAuthenticated: Bool {
-        if let user = Auth.auth().currentUser {
-            return user.isEmailVerified
-        }
-        return false
+    var isEmailVerified: Bool {
+        auth.currentUser?.isEmailVerified ?? false
     }
 }
 
