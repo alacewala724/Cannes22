@@ -360,7 +360,7 @@ class FirestoreService: ObservableObject {
             print("updateMovieRanking: Movie score before update: \(movie.score)")
             print("updateMovieRanking: Old state: \(oldState ?? "nil"), old score: \(oldScore)")
             
-            if oldState == MovieRatingState.initialSentiment.rawValue {
+            if oldState == nil || oldState == MovieRatingState.initialSentiment.rawValue {
                 // This is a new rating - add to community ratings with the final ranking-based score
                 print("updateMovieRanking: Adding new rating with final ranking-based score: \(movie.score)")
                 try await addNewRating(movieId: movie.id.uuidString, score: movie.score, movie: movie)

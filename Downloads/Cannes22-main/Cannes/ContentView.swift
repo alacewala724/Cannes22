@@ -349,7 +349,7 @@ final class MovieStore: ObservableObject {
                 print("insertNewMovie: Starting for movie: \(movie.title) with initial score: \(movie.score)")
                 
                 // Recalculate scores first to get the final score
-                await recalculateScores()
+                await recalculateScores(excluding: Set([movie.id]))
                 
                 // Get the movie with the final recalculated score
                 let updatedMovie = movie.mediaType == .movie ? movies : tvShows
@@ -435,13 +435,14 @@ final class MovieStore: ObservableObject {
         }
     }
 
-    private func recalculateScoresForList(_ list: inout [Movie]) async {
+    private func recalculateScoresForList(_ list: inout [Movie], excluding excludedIds: Set<UUID> = []) async {
         print("recalculateScoresForList: Starting recalculation for list with \(list.count) movies")
         
         // Create a local copy of the list to work with
         let localList = list
         
         var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
+        var communityUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
         var updatedList = localList
         
         // Calculate new scores synchronously
@@ -471,20 +472,34 @@ final class MovieStore: ObservableObject {
                     newScore: newScore,
                     oldScore: oldScore
                 ))
+
+                if !excludedIds.contains(movie.id) {
+                    communityUpdates.append((
+                        movie: movie,
+                        newScore: newScore,
+                        oldScore: oldScore,
+                        isNewRating: false
+                    ))
+                }
                 
                 updatedList[arrayIndex].score = newScore
             }
         }
         
-        // Update only personal rankings, not community ratings
+        // Update personal and community rankings
         if !personalUpdates.isEmpty {
             print("recalculateScoresForList: Updating \(personalUpdates.count) personal rankings")
             do {
-                // Update personal rankings only
                 if let userId = AuthenticationService.shared.currentUser?.uid {
+                    // Personal rankings
                     try await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+
+                    // Community averages (skip excluded IDs)
+                    if !communityUpdates.isEmpty {
+                        try await firestoreService.batchUpdateRatingsWithMovies(movieUpdates: communityUpdates)
+                    }
                 }
-                
+
                 // Update the list on the main thread
                 await MainActor.run {
                     list = updatedList
@@ -497,13 +512,10 @@ final class MovieStore: ObservableObject {
         }
     }
 
-    func recalculateScores() async {
-        await MainActor.run {
-            Task {
-                await recalculateScoresForList(&movies)
-                await recalculateScoresForList(&tvShows)
-            }
-        }
+    func recalculateScores(excluding excludedIds: Set<UUID> = []) async {
+        // Run recalculations sequentially so that callers can await completion
+        await recalculateScoresForList(&movies, excluding: excludedIds)
+        await recalculateScoresForList(&tvShows, excluding: excludedIds)
     }
     
     private func recalculateScoresForAffectedMovies(deletedMovies: [Movie]) async {
@@ -516,7 +528,7 @@ final class MovieStore: ObservableObject {
         }
     }
     
-    private func recalculateScoresForSentiment(_ sentiment: MovieSentiment) async {
+    private func recalculateScoresForSentiment(_ sentiment: MovieSentiment, excluding excludedIds: Set<UUID> = []) async {
         // Get the appropriate list based on media type
         let targetList = selectedMediaType == .movie ? movies : tvShows
         let moviesInSentiment = targetList.filter { $0.sentiment == sentiment }
@@ -529,6 +541,7 @@ final class MovieStore: ObservableObject {
         let step = band.half / max(centre, 1)
         
         var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
+        var communityUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
         var updatedMovies: [Movie] = []
         
         for (rank, movie) in moviesInSentiment.enumerated() {
@@ -540,18 +553,29 @@ final class MovieStore: ObservableObject {
                 newScore: newScore,
                 oldScore: movie.score
             ))
+
+            if !excludedIds.contains(movie.id) {
+                communityUpdates.append((
+                    movie: movie,
+                    newScore: newScore,
+                    oldScore: movie.score,
+                    isNewRating: false
+                ))
+            }
             
             var updatedMovie = movie
             updatedMovie.score = newScore
             updatedMovies.append(updatedMovie)
         }
         
-        // Update only personal rankings, not community ratings
+        // Update personal and community rankings
         if !personalUpdates.isEmpty {
             do {
-                // Update personal rankings only
                 if let userId = AuthenticationService.shared.currentUser?.uid {
                     try await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                    if !communityUpdates.isEmpty {
+                        try await firestoreService.batchUpdateRatingsWithMovies(movieUpdates: communityUpdates)
+                    }
                 }
                 
                 // Update the UI on main thread
@@ -1006,7 +1030,7 @@ struct ComparisonView: View {
                     Task {
                         do {
                             // First recalculate scores
-                            await store.recalculateScores()
+                            await store.recalculateScores(excluding: Set([newMovie.id]))
                             
                             // Get the updated movie with the recalculated score
                             let updatedMovie = store.getMovies().first { $0.id == newMovie.id } ?? newMovie
@@ -1046,7 +1070,7 @@ struct ComparisonView: View {
                 Task {
                     do {
                         // First recalculate scores
-                        await store.recalculateScores()
+                        await store.recalculateScores(excluding: Set([newMovie.id]))
                         
                         // Get the updated movie with the recalculated score
                         let updatedMovie = store.getMovies().first { $0.id == newMovie.id } ?? newMovie
