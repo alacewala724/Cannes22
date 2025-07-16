@@ -513,12 +513,9 @@ final class MovieStore: ObservableObject {
     }
 
     func recalculateScores(excluding excludedIds: Set<UUID> = []) async {
-        await MainActor.run {
-            Task {
-                await recalculateScoresForList(&movies, excluding: excludedIds)
-                await recalculateScoresForList(&tvShows, excluding: excludedIds)
-            }
-        }
+        // Run recalculations sequentially so that callers can await completion
+        await recalculateScoresForList(&movies, excluding: excludedIds)
+        await recalculateScoresForList(&tvShows, excluding: excludedIds)
     }
     
     private func recalculateScoresForAffectedMovies(deletedMovies: [Movie]) async {
