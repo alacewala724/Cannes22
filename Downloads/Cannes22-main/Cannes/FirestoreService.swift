@@ -346,34 +346,17 @@ class FirestoreService: ObservableObject {
         case .initialSentiment:
             print("updateMovieRanking: Skipping global stats update for initialSentiment")
             break
-            
+
         case .comparing:
             print("updateMovieRanking: Skipping global stats update for comparing")
             break
-            
-        case .finalInsertion:
-            print("updateMovieRanking: Processing finalInsertion for global stats")
-            // Determine if this is a brand new rating
-            let isNewRating = !oldSnapshot.exists || oldState == MovieRatingState.initialSentiment.rawValue
 
-            print("updateMovieRanking: Movie score before update: \(movie.score)")
-            print("updateMovieRanking: Old state: \(oldState ?? "nil"), old score: \(oldScore)")
-            if isNewRating {
-                // This is a new rating - add to community ratings with the final ranking-based score
-                print("updateMovieRanking: Adding new rating with final ranking-based score: \(movie.score)")
-                try await addNewRating(movieId: movie.id.uuidString, score: movie.score, movie: movie)
-            } else {
-                // This is an update to an existing rating
-                print("updateMovieRanking: Updating existing rating from \(oldScore) to \(movie.score)")
-                try await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
+        case .finalInsertion, .scoreUpdate:
+            print("updateMovieRanking: Applying community rating for state \(state)")
+            if let currentUserId = Auth.auth().currentUser?.uid {
+                try await applyCommunityRating(userId: currentUserId, movie: movie, newScore: movie.score)
             }
-            
-        case .scoreUpdate:
-            print("updateMovieRanking: Processing scoreUpdate for global stats")
 
-            // Update community rating with the score change
-            try await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
-        }
         
         print("updateMovieRanking: Completed for movie: \(movie.title)")
     }
@@ -533,23 +516,23 @@ class FirestoreService: ObservableObject {
             .document(movieId)
             .delete()
         
-        // Update community ratings collection
+        // Update community ratings collection and remove user rating document
         let communityRatingId = tmdbId?.description ?? movieId
         let ratingsRef = db.collection("ratings").document(communityRatingId)
+        let userRatingRef = ratingsRef.collection("users").document(userId)
         let snapshot = try await ratingsRef.getDocument()
-        
+
         if snapshot.exists {
             let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
             let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
-            
+
             let newTotal = currentTotal - userScore
             let newCount = max(0, currentCount - 1)
-            
+
             print("deleteMovieRanking: Updating community rating - currentTotal: \(currentTotal), currentCount: \(currentCount)")
             print("deleteMovieRanking: Subtracting score: \(userScore), newTotal: \(newTotal), newCount: \(newCount)")
-            
+
             if newCount > 0 {
-                // Update the document with new total and count
                 let newAverage = newTotal / Double(newCount)
                 try await ratingsRef.updateData([
                     "totalScore": newTotal,
@@ -558,10 +541,12 @@ class FirestoreService: ObservableObject {
                     "lastUpdated": FieldValue.serverTimestamp()
                 ])
             } else {
-                // If no more ratings, delete the entire document
                 try await ratingsRef.delete()
                 print("deleteMovieRanking: Deleted community document - no more ratings")
             }
+
+            // Remove the user's rating document
+            try? await userRatingRef.delete()
         } else {
             print("deleteMovieRanking: Community document doesn't exist for movieId: \(communityRatingId)")
         }
@@ -667,78 +652,61 @@ extension FirestoreService {
     
     // New function that takes movie objects for proper TMDB ID handling
     private func updateSingleMovieRatingWithMovie(update: (movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)) async {
-        // Use TMDB ID for community ratings, fallback to UUID if no TMDB ID
-        let communityRatingId = update.movie.tmdbId?.description ?? update.movie.id.uuidString
-        print("updateSingleMovieRatingWithMovie: Using community rating ID: \(communityRatingId) for movie: \(update.movie.title)")
-        print("updateSingleMovieRatingWithMovie: newScore=\(update.newScore), oldScore=\(update.oldScore), isNewRating=\(update.isNewRating)")
-        
-        // Use the final recalculated score for community ratings
-        let communityScore = update.newScore
-        print("updateSingleMovieRatingWithMovie: Using final recalculated score for community rating: \(communityScore)")
-        
-        let ratingsRef = db.collection("ratings").document(communityRatingId)
-        
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
         do {
-            _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
-                do {
-                    let snapshot = try transaction.getDocument(ratingsRef)
-                    
-                    if snapshot.exists {
-                        let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
-                        let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
-                        
-                        if update.isNewRating {
-                            // New user rating - add to total
-                            let newTotal = currentTotal + communityScore
-                            let newCount = currentCount + 1
-                            let newAverage = newTotal / Double(newCount)
-                            
-                            print("updateSingleMovieRatingWithMovie: Adding new rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: Adding final score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage)")
-                            
-                            transaction.updateData([
-                                "totalScore": newTotal,
-                                "numberOfRatings": newCount,
-                                "averageRating": newAverage,
-                                "lastUpdated": FieldValue.serverTimestamp()
-                            ], forDocument: ratingsRef)
-                        } else {
-                            // Update existing user rating - replace old score with new score
-                            let newTotal = currentTotal - update.oldScore + communityScore
-                            let newAverage = newTotal / Double(currentCount)
-                            
-                            print("updateSingleMovieRatingWithMovie: Updating existing rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage)")
-                            
-                            transaction.updateData([
-                                "totalScore": newTotal,
-                                "averageRating": newAverage,
-                                "lastUpdated": FieldValue.serverTimestamp()
-                            ], forDocument: ratingsRef)
-                        }
-                    } else {
-                        // Document doesn't exist - create it with the current score
-                        print("updateSingleMovieRatingWithMovie: Creating new document with final score=\(communityScore)")
-                        transaction.setData([
-                            "totalScore": communityScore,
-                            "numberOfRatings": 1,
-                            "averageRating": communityScore,
-                            "lastUpdated": FieldValue.serverTimestamp(),
-                            "title": update.movie.title,
-                            "mediaType": update.movie.mediaType.rawValue,
-                            "tmdbId": update.movie.tmdbId as Any
-                        ], forDocument: ratingsRef)
-                    }
-                    return nil
-                } catch {
-                    if let errorPointer = errorPointer {
-                        errorPointer.pointee = error as NSError
-                    }
-                    return nil
-                }
-            }
+            try await applyCommunityRating(userId: currentUserId, movie: update.movie, newScore: update.newScore)
         } catch {
-            print("updateSingleMovieRatingWithMovie: Failed to update movie \(update.movie.title) (\(communityRatingId)): \(error)")
+            print("updateSingleMovieRatingWithMovie: Failed to apply rating for \(update.movie.title): \(error)")
+        }
+    }
+
+    private func applyCommunityRating(userId: String, movie: Movie, newScore: Double) async throws {
+        let communityRatingId = movie.tmdbId?.description ?? movie.id.uuidString
+        let ratingsRef = db.collection("ratings").document(communityRatingId)
+        let userRatingRef = ratingsRef.collection("users").document(userId)
+
+        try await db.runTransaction { transaction, errorPointer in
+            let ratingSnapshot: DocumentSnapshot
+            do {
+                ratingSnapshot = try transaction.getDocument(ratingsRef)
+            } catch {
+                if let errorPointer = errorPointer { errorPointer.pointee = error as NSError }
+                return nil
+            }
+
+            let userSnapshot: DocumentSnapshot
+            do {
+                userSnapshot = try transaction.getDocument(userRatingRef)
+            } catch {
+                if let errorPointer = errorPointer { errorPointer.pointee = error as NSError }
+                return nil
+            }
+
+            var total = ratingSnapshot.get("totalScore") as? Double ?? 0.0
+            var count = ratingSnapshot.get("numberOfRatings") as? Int ?? 0
+
+            if userSnapshot.exists {
+                let previous = userSnapshot.get("score") as? Double ?? 0.0
+                total -= previous
+            } else {
+                count += 1
+            }
+
+            total += newScore
+            let average = count > 0 ? total / Double(count) : 0.0
+
+            transaction.setData(["score": newScore], forDocument: userRatingRef)
+            transaction.setData([
+                "totalScore": total,
+                "numberOfRatings": count,
+                "averageRating": average,
+                "lastUpdated": FieldValue.serverTimestamp(),
+                "title": movie.title,
+                "mediaType": movie.mediaType.rawValue,
+                "tmdbId": movie.tmdbId as Any
+            ], forDocument: ratingsRef, merge: true)
+
+            return nil
         }
     }
     
