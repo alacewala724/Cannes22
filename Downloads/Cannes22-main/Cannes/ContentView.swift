@@ -335,6 +335,18 @@ final class MovieStore: ObservableObject {
         
         // Insert the movie with its original score first
         targetList.insert(movie, at: insertionIndex)
+
+        // Predict the final score for immediate UI feedback
+        if let band = bands[movie.sentiment] {
+            let sentimentCount = targetList.filter { $0.sentiment == movie.sentiment }.count
+            let n = Double(sentimentCount)
+            let centre = (n - 1) / 2
+            let step = band.half / max(centre, 1)
+            let rank = Double(min(finalRank - 1, sentimentCount - 1))
+            let offset = centre - rank
+            let predictedScore = band.mid + offset * step
+            targetList[insertionIndex].score = predictedScore
+        }
         
         // Update the appropriate list
         if movie.mediaType == .movie {
@@ -513,9 +525,12 @@ final class MovieStore: ObservableObject {
     }
 
     func recalculateScores(excluding excludedIds: Set<UUID> = []) async {
-        // Run recalculations sequentially so that callers can await completion
-        await recalculateScoresForList(&movies, excluding: excludedIds)
-        await recalculateScoresForList(&tvShows, excluding: excludedIds)
+        await MainActor.run {
+            Task {
+                await recalculateScoresForList(&movies, excluding: excludedIds)
+                await recalculateScoresForList(&tvShows, excluding: excludedIds)
+            }
+        }
     }
     
     private func recalculateScoresForAffectedMovies(deletedMovies: [Movie]) async {

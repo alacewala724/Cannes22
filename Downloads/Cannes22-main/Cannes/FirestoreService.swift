@@ -313,6 +313,16 @@ class FirestoreService: ObservableObject {
         print("updateMovieRanking: Starting for movie: \(movie.title) (ID: \(movie.id.uuidString)), state: \(state), score: \(movie.score)")
         
         // 1. Update user's personal ranking
+        let userDocRef = db.collection("users")
+            .document(userId)
+            .collection("rankings")
+            .document(movie.id.uuidString)
+
+        // Capture any existing ranking before updating
+        let oldSnapshot = try await userDocRef.getDocument()
+        let oldState = oldSnapshot.get("ratingState") as? String
+        let oldScore = oldSnapshot.get("score") as? Double ?? 0.0
+
         let movieData: [String: Any] = [
             "id": movie.id.uuidString,
             "title": movie.title,
@@ -326,13 +336,9 @@ class FirestoreService: ObservableObject {
             "ratingState": state.rawValue,
             "timestamp": FieldValue.serverTimestamp()
         ]
-        
-        try await db.collection("users")
-            .document(userId)
-            .collection("rankings")
-            .document(movie.id.uuidString)
-            .setData(movieData)
-        
+
+        try await userDocRef.setData(movieData)
+
         print("updateMovieRanking: Updated user ranking for movie: \(movie.title)")
         
         // 2. Update global stats based on state
@@ -347,20 +353,12 @@ class FirestoreService: ObservableObject {
             
         case .finalInsertion:
             print("updateMovieRanking: Processing finalInsertion for global stats")
-            // Check if this is a new rating or an update
-            let oldRanking = try await db.collection("users")
-                .document(userId)
-                .collection("rankings")
-                .document(movie.id.uuidString)
-                .getDocument()
-            
-            let oldState = oldRanking.get("ratingState") as? String
-            let oldScore = oldRanking.get("score") as? Double ?? 0.0
-            
+            // Determine if this is a brand new rating
+            let isNewRating = !oldSnapshot.exists || oldState == MovieRatingState.initialSentiment.rawValue
+
             print("updateMovieRanking: Movie score before update: \(movie.score)")
             print("updateMovieRanking: Old state: \(oldState ?? "nil"), old score: \(oldScore)")
-            
-            if oldState == nil || oldState == MovieRatingState.initialSentiment.rawValue {
+            if isNewRating {
                 // This is a new rating - add to community ratings with the final ranking-based score
                 print("updateMovieRanking: Adding new rating with final ranking-based score: \(movie.score)")
                 try await addNewRating(movieId: movie.id.uuidString, score: movie.score, movie: movie)
@@ -372,22 +370,7 @@ class FirestoreService: ObservableObject {
             
         case .scoreUpdate:
             print("updateMovieRanking: Processing scoreUpdate for global stats")
-            // Get the old score before updating
-            let oldRanking = try await db.collection("users")
-                .document(userId)
-                .collection("rankings")
-                .document(movie.id.uuidString)
-                .getDocument()
-            
-            let oldScore = oldRanking.get("score") as? Double ?? 0.0
-            
-            // Update personal ranking
-            try await db.collection("users")
-                .document(userId)
-                .collection("rankings")
-                .document(movie.id.uuidString)
-                .setData(movieData)
-            
+
             // Update community rating with the score change
             try await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
         }
