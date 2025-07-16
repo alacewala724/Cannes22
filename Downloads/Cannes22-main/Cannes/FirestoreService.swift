@@ -353,26 +353,50 @@ class FirestoreService: ObservableObject {
             
         case .finalInsertion:
             print("updateMovieRanking: Processing finalInsertion for global stats")
-            // Determine if this is a brand new rating
-            let isNewRating = !oldSnapshot.exists || oldState == MovieRatingState.initialSentiment.rawValue
+            
+            // For community ratings, check if this user has EVER rated this TMDB ID before
+            let isNewUserRating: Bool
+            if let tmdbId = movie.tmdbId {
+                // Check if user has any existing rankings for this TMDB ID
+                let existingRankings = try await db.collection("users")
+                    .document(userId)
+                    .collection("rankings")
+                    .whereField("tmdbId", isEqualTo: tmdbId)
+                    .whereField("ratingState", in: [MovieRatingState.finalInsertion.rawValue, MovieRatingState.scoreUpdate.rawValue])
+                    .getDocuments()
+                
+                // If there are other completed ratings for this TMDB ID, this is an update
+                // Filter out the current movie ID to avoid counting itself
+                let otherCompletedRatings = existingRankings.documents.filter { doc in
+                    doc.get("id") as? String != movie.id.uuidString
+                }
+                
+                isNewUserRating = otherCompletedRatings.isEmpty
+                print("updateMovieRanking: TMDB ID \(tmdbId) - found \(otherCompletedRatings.count) other completed ratings for this user, isNewUserRating: \(isNewUserRating)")
+            } else {
+                // No TMDB ID - treat as new rating
+                isNewUserRating = true
+                print("updateMovieRanking: No TMDB ID, treating as new user rating")
+            }
 
             print("updateMovieRanking: Movie score before update: \(movie.score)")
             print("updateMovieRanking: Old state: \(oldState ?? "nil"), old score: \(oldScore)")
-            if isNewRating {
+            
+            if isNewUserRating {
                 // This is a new rating - add to community ratings with the final ranking-based score
-                print("updateMovieRanking: Adding new rating with final ranking-based score: \(movie.score)")
+                print("updateMovieRanking: Adding new user rating with final ranking-based score: \(movie.score)")
                 try await addNewRating(movieId: movie.id.uuidString, score: movie.score, movie: movie)
             } else {
                 // This is an update to an existing rating
-                print("updateMovieRanking: Updating existing rating from \(oldScore) to \(movie.score)")
-                try await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
+                print("updateMovieRanking: Updating existing user rating from \(oldScore) to \(movie.score)")
+                await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
             }
             
         case .scoreUpdate:
             print("updateMovieRanking: Processing scoreUpdate for global stats")
 
             // Update community rating with the score change
-            try await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
+            await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
         }
         
         print("updateMovieRanking: Completed for movie: \(movie.title)")
@@ -389,40 +413,72 @@ class FirestoreService: ObservableObject {
         let communityScore = score
         print("addNewRating: Using final recalculated score for community rating: \(communityScore)")
         
+        // Validate score to prevent NaN or infinite values
+        guard !communityScore.isNaN && !communityScore.isInfinite else {
+            print("addNewRating: Invalid score value detected, skipping update")
+            return
+        }
+        
         let ratingsRef = db.collection("ratings").document(communityRatingId)
         
-        try await db.runTransaction { transaction, errorPointer in
+        // Use transaction to safely add to existing community rating
+        _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
             do {
                 let snapshot = try transaction.getDocument(ratingsRef)
-                print("addNewRating: Document exists: \(snapshot.exists)")
                 
                 if snapshot.exists {
-                    // Add this user's score to the existing total
+                    // Document exists - add this user's score to existing community rating
                     let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
                     let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
+                    
+                    // Validate existing data
+                    guard !currentTotal.isNaN && !currentTotal.isInfinite && currentCount >= 0 else {
+                        print("addNewRating: Invalid existing data detected, recreating document")
+                        transaction.setData([
+                            "totalScore": communityScore,
+                            "numberOfRatings": 1,
+                            "averageRating": communityScore,
+                            "lastUpdated": FieldValue.serverTimestamp(),
+                            "title": movie.title,
+                            "mediaType": movie.mediaType.rawValue,
+                            "tmdbId": movie.tmdbId as Any
+                        ], forDocument: ratingsRef)
+                        return nil
+                    }
+                    
+                    // Add this user's score to the community total
                     let newTotal = currentTotal + communityScore
                     let newCount = currentCount + 1
                     let newAverage = newTotal / Double(newCount)
                     
-                    print("addNewRating: Adding new rating - currentTotal: \(currentTotal), currentCount: \(currentCount)")
-                    print("addNewRating: Adding final score: \(communityScore) to total: \(currentTotal) = \(newTotal)")
-                    print("addNewRating: New values - newTotal: \(newTotal), newCount: \(newCount), newAverage: \(newAverage)")
+                    print("addNewRating: Adding to existing community rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
+                    print("addNewRating: Adding score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage)")
+                    
+                    // Validate calculated values
+                    guard !newTotal.isNaN && !newTotal.isInfinite && !newAverage.isNaN && !newAverage.isInfinite else {
+                        print("addNewRating: Calculated values are invalid, recreating document")
+                        transaction.setData([
+                            "totalScore": communityScore,
+                            "numberOfRatings": 1,
+                            "averageRating": communityScore,
+                            "lastUpdated": FieldValue.serverTimestamp(),
+                            "title": movie.title,
+                            "mediaType": movie.mediaType.rawValue,
+                            "tmdbId": movie.tmdbId as Any
+                        ], forDocument: ratingsRef)
+                        return nil
+                    }
                     
                     transaction.updateData([
                         "totalScore": newTotal,
                         "numberOfRatings": newCount,
                         "averageRating": newAverage,
-                        "lastUpdated": FieldValue.serverTimestamp(),
-                        "title": movie.title,
-                        "mediaType": movie.mediaType.rawValue,
-                        "tmdbId": movie.tmdbId as Any
+                        "lastUpdated": FieldValue.serverTimestamp()
                     ], forDocument: ratingsRef)
-                    
-                    print("addNewRating: Successfully updated existing document")
                 } else {
-                    // Create new document for this movie
-                    print("addNewRating: Creating new document for movieId: \(communityRatingId) with final score: \(communityScore)")
-                    let documentData: [String: Any] = [
+                    // Document doesn't exist - create new community rating with this user's score
+                    print("addNewRating: Creating new community rating document")
+                    transaction.setData([
                         "totalScore": communityScore,
                         "numberOfRatings": 1,
                         "averageRating": communityScore,
@@ -430,20 +486,18 @@ class FirestoreService: ObservableObject {
                         "title": movie.title,
                         "mediaType": movie.mediaType.rawValue,
                         "tmdbId": movie.tmdbId as Any
-                    ]
-                    transaction.setData(documentData, forDocument: ratingsRef)
-                    
-                    print("addNewRating: Successfully created new document with final score: \(communityScore)")
+                    ], forDocument: ratingsRef)
                 }
                 return nil
             } catch {
-                print("addNewRating: Error in transaction: \(error)")
                 if let errorPointer = errorPointer {
                     errorPointer.pointee = error as NSError
                 }
                 return nil
             }
         }
+        
+        print("addNewRating: Successfully updated community rating")
     }
     
     private func updateExistingRating(movieId: String, oldScore: Double, newScore: Double, movie: Movie) async throws {
@@ -676,6 +730,12 @@ extension FirestoreService {
         let communityScore = update.newScore
         print("updateSingleMovieRatingWithMovie: Using final recalculated score for community rating: \(communityScore)")
         
+        // Validate scores to prevent NaN or infinite values
+        guard !communityScore.isNaN && !communityScore.isInfinite && !update.oldScore.isNaN && !update.oldScore.isInfinite else {
+            print("updateSingleMovieRatingWithMovie: Invalid score values detected, skipping update")
+            return
+        }
+        
         let ratingsRef = db.collection("ratings").document(communityRatingId)
         
         do {
@@ -686,6 +746,21 @@ extension FirestoreService {
                     if snapshot.exists {
                         let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
                         let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
+                        
+                        // Validate existing data
+                        guard !currentTotal.isNaN && !currentTotal.isInfinite && currentCount >= 0 else {
+                            print("updateSingleMovieRatingWithMovie: Invalid existing data detected, recreating document")
+                            transaction.setData([
+                                "totalScore": communityScore,
+                                "numberOfRatings": 1,
+                                "averageRating": communityScore,
+                                "lastUpdated": FieldValue.serverTimestamp(),
+                                "title": update.movie.title,
+                                "mediaType": update.movie.mediaType.rawValue,
+                                "tmdbId": update.movie.tmdbId as Any
+                            ], forDocument: ratingsRef)
+                            return nil
+                        }
                         
                         if update.isNewRating {
                             // New user rating - add to total
@@ -709,6 +784,21 @@ extension FirestoreService {
                             
                             print("updateSingleMovieRatingWithMovie: Updating existing rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
                             print("updateSingleMovieRatingWithMovie: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage)")
+                            
+                            // Validate calculated values
+                            guard !newTotal.isNaN && !newTotal.isInfinite && !newAverage.isNaN && !newAverage.isInfinite else {
+                                print("updateSingleMovieRatingWithMovie: Calculated values are invalid, recreating document")
+                                transaction.setData([
+                                    "totalScore": communityScore,
+                                    "numberOfRatings": 1,
+                                    "averageRating": communityScore,
+                                    "lastUpdated": FieldValue.serverTimestamp(),
+                                    "title": update.movie.title,
+                                    "mediaType": update.movie.mediaType.rawValue,
+                                    "tmdbId": update.movie.tmdbId as Any
+                                ], forDocument: ratingsRef)
+                                return nil
+                            }
                             
                             transaction.updateData([
                                 "totalScore": newTotal,
