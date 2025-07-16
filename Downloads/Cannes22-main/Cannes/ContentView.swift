@@ -93,35 +93,55 @@ enum AppModels {
 }
 
 // MARK: - Movie Model
+enum MediaType: String, Codable {
+    case movie
+    case tv
+}
+
 struct Movie: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     let title: String
-    var sentiment: MovieSentiment
+    let sentiment: MovieSentiment
     let tmdbId: Int?
     let mediaType: AppModels.MediaType
     let genres: [AppModels.Genre]
     var score: Double
+    var originalScore: Double // Track the original user-assigned score
     var comparisonsCount: Int
-    var confidenceLevel: Int
-
-    init(id: UUID = UUID(), 
-         title: String, 
-         sentiment: MovieSentiment, 
-         tmdbId: Int? = nil, 
-         mediaType: AppModels.MediaType = .movie, 
-         genres: [AppModels.Genre] = [],
-         score: Double? = nil,
-         comparisonsCount: Int = 0,
-         confidenceLevel: Int = 1) {
+    
+    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = [], score: Double, comparisonsCount: Int = 0) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
         self.tmdbId = tmdbId
         self.mediaType = mediaType
         self.genres = genres
-        self.score = score ?? sentiment.midpoint
+        self.score = score
+        self.originalScore = score // Initialize original score to the same value
         self.comparisonsCount = comparisonsCount
-        self.confidenceLevel = confidenceLevel
+    }
+    
+    // MARK: - Codable
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case sentiment
+        case tmdbId
+        case mediaType
+        case genres
+        case score
+        case originalScore
+        case comparisonsCount
+    }
+    
+    // MARK: - Equatable
+    static func == (lhs: Movie, rhs: Movie) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    // MARK: - Hashable
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 
     var displayScore: Double { score.rounded(toPlaces: 1) }
@@ -132,12 +152,28 @@ struct MovieComparison: Codable {
     let loserId: UUID
 }
 
+// MARK: - Movie Rating State
+enum MovieRatingState: String, Codable {
+    case initialSentiment    // When user first selects a sentiment
+    case comparing          // During the comparison process
+    case finalInsertion     // When movie is finally inserted into the list
+    case scoreUpdate        // When scores are recalculated after comparisons
+}
+
+// MARK: - Local State Management
+enum LocalMovieState {
+    case comparing
+    case final
+}
+
 // MARK: - Store
 final class MovieStore: ObservableObject {
-    private let firestoreService = FirestoreService()
+    let firestoreService = FirestoreService()
     @Published var movies: [Movie] = []
     @Published var tvShows: [Movie] = []
     @Published var selectedMediaType: AppModels.MediaType = .movie
+    
+    private var isDeleting = false // Flag to prevent reloading during deletion
     
     private struct Band {
         let min: Double
@@ -172,14 +208,105 @@ final class MovieStore: ObservableObject {
     
     private func loadMovies() async {
         guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
+        
         do {
-            let rankings = try await firestoreService.getUserRankings(userId: userId)
+            let loadedMovies = try await firestoreService.getUserRankings(userId: userId)
+            
             await MainActor.run {
-                self.movies = rankings.filter { $0.mediaType == .movie }
-                self.tvShows = rankings.filter { $0.mediaType == .tv }
+                // Separate movies and TV shows
+                movies = loadedMovies.filter { $0.mediaType == .movie }
+                tvShows = loadedMovies.filter { $0.mediaType == .tv }
+                
+                // Clean up duplicates
+                cleanupDuplicateMovies()
+                
+                // Recalculate scores after loading
+                Task {
+                    await recalculateScoresOnLoad()
+                }
             }
         } catch {
             print("Error loading movies: \(error)")
+        }
+    }
+    
+    private func cleanupDuplicateMovies() {
+        // Remove duplicates by TMDB ID, keeping the one with the highest score
+        var uniqueMovies: [Movie] = []
+        var seenTMDBIds: Set<Int> = []
+        
+        for movie in movies {
+            if let tmdbId = movie.tmdbId {
+                if !seenTMDBIds.contains(tmdbId) {
+                    seenTMDBIds.insert(tmdbId)
+                    uniqueMovies.append(movie)
+                } else {
+                    // Found duplicate - keep the one with higher score
+                    if let existingIndex = uniqueMovies.firstIndex(where: { $0.tmdbId == tmdbId }) {
+                        if movie.score > uniqueMovies[existingIndex].score {
+                            uniqueMovies[existingIndex] = movie
+                        }
+                    }
+                }
+            } else {
+                // No TMDB ID, keep it
+                uniqueMovies.append(movie)
+            }
+        }
+        
+        movies = uniqueMovies
+        
+        // Do the same for TV shows
+        var uniqueTVShows: [Movie] = []
+        var seenTVTMDBIds: Set<Int> = []
+        
+        for show in tvShows {
+            if let tmdbId = show.tmdbId {
+                if !seenTVTMDBIds.contains(tmdbId) {
+                    seenTVTMDBIds.insert(tmdbId)
+                    uniqueTVShows.append(show)
+                } else {
+                    // Found duplicate - keep the one with higher score
+                    if let existingIndex = uniqueTVShows.firstIndex(where: { $0.tmdbId == tmdbId }) {
+                        if show.score > uniqueTVShows[existingIndex].score {
+                            uniqueTVShows[existingIndex] = show
+                        }
+                    }
+                }
+            } else {
+                // No TMDB ID, keep it
+                uniqueTVShows.append(show)
+            }
+        }
+        
+        tvShows = uniqueTVShows
+    }
+    
+    private func recalculateScoresOnLoad() async {
+        print("recalculateScoresOnLoad: Starting score recalculation")
+        
+        // Log scores before recalculation
+        print("recalculateScoresOnLoad: Movies before recalculation:")
+        for movie in movies {
+            print("  - \(movie.title): \(movie.score)")
+        }
+        print("recalculateScoresOnLoad: TV Shows before recalculation:")
+        for movie in tvShows {
+            print("  - \(movie.title): \(movie.score)")
+        }
+        
+        // Recalculate scores for both movies and TV shows
+        await recalculateScoresForList(&movies)
+        await recalculateScoresForList(&tvShows)
+        
+        // Log scores after recalculation
+        print("recalculateScoresOnLoad: Movies after recalculation:")
+        for movie in movies {
+            print("  - \(movie.title): \(movie.score)")
+        }
+        print("recalculateScoresOnLoad: TV Shows after recalculation:")
+        for movie in tvShows {
+            print("  - \(movie.title): \(movie.score)")
         }
     }
     
@@ -206,6 +333,7 @@ final class MovieStore: ObservableObject {
         let sectionLength = sectionEnd - sectionStart
         let insertionIndex = sectionStart + min(finalRank - 1, sectionLength)
         
+        // Insert the movie with its original score first
         targetList.insert(movie, at: insertionIndex)
         
         // Update the appropriate list
@@ -215,12 +343,28 @@ final class MovieStore: ObservableObject {
             tvShows = targetList
         }
         
-        recalculateScores()
-        
-        // Save to Firestore
+        // First recalculate scores to get the final score
         Task {
             do {
-                try await firestoreService.updateMovieRanking(userId: userId, movie: movie)
+                print("insertNewMovie: Starting for movie: \(movie.title) with initial score: \(movie.score)")
+                
+                // Recalculate scores first to get the final score
+                await recalculateScores()
+                
+                // Get the movie with the final recalculated score
+                let updatedMovie = movie.mediaType == .movie ? movies : tvShows
+                let finalMovie = updatedMovie.first { $0.id == movie.id } ?? movie
+                
+                print("insertNewMovie: Final movie score after recalculation: \(finalMovie.score)")
+                
+                // Then save to Firestore with the final recalculated score
+                try await firestoreService.updateMovieRanking(
+                    userId: userId, 
+                    movie: finalMovie,
+                    state: .finalInsertion
+                )
+                
+                print("insertNewMovie: Completed saving movie: \(finalMovie.title) with score: \(finalMovie.score)")
             } catch {
                 print("Error saving movie: \(error)")
             }
@@ -230,70 +374,208 @@ final class MovieStore: ObservableObject {
     func deleteMovies(at offsets: IndexSet) {
         guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
         
-        withAnimation {
-            var targetList = selectedMediaType == .movie ? movies : tvShows
+        // Convert IndexSet to array for easier handling
+        let indicesToDelete = Array(offsets)
+        let targetList = selectedMediaType == .movie ? movies : tvShows
+        let moviesToDelete = indicesToDelete.map { targetList[$0] }
+        
+        // Create a task to handle all deletions
+        Task {
+            isDeleting = true
             
-            for index in offsets {
-                let movie = targetList[index]
-                Task {
-                    do {
-                        try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
-                    } catch {
-                        print("Error deleting movie: \(error)")
-                    }
+            var successfulDeletions: [Int] = []
+            var failedDeletions: [Int] = []
+            
+            // Try to delete each movie
+            for (index, movie) in zip(indicesToDelete, moviesToDelete) {
+                do {
+                    try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
+                    successfulDeletions.append(index)
+                } catch {
+                    print("Error deleting movie \(movie.title): \(error)")
+                    failedDeletions.append(index)
                 }
             }
-            targetList.remove(atOffsets: offsets)
             
-            // Update the appropriate list
-            if selectedMediaType == .movie {
-                movies = targetList
-            } else {
-                tvShows = targetList
-            }
-            
-            // Recalculate scores for both lists
-            recalculateScoresForList(&movies)
-            recalculateScoresForList(&tvShows)
-        }
-    }
-
-    private func recalculateScoresForList(_ list: inout [Movie]) {
-        for sentiment in MovieSentiment.allCasesOrdered {
-            // 1. Slice the array in *display order* for this sentiment
-            let idxs = list.indices.filter { list[$0].sentiment == sentiment }
-            guard let band = bands[sentiment], !idxs.isEmpty else { continue }
-
-            let n       = Double(idxs.count)          // #movies in band
-            let centre  = (n - 1) / 2                 // may be .5 for even counts
-            let step    = band.half / max(centre, 1)  // never 0
-
-            for (rank, arrayIndex) in idxs.enumerated() {
-                let offset = centre - Double(rank)    // Changed: now rank 0 gives +centre
-                let newScore = band.mid + offset * step
-                list[arrayIndex].score = newScore
-                
-                // Create a copy of the movie to avoid capturing the inout parameter
-                let movieToUpdate = list[arrayIndex]
-                
-                // Save the new score to Firestore
-                if let userId = AuthenticationService.shared.currentUser?.uid {
-                    Task {
-                        do {
-                            try await firestoreService.updateMovieRanking(userId: userId, movie: movieToUpdate)
-                        } catch {
-                            print("Error updating score: \(error)")
+            // Update UI on main thread immediately
+            await MainActor.run {
+                withAnimation {
+                    var updatedList = self.selectedMediaType == .movie ? self.movies : self.tvShows
+                    
+                    // Remove successfully deleted movies
+                    for index in successfulDeletions.sorted(by: >) {
+                        if index < updatedList.count {
+                            updatedList.remove(at: index)
                         }
                     }
+                    
+                    // Update the appropriate list
+                    if self.selectedMediaType == .movie {
+                        self.movies = updatedList
+                    } else {
+                        self.tvShows = updatedList
+                    }
+                    
+                    // Show error for failed deletions
+                    if !failedDeletions.isEmpty {
+                        print("Failed to delete \(failedDeletions.count) movies")
+                    }
                 }
+                
+                // Only recalculate scores for the affected sentiment section
+                if !successfulDeletions.isEmpty {
+                    Task {
+                        await self.recalculateScoresForAffectedMovies(deletedMovies: moviesToDelete)
+                    }
+                }
+                
+                // Reset deletion flag
+                self.isDeleting = false
             }
         }
     }
 
-    func recalculateScores() {
-        recalculateScoresForList(&movies)
-        recalculateScoresForList(&tvShows)
-        objectWillChange.send()
+    private func recalculateScoresForList(_ list: inout [Movie]) async {
+        print("recalculateScoresForList: Starting recalculation for list with \(list.count) movies")
+        
+        // Create a local copy of the list to work with
+        let localList = list
+        
+        var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
+        var updatedList = localList
+        
+        // Calculate new scores synchronously
+        for sentiment in MovieSentiment.allCasesOrdered {
+            let idxs = updatedList.indices.filter { updatedList[$0].sentiment == sentiment }
+            guard let band = bands[sentiment], !idxs.isEmpty else { continue }
+
+            print("recalculateScoresForList: Processing sentiment \(sentiment) with \(idxs.count) movies")
+            print("recalculateScoresForList: Band for \(sentiment): min=\(band.min), max=\(band.max), mid=\(band.mid), half=\(band.half)")
+
+            let n = Double(idxs.count)
+            let centre = (n - 1) / 2
+            let step = band.half / max(centre, 1)
+            
+            print("recalculateScoresForList: n=\(n), centre=\(centre), step=\(step)")
+
+            for (rank, arrayIndex) in idxs.enumerated() {
+                let offset = centre - Double(rank)
+                let movie = updatedList[arrayIndex]
+                let oldScore = movie.score // Use the actual loaded score
+                let newScore = band.mid + offset * step
+                
+                print("recalculateScoresForList: \(movie.title) - rank=\(rank), offset=\(offset), oldScore=\(oldScore), newScore=\(newScore)")
+                
+                personalUpdates.append((
+                    movie: movie,
+                    newScore: newScore,
+                    oldScore: oldScore
+                ))
+                
+                updatedList[arrayIndex].score = newScore
+            }
+        }
+        
+        // Update only personal rankings, not community ratings
+        if !personalUpdates.isEmpty {
+            print("recalculateScoresForList: Updating \(personalUpdates.count) personal rankings")
+            do {
+                // Update personal rankings only
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    try await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                }
+                
+                // Update the list on the main thread
+                await MainActor.run {
+                    list = updatedList
+                }
+            } catch {
+                print("Error updating personal rankings: \(error)")
+            }
+        } else {
+            print("recalculateScoresForList: No personal rankings to update")
+        }
+    }
+
+    func recalculateScores() async {
+        await MainActor.run {
+            Task {
+                await recalculateScoresForList(&movies)
+                await recalculateScoresForList(&tvShows)
+            }
+        }
+    }
+    
+    private func recalculateScoresForAffectedMovies(deletedMovies: [Movie]) async {
+        // Get the sentiment sections that were affected by deletions
+        let affectedSentiments = Set(deletedMovies.map { $0.sentiment })
+        
+        // Only recalculate movies in the affected sentiment sections
+        for sentiment in affectedSentiments {
+            await recalculateScoresForSentiment(sentiment)
+        }
+    }
+    
+    private func recalculateScoresForSentiment(_ sentiment: MovieSentiment) async {
+        // Get the appropriate list based on media type
+        let targetList = selectedMediaType == .movie ? movies : tvShows
+        let moviesInSentiment = targetList.filter { $0.sentiment == sentiment }
+        
+        guard !moviesInSentiment.isEmpty, let band = bands[sentiment] else { return }
+        
+        // Calculate new scores for this sentiment section
+        let n = Double(moviesInSentiment.count)
+        let centre = (n - 1) / 2
+        let step = band.half / max(centre, 1)
+        
+        var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
+        var updatedMovies: [Movie] = []
+        
+        for (rank, movie) in moviesInSentiment.enumerated() {
+            let offset = centre - Double(rank)
+            let newScore = band.mid + offset * step
+            
+            personalUpdates.append((
+                movie: movie,
+                newScore: newScore,
+                oldScore: movie.score
+            ))
+            
+            var updatedMovie = movie
+            updatedMovie.score = newScore
+            updatedMovies.append(updatedMovie)
+        }
+        
+        // Update only personal rankings, not community ratings
+        if !personalUpdates.isEmpty {
+            do {
+                // Update personal rankings only
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    try await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                }
+                
+                // Update the UI on main thread
+                await MainActor.run {
+                    var updatedList = self.selectedMediaType == .movie ? self.movies : self.tvShows
+                    
+                    // Update the scores for affected movies
+                    for updatedMovie in updatedMovies {
+                        if let index = updatedList.firstIndex(where: { $0.id == updatedMovie.id }) {
+                            updatedList[index] = updatedMovie
+                        }
+                    }
+                    
+                    // Update the appropriate list
+                    if self.selectedMediaType == .movie {
+                        self.movies = updatedList
+                    } else {
+                        self.tvShows = updatedList
+                    }
+                }
+            } catch {
+                print("Error updating personal rankings for sentiment \(sentiment): \(error)")
+            }
+        }
     }
 
     func recordComparison(winnerID: UUID, loserID: UUID) {
@@ -307,12 +589,8 @@ final class MovieStore: ObservableObject {
         // Only allow comparisons within the same sentiment
         guard targetList[winIdx].sentiment == targetList[loseIdx].sentiment else { return }
 
-        if winIdx > loseIdx { targetList.swapAt(winIdx, loseIdx) }
-
         targetList[winIdx].comparisonsCount += 1
-        targetList[winIdx].confidenceLevel  += 1
         targetList[loseIdx].comparisonsCount += 1
-        targetList[loseIdx].confidenceLevel  += 1
 
         // Update the appropriate list
         if selectedMediaType == .movie {
@@ -320,8 +598,10 @@ final class MovieStore: ObservableObject {
         } else {
             tvShows = targetList
         }
+    }
 
-        recalculateScores()
+    func getMovies() -> [Movie] {
+        return selectedMediaType == .movie ? movies : tvShows
     }
 }
 
@@ -424,7 +704,7 @@ struct AddMovieView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .onChange(of: searchType) { _ in
+                .onChange(of: searchType) { oldValue, newValue in
                     searchResults = []
                     if !searchText.isEmpty {
                         Task {
@@ -531,9 +811,8 @@ struct AddMovieView: View {
                                             tmdbId: tmdbId,
                                             mediaType: selectedMovie?.mediaType ?? .movie,
                                             genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
-                                            score: details?.voteAverage,
-                                            comparisonsCount: 0,
-                                            confidenceLevel: 1
+                                            score: self.sentiment.midpoint,
+                                            comparisonsCount: 0
                                         )
                                     }
                                 } else {
@@ -542,7 +821,8 @@ struct AddMovieView: View {
                                         newMovie = Movie(
                                             title: selectedMovie?.displayTitle ?? searchText,
                                             sentiment: self.sentiment,
-                                            mediaType: selectedMovie?.mediaType ?? .movie
+                                            mediaType: selectedMovie?.mediaType ?? .movie,
+                                            score: self.sentiment.midpoint
                                         )
                                     }
                                 }
@@ -679,6 +959,7 @@ struct ComparisonView: View {
                 Button(action: {
                     let generator = UIImpactFeedbackGenerator(style: .medium)
                     generator.impactOccurred()
+                    // You picked existing movie as better → it should be ranked higher → go left
                     store.recordComparison(winnerID: sortedMovies[mid].id, loserID: newMovie.id)
                     left = mid + 1
                     updateMidOrFinish()
@@ -696,6 +977,7 @@ struct ComparisonView: View {
                 Button(action: {
                     let generator = UIImpactFeedbackGenerator(style: .medium)
                     generator.impactOccurred()
+                    // You picked new movie as better → it should be ranked higher → go left
                     store.recordComparison(winnerID: newMovie.id, loserID: sortedMovies[mid].id)
                     right = mid - 1
                     updateMidOrFinish()
@@ -715,8 +997,40 @@ struct ComparisonView: View {
             Button("Too close to call") {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
+                
+                // Insert the movie into the UI first
                 store.insertNewMovie(newMovie, at: mid + 2)
-                onComplete()
+                
+                // Use the same sequence as the comparison completion
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    Task {
+                        do {
+                            // First recalculate scores
+                            await store.recalculateScores()
+                            
+                            // Get the updated movie with the recalculated score
+                            let updatedMovie = store.getMovies().first { $0.id == newMovie.id } ?? newMovie
+                            
+                            // Then save to Firebase with the final recalculated score
+                            try await store.firestoreService.updateMovieRanking(
+                                userId: userId,
+                                movie: updatedMovie,
+                                state: .finalInsertion
+                            )
+                            
+                            await MainActor.run {
+                                onComplete()
+                            }
+                        } catch {
+                            print("Error saving final movie state: \(error)")
+                            await MainActor.run {
+                                onComplete()
+                            }
+                        }
+                    }
+                } else {
+                    onComplete()
+                }
             }
             .font(.headline)
             .foregroundColor(.gray)
@@ -727,6 +1041,27 @@ struct ComparisonView: View {
     private func updateMidOrFinish() {
         if left > right {
             searching = false
+            // Only save to Firebase and recalculate scores when comparison is complete
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                Task {
+                    do {
+                        // First recalculate scores
+                        await store.recalculateScores()
+                        
+                        // Get the updated movie with the recalculated score
+                        let updatedMovie = store.getMovies().first { $0.id == newMovie.id } ?? newMovie
+                        
+                        // Then save to Firebase with the final recalculated score
+                        try await store.firestoreService.updateMovieRanking(
+                            userId: userId,
+                            movie: updatedMovie,
+                            state: .finalInsertion
+                        )
+                    } catch {
+                        print("Error saving final movie state: \(error)")
+                    }
+                }
+            }
         } else {
             mid = (left + right) / 2
         }
@@ -744,6 +1079,7 @@ struct TMDBMovieDetailView: View {
     @State private var seasons: [TMDBSeason] = []
     @State private var selectedSeason: TMDBSeason?
     @State private var episodes: [TMDBEpisode] = []
+    @State private var averageRating: Double?
     
     private let tmdbService = TMDBService()
     
@@ -774,6 +1110,8 @@ struct TMDBMovieDetailView: View {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
             }
+            print("TMDBMovieDetailView: onAppear - fetching average rating for movie: \(movie.title) (ID: \(movie.id.uuidString))")
+            fetchAverageRating(for: movie.id.uuidString)
         }
         .onChange(of: selectedSeason) { (oldValue: TMDBSeason?, newValue: TMDBSeason?) in
             if let season = newValue {
@@ -917,20 +1255,53 @@ struct TMDBMovieDetailView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                // Your Rating
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Your Rating")
-                        .font(.headline)
-                        .padding(.top, 8)
-                    HStack {
-                        Text(movie.sentiment.rawValue)
+                // Display ratings side by side
+                HStack(spacing: 20) {
+                    // Personal Rating
+                    VStack(spacing: 4) {
+                        Text("Your Rating")
                             .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(movie.sentiment.color.opacity(0.15))
-                            .cornerRadius(8)
+                            .foregroundColor(.secondary)
+                        Text(String(format: "%.1f", movie.displayScore))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(movie.sentiment.color)
+                            .frame(width: 60, height: 60)
+                            .background(
+                                Circle()
+                                    .stroke(movie.sentiment.color, lineWidth: 2)
+                            )
+                    }
+                    
+                    // Community Rating
+                    VStack(spacing: 4) {
+                        Text("Community")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        if let avg = averageRating {
+                            Text(String(format: "%.1f", avg))
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.accentColor)
+                                .frame(width: 60, height: 60)
+                                .background(
+                                    Circle()
+                                        .stroke(Color.accentColor, lineWidth: 2)
+                                )
+                        } else {
+                            Text("—")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.secondary)
+                                .frame(width: 60, height: 60)
+                                .background(
+                                    Circle()
+                                        .stroke(Color.secondary, lineWidth: 2)
+                                )
+                        }
                     }
                 }
+                .padding(.top, 8)
             }
             .padding(.horizontal)
         }
@@ -1105,6 +1476,92 @@ struct TMDBMovieDetailView: View {
         }
         return runtime // Return original string if parsing fails
     }
+
+    private func fetchAverageRating(for movieId: String) {
+        print("fetchAverageRating: Starting fetch for movieId: \(movieId)")
+        print("fetchAverageRating: Movie title: \(movie.title), TMDB ID: \(movie.tmdbId?.description ?? "nil")")
+        
+        // Use TMDB ID for community ratings, fallback to UUID if no TMDB ID
+        let communityRatingId = movie.tmdbId?.description ?? movieId
+        print("fetchAverageRating: Using community rating ID: \(communityRatingId) (TMDB ID: \(movie.tmdbId?.description ?? "nil"))")
+        
+        let docRef = Firestore.firestore().collection("ratings").document(communityRatingId)
+        docRef.getDocument { snapshot, error in
+            if let error = error {
+                print("fetchAverageRating: Error fetching document for movieId \(communityRatingId): \(error)")
+                return
+            }
+            
+            if let snapshot = snapshot {
+                print("fetchAverageRating: Document exists: \(snapshot.exists)")
+                if snapshot.exists {
+                    if let data = snapshot.data() {
+                        print("fetchAverageRating: Document data: \(data)")
+                        
+                        // Check if this document is for the right movie
+                        if let docTitle = data["title"] as? String {
+                            print("fetchAverageRating: Document title: '\(docTitle)' vs movie title: '\(movie.title)'")
+                            if docTitle != movie.title {
+                                print("fetchAverageRating: WARNING - Document title doesn't match movie title!")
+                            }
+                        }
+                        
+                        if let avg = data["averageRating"] as? Double {
+                            print("fetchAverageRating: Found averageRating: \(avg)")
+                            self.averageRating = avg
+                        } else {
+                            print("fetchAverageRating: No averageRating found in data")
+                            if let totalScore = data["totalScore"] as? Double,
+                               let numberOfRatings = data["numberOfRatings"] as? Int {
+                                let calculatedAvg = totalScore / Double(numberOfRatings)
+                                print("fetchAverageRating: Calculated average from totalScore (\(totalScore)) and numberOfRatings (\(numberOfRatings)): \(calculatedAvg)")
+                                self.averageRating = calculatedAvg
+                            } else {
+                                print("fetchAverageRating: No totalScore or numberOfRatings found")
+                            }
+                        }
+                    } else {
+                        print("fetchAverageRating: Document exists but no data")
+                    }
+                } else {
+                    print("fetchAverageRating: Document does not exist for movieId: \(communityRatingId)")
+                    
+                    // Try to find any documents that might be for this movie
+                    print("fetchAverageRating: Searching for any documents with this movie title...")
+                    Firestore.firestore().collection("ratings")
+                        .whereField("title", isEqualTo: movie.title)
+                        .getDocuments { searchSnapshot, searchError in
+                            if let searchError = searchError {
+                                print("fetchAverageRating: Error searching for documents: \(searchError)")
+                                return
+                            }
+                            
+                            if let searchSnapshot = searchSnapshot {
+                                print("fetchAverageRating: Found \(searchSnapshot.documents.count) documents with title '\(movie.title)'")
+                                for doc in searchSnapshot.documents {
+                                    print("fetchAverageRating: Document ID: \(doc.documentID), data: \(doc.data())")
+                                }
+                            }
+                        }
+                }
+            } else {
+                print("fetchAverageRating: No snapshot returned")
+            }
+        }
+        
+        // Also check the personal rating for comparison
+        if let userId = AuthenticationService.shared.currentUser?.uid {
+            let personalRef = Firestore.firestore().collection("users").document(userId).collection("rankings").document(movieId)
+            personalRef.getDocument { snapshot, error in
+                if let data = snapshot?.data(),
+                   let personalScore = data["score"] as? Double {
+                    print("fetchAverageRating: Personal rating for this movie: \(personalScore)")
+                } else {
+                    print("fetchAverageRating: No personal rating found for this movie")
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Content View
@@ -1157,10 +1614,10 @@ struct ContentView: View {
                     .padding()
                     
                     List {
-                        ForEach(filteredMovies) { movie in
+                        ForEach(Array(filteredMovies.enumerated()), id: \.element.id) { (index, movie) in
                             MovieRow(
                                 movie: movie,
-                                position: filteredMovies.firstIndex(of: movie)! + 1,
+                                position: index + 1,
                                 accessory: accessory(for: movie),
                                 onTap: {
                                     if editMode.isEditing == false {
@@ -1199,6 +1656,16 @@ struct ContentView: View {
                             try? authService.signOut()
                         }) {
                             Text("Sign Out")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: {
+                            Task {
+                                try? await store.firestoreService.completeCommunityRatingReset()
+                            }
+                        }) {
+                            Text("Reset")
+                                .foregroundColor(.red)
                         }
                     }
                 }
@@ -1392,3 +1859,17 @@ struct ContentView_Previews: PreviewProvider {
     }
 }
 #endif
+
+// MARK: - Comparison Manager
+class ComparisonManager {
+    static let shared = ComparisonManager()
+    
+    func saveComparisonState(movie: Movie) {
+        // Save to UserDefaults or local database
+    }
+    
+    func loadIncompleteComparisons() -> [Movie] {
+        // Load any movies that were in the middle of comparison
+        return [] // Return empty array for now
+    }
+}
