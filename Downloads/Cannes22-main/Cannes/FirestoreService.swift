@@ -356,7 +356,7 @@ class FirestoreService: ObservableObject {
             if let currentUserId = Auth.auth().currentUser?.uid {
                 try await applyCommunityRating(userId: currentUserId, movie: movie, newScore: movie.score)
             }
-        }
+
         
         print("updateMovieRanking: Completed for movie: \(movie.title)")
     }
