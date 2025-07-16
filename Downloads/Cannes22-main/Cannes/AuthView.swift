@@ -99,7 +99,7 @@ struct AuthView: View {
                     try await authService.signUp(email: email, password: password)
                 }
                 showVerificationAlert = true
-                try await authService.signOut()
+                try authService.signOut()
             } else {
                 try await withTimeout(seconds: 10) {
                     try await authService.signIn(email: email, password: password)
