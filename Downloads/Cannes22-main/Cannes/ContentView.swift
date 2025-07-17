@@ -3,6 +3,7 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 import Combine
+import Network
 
 // MARK: - UI Constants
 enum UI {
@@ -206,6 +207,17 @@ final class MovieStore: ObservableObject {
     @Published var globalTVRatings: [GlobalRating] = []
     @Published var selectedMediaType: AppModels.MediaType = .movie
     
+    // Error handling
+    @Published var errorMessage: String?
+    @Published var showError = false
+    
+    // Offline state
+    @Published var isOffline = false
+    @Published var isLoadingFromCache = false
+    @Published var lastSyncDate: Date?
+    
+    private let cacheManager = CacheManager.shared
+    private let networkMonitor = NetworkMonitor.shared
     private var isDeleting = false // Flag to prevent reloading during deletion
     private var isRecalculating = false // Flag to prevent concurrent recalculations
     private var isLoading = false // Flag to prevent concurrent loading
@@ -234,14 +246,83 @@ final class MovieStore: ObservableObject {
                 } else {
                     self?.movies = []
                     self?.tvShows = []
+                    self?.globalMovieRatings = []
+                    self?.globalTVRatings = []
                 }
             }
             .store(in: &cancellables)
+        
+        // Listen for network changes
+        networkMonitor.$isConnected
+            .sink { [weak self] isConnected in
+                self?.isOffline = !isConnected
+                
+                if isConnected {
+                    // When coming back online, sync if we have cached data
+                    self?.syncWhenBackOnline()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Initialize offline state
+        isOffline = !networkMonitor.isConnected
     }
     
     private var cancellables = Set<AnyCancellable>()
     
-    private func loadMovies() async {
+    private func syncWhenBackOnline() {
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
+        
+        // Check if we have cached data that might be stale
+        if movies.isEmpty && tvShows.isEmpty {
+            // No data loaded, try loading from server
+            Task {
+                await loadMovies()
+            }
+        } else {
+            // We have data, but it might be from cache - refresh in background
+            Task {
+                await loadMovies(forceRefresh: true)
+            }
+        }
+        
+        // Same for global ratings
+        if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
+            Task {
+                await loadGlobalRatings()
+            }
+        } else {
+            Task {
+                await loadGlobalRatings(forceRefresh: true)
+            }
+        }
+    }
+    
+    // Helper to convert errors to user-friendly messages
+    func handleError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Something went wrong. Please try again."
+        }
+    }
+    
+    private func showError(message: String) {
+        Task { @MainActor in
+            self.errorMessage = message
+            self.showError = true
+        }
+    }
+    
+    func loadMovies(forceRefresh: Bool = false) async {
         guard !isLoading else {
             print("loadMovies: Already loading, skipping")
             return
@@ -252,24 +333,75 @@ final class MovieStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         
+        // Try cache first if offline or if we don't want to force refresh
+        if !forceRefresh && (!networkMonitor.isConnected || movies.isEmpty) {
+            await loadFromCache(userId: userId)
+        }
+        
+        // If online, try to load from server
+        if networkMonitor.isConnected {
+            await loadFromServer(userId: userId)
+        } else if movies.isEmpty && tvShows.isEmpty {
+            // We're offline and have no cached data
+            showError(message: "No internet connection. Unable to load your rankings.")
+        }
+    }
+    
+    private func loadFromCache(userId: String) async {
+        await MainActor.run { isLoadingFromCache = true }
+        defer { 
+            Task { @MainActor in 
+                self.isLoadingFromCache = false 
+            }
+        }
+        
+        print("loadFromCache: Loading personal rankings from cache")
+        
+        let cachedMovies = cacheManager.getCachedPersonalMovies(userId: userId) ?? []
+        let cachedTVShows = cacheManager.getCachedPersonalTVShows(userId: userId) ?? []
+        
+        if !cachedMovies.isEmpty || !cachedTVShows.isEmpty {
+            await MainActor.run {
+                self.movies = cachedMovies
+                self.tvShows = cachedTVShows
+                self.lastSyncDate = cacheManager.getLastSyncDate(userId: userId)
+            }
+            
+            print("loadFromCache: Loaded \(cachedMovies.count) movies and \(cachedTVShows.count) TV shows from cache")
+        }
+    }
+    
+    private func loadFromServer(userId: String) async {
         do {
+            print("loadFromServer: Loading personal rankings from server")
             let loadedMovies = try await firestoreService.getUserRankings(userId: userId)
             
             await MainActor.run {
                 // Separate movies and TV shows
-                movies = loadedMovies.filter { $0.mediaType == .movie }
-                tvShows = loadedMovies.filter { $0.mediaType == .tv }
+                let newMovies = loadedMovies.filter { $0.mediaType == .movie }
+                let newTVShows = loadedMovies.filter { $0.mediaType == .tv }
+                
+                self.movies = newMovies
+                self.tvShows = newTVShows
+                self.lastSyncDate = Date()
                 
                 // Clean up duplicates
                 cleanupDuplicateMovies()
+                
+                // Cache the fresh data
+                cacheManager.cachePersonalMovies(self.movies, userId: userId)
+                cacheManager.cachePersonalTVShows(self.tvShows, userId: userId)
             }
             
             // Recalculate scores after loading (only if we actually loaded movies)
             if !loadedMovies.isEmpty {
                 await recalculateScoresOnLoad()
             }
+            
+            print("loadFromServer: Successfully loaded and cached \(loadedMovies.count) total items")
         } catch {
-            print("Error loading movies: \(error)")
+            print("loadFromServer: Error loading movies: \(error)")
+            showError(message: handleError(error))
         }
     }
     
@@ -478,10 +610,27 @@ final class MovieStore: ObservableObject {
                 }
                 
                 print("insertNewMovie: Completed saving movie: \(finalMovie.title) with score: \(finalMovie.score)")
+                
+                // Update cache after successful insertion
+                await MainActor.run {
+                    updateCacheAfterInsertion()
+                }
             } catch {
                 print("Error saving movie: \(error)")
+                showError(message: handleError(error))
             }
         }
+    }
+    
+    private func updateCacheAfterInsertion() {
+        // Update cache with current data after successful insertion
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
+        
+        cacheManager.cachePersonalMovies(movies, userId: userId)
+        cacheManager.cachePersonalTVShows(tvShows, userId: userId)
+        
+        // Update last sync time
+        lastSyncDate = Date()
     }
     
     func deleteMovies(at offsets: IndexSet) {
@@ -557,11 +706,25 @@ final class MovieStore: ObservableObject {
                     
                     // Reset deletion flag
                     self.isDeleting = false
+                    
+                    // Update cache after successful deletions
+                    self.updateCacheAfterDeletion()
                 }
             }
         }
     }
-
+    
+    private func updateCacheAfterDeletion() {
+        // Update cache with current data after successful deletion
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
+        
+        cacheManager.cachePersonalMovies(movies, userId: userId)
+        cacheManager.cachePersonalTVShows(tvShows, userId: userId)
+        
+        // Update last sync time
+        lastSyncDate = Date()
+    }
+    
     private func recalculateScoresForAffectedMovies(deletedMovies: [Movie]) async {
         // Get the sentiment sections that were affected by deletions
         let affectedSentiments = Set(deletedMovies.map { $0.sentiment })
@@ -630,6 +793,7 @@ final class MovieStore: ObservableObject {
                 }
             } catch {
                 print("Error updating personal rankings for sentiment \(sentiment): \(error)")
+                showError(message: handleError(error))
             }
         }
     }
@@ -796,6 +960,7 @@ final class MovieStore: ObservableObject {
                     try await recalculateScoresAndUpdateCommunityRatings()
                 } catch {
                     print("Error in recalculateScores: \(error)")
+                    showError(message: handleError(error))
                 }
             }
         }
@@ -856,6 +1021,7 @@ final class MovieStore: ObservableObject {
                 }
             } catch {
                 print("Error updating personal rankings during load: \(error)")
+                showError(message: handleError(error))
             }
         } else {
             print("recalculateScoresForListOnLoad: No personal rankings to update")
@@ -873,7 +1039,7 @@ final class MovieStore: ObservableObject {
         return getUserPersonalScore(for: tmdbId) != nil
     }
     
-    func loadGlobalRatings() async {
+    func loadGlobalRatings(forceRefresh: Bool = false) async {
         guard !isLoading else {
             print("loadGlobalRatings: Already loading, skipping")
             return
@@ -882,8 +1048,46 @@ final class MovieStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         
+        // Try cache first if offline or if we don't want to force refresh
+        if !forceRefresh && (!networkMonitor.isConnected || globalMovieRatings.isEmpty) {
+            await loadGlobalRatingsFromCache()
+        }
+        
+        // If online, try to load from server
+        if networkMonitor.isConnected {
+            await loadGlobalRatingsFromServer()
+        } else if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
+            // We're offline and have no cached data
+            showError(message: "No internet connection. Unable to load community rankings.")
+        }
+    }
+    
+    private func loadGlobalRatingsFromCache() async {
+        await MainActor.run { isLoadingFromCache = true }
+        defer { 
+            Task { @MainActor in 
+                self.isLoadingFromCache = false 
+            }
+        }
+        
+        print("loadGlobalRatingsFromCache: Loading global ratings from cache")
+        
+        let cachedMovieRatings = cacheManager.getCachedGlobalMovieRatings() ?? []
+        let cachedTVRatings = cacheManager.getCachedGlobalTVRatings() ?? []
+        
+        if !cachedMovieRatings.isEmpty || !cachedTVRatings.isEmpty {
+            await MainActor.run {
+                self.globalMovieRatings = cachedMovieRatings
+                self.globalTVRatings = cachedTVRatings
+            }
+            
+            print("loadGlobalRatingsFromCache: Loaded \(cachedMovieRatings.count) movie ratings and \(cachedTVRatings.count) TV ratings from cache")
+        }
+    }
+    
+    private func loadGlobalRatingsFromServer() async {
         do {
-            print("loadGlobalRatings: Starting to fetch global community ratings")
+            print("loadGlobalRatingsFromServer: Starting to fetch global community ratings")
             
             let snapshot = try await Firestore.firestore().collection("ratings").getDocuments()
             
@@ -918,6 +1122,7 @@ final class MovieStore: ObservableObject {
                 } else {
                     tvRatings.append(globalRating)
                 }
+
             }
             
             // Sort by rating (highest first)
@@ -927,11 +1132,16 @@ final class MovieStore: ObservableObject {
             await MainActor.run {
                 self.globalMovieRatings = movieRatings
                 self.globalTVRatings = tvRatings
-                print("loadGlobalRatings: Loaded \(movieRatings.count) movie ratings and \(tvRatings.count) TV ratings")
+                
+                // Cache the fresh data
+                self.cacheManager.cacheGlobalRatings(movies: movieRatings, tvShows: tvRatings)
+                
+                print("loadGlobalRatingsFromServer: Loaded and cached \(movieRatings.count) movie ratings and \(tvRatings.count) TV ratings")
             }
             
         } catch {
-            print("loadGlobalRatings: Error loading global ratings: \(error)")
+            print("loadGlobalRatingsFromServer: Error loading global ratings: \(error)")
+            showError(message: handleError(error))
         }
     }
 }
@@ -950,6 +1160,8 @@ struct AddMovieView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedMovie: AppModels.Movie?
     @State private var searchType: SearchType = .movie
+    @State private var searchErrorMessage: String?
+    @State private var showSearchError = false
     
     private let tmdbService = TMDBService()
     
@@ -984,6 +1196,18 @@ struct AddMovieView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: { dismiss() })
                 }
+            }
+            .alert("Search Error", isPresented: $showSearchError) {
+                Button("Retry") {
+                    if !searchText.isEmpty {
+                        Task {
+                            await searchContent(query: searchText)
+                        }
+                    }
+                }
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(searchErrorMessage ?? "Failed to search for movies")
             }
         }
     }
@@ -1102,6 +1326,8 @@ struct AddMovieView: View {
             await MainActor.run {
                 searchResults = []
                 isSearching = false
+                searchErrorMessage = store.handleError(error)
+                showSearchError = true
             }
         }
     }
@@ -1133,6 +1359,9 @@ struct AddMovieView: View {
                                         }
                                     } catch {
                                         print("Error fetching details: \(error)")
+                                        // Show error to user
+                                        searchErrorMessage = store.handleError(error)
+                                        showSearchError = true
                                     }
                                     
                                     await MainActor.run {
@@ -1422,6 +1651,11 @@ struct ComparisonView: View {
                         continuation.resume()
                     } catch {
                         print("Error saving movie: \(error)")
+                        // Show error to user
+                        await MainActor.run {
+                            store.errorMessage = store.handleError(error)
+                            store.showError = true
+                        }
                         continuation.resume()
                     }
                 }
@@ -2039,6 +2273,7 @@ struct ContentView: View {
     @State private var selectedGlobalRating: GlobalRating?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
+    @State private var showingSettings = false
     @State private var viewMode: ViewMode = .personal
     @EnvironmentObject var authService: AuthenticationService
 
@@ -2072,6 +2307,38 @@ struct ContentView: View {
         } else if authService.isAuthenticated {
             NavigationStack {
                 VStack(spacing: 0) {
+                    // Offline status banner
+                    if store.isOffline {
+                        HStack {
+                            Image(systemName: "wifi.slash")
+                                .foregroundColor(.orange)
+                            Text("Offline - Viewing cached data")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                            Spacer()
+                            if let lastSync = store.lastSyncDate {
+                                Text("Last sync: \(formatSyncTime(lastSync))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, UI.hPad)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.1))
+                    } else if store.isLoadingFromCache {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Loading from cache...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, UI.hPad)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.1))
+                    }
+                    
                     // Display the username with "@" symbol, left-aligned
                     if let username = authService.username {
                         HStack {
@@ -2153,6 +2420,7 @@ struct ContentView: View {
                                 Image(systemName: "plus.circle.fill")
                                     .font(.title2)
                             }
+                            .disabled(store.isOffline) // Disable adding movies when offline
                         }
                         ToolbarItem(placement: .navigationBarLeading) {
                             EditButton()
@@ -2166,10 +2434,9 @@ struct ContentView: View {
                     }
                     
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: {
-                            try? authService.signOut()
-                        }) {
-                            Text("Sign Out")
+                        Button(action: { showingSettings = true }) {
+                            Image(systemName: "gear")
+                                .font(.title2)
                         }
                     }
                 }
@@ -2182,6 +2449,9 @@ struct ContentView: View {
                         selectedGenres: $selectedGenres,
                         availableGenres: availableGenres
                     )
+                }
+                .sheet(isPresented: $showingSettings) {
+                    SettingsView()
                 }
                 .navigationDestination(item: $selectedMovie) { movie in
                     TMDBMovieDetailView(movie: movie)
@@ -2196,6 +2466,28 @@ struct ContentView: View {
                             await store.loadGlobalRatings()
                         }
                     }
+                }
+                .alert("Error", isPresented: $store.showError) {
+                    Button("Retry") {
+                        Task {
+                            if viewMode == .global {
+                                await store.loadGlobalRatings()
+                            } else {
+                                // Retry loading personal movies
+                                store.movies = []
+                                store.tvShows = []
+                                // Trigger reload via auth state
+                                if AuthenticationService.shared.currentUser != nil {
+                                    Task {
+                                        await store.loadMovies()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(store.errorMessage ?? "An error occurred")
                 }
             }
             .navigationViewStyle(.stack)
@@ -2214,6 +2506,7 @@ struct ContentView: View {
                         .foregroundColor(.red)
                         .font(.title3)
                 }
+                .disabled(store.isOffline) // Disable deletion when offline
             )
         } else {
             return AnyView(
@@ -2221,6 +2514,24 @@ struct ContentView: View {
                     .foregroundColor(.gray)
                     .font(.title3)
             )
+        }
+    }
+    
+    private func formatSyncTime(_ date: Date) -> String {
+        let now = Date()
+        let interval = now.timeIntervalSince(date)
+        
+        if interval < 60 {
+            return "just now"
+        } else if interval < 3600 {
+            let minutes = Int(interval / 60)
+            return "\(minutes)m ago"
+        } else if interval < 86400 {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        } else {
+            let days = Int(interval / 86400)
+            return "\(days)d ago"
         }
     }
 }
@@ -2669,16 +2980,17 @@ struct GlobalRatingDetailView: View {
                         showingAddMovie = true
                     }) {
                         HStack {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Rank This \(rating.mediaType.rawValue)")
+                            Image(systemName: store.isOffline ? "wifi.slash" : "plus.circle.fill")
+                            Text(store.isOffline ? "Offline - Cannot Rate" : "Rank This \(rating.mediaType.rawValue)")
                         }
                         .font(.headline)
                         .foregroundColor(.white)
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(Color.accentColor)
+                        .background(store.isOffline ? Color.gray : Color.accentColor)
                         .cornerRadius(12)
                     }
+                    .disabled(store.isOffline)
                     .padding(.horizontal)
                 }
             }
@@ -3006,6 +3318,432 @@ struct AddMovieFromGlobalView: View {
                 }
             } else {
                 ProgressView()
+            }
+        }
+    }
+}
+
+// MARK: - Cache Manager
+class CacheManager: ObservableObject {
+    static let shared = CacheManager()
+    
+    private let userDefaults = UserDefaults.standard
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    
+    // Cache keys
+    private enum CacheKeys {
+        static func personalMovies(userId: String) -> String { "personal_movies_\(userId)" }
+        static func personalTVShows(userId: String) -> String { "personal_tv_\(userId)" }
+        static func globalMovieRatings() -> String { "global_movie_ratings" }
+        static func globalTVRatings() -> String { "global_tv_ratings" }
+        static func lastSync(userId: String) -> String { "last_sync_\(userId)" }
+    }
+    
+    // MARK: - Personal Rankings Cache
+    
+    func cachePersonalMovies(_ movies: [Movie], userId: String) {
+        do {
+            let data = try encoder.encode(movies)
+            userDefaults.set(data, forKey: CacheKeys.personalMovies(userId: userId))
+            userDefaults.set(Date(), forKey: CacheKeys.lastSync(userId: userId))
+            print("CacheManager: Cached \(movies.count) personal movies for user \(userId)")
+        } catch {
+            print("CacheManager: Failed to cache personal movies: \(error)")
+        }
+    }
+    
+    func cachePersonalTVShows(_ tvShows: [Movie], userId: String) {
+        do {
+            let data = try encoder.encode(tvShows)
+            userDefaults.set(data, forKey: CacheKeys.personalTVShows(userId: userId))
+            print("CacheManager: Cached \(tvShows.count) personal TV shows for user \(userId)")
+        } catch {
+            print("CacheManager: Failed to cache personal TV shows: \(error)")
+        }
+    }
+    
+    func getCachedPersonalMovies(userId: String) -> [Movie]? {
+        guard let data = userDefaults.data(forKey: CacheKeys.personalMovies(userId: userId)) else { return nil }
+        do {
+            let movies = try decoder.decode([Movie].self, from: data)
+            print("CacheManager: Retrieved \(movies.count) cached personal movies for user \(userId)")
+            return movies
+        } catch {
+            print("CacheManager: Failed to decode cached personal movies: \(error)")
+            return nil
+        }
+    }
+    
+    func getCachedPersonalTVShows(userId: String) -> [Movie]? {
+        guard let data = userDefaults.data(forKey: CacheKeys.personalTVShows(userId: userId)) else { return nil }
+        do {
+            let tvShows = try decoder.decode([Movie].self, from: data)
+            print("CacheManager: Retrieved \(tvShows.count) cached personal TV shows for user \(userId)")
+            return tvShows
+        } catch {
+            print("CacheManager: Failed to decode cached personal TV shows: \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - Global Ratings Cache
+    
+    func cacheGlobalRatings(movies: [GlobalRating], tvShows: [GlobalRating]) {
+        do {
+            let movieData = try encoder.encode(movies)
+            let tvData = try encoder.encode(tvShows)
+            userDefaults.set(movieData, forKey: CacheKeys.globalMovieRatings())
+            userDefaults.set(tvData, forKey: CacheKeys.globalTVRatings())
+            print("CacheManager: Cached \(movies.count) global movie ratings and \(tvShows.count) global TV ratings")
+        } catch {
+            print("CacheManager: Failed to cache global ratings: \(error)")
+        }
+    }
+    
+    func getCachedGlobalMovieRatings() -> [GlobalRating]? {
+        guard let data = userDefaults.data(forKey: CacheKeys.globalMovieRatings()) else { return nil }
+        do {
+            let ratings = try decoder.decode([GlobalRating].self, from: data)
+            print("CacheManager: Retrieved \(ratings.count) cached global movie ratings")
+            return ratings
+        } catch {
+            print("CacheManager: Failed to decode cached global movie ratings: \(error)")
+            return nil
+        }
+    }
+    
+    func getCachedGlobalTVRatings() -> [GlobalRating]? {
+        guard let data = userDefaults.data(forKey: CacheKeys.globalTVRatings()) else { return nil }
+        do {
+            let ratings = try decoder.decode([GlobalRating].self, from: data)
+            print("CacheManager: Retrieved \(ratings.count) cached global TV ratings")
+            return ratings
+        } catch {
+            print("CacheManager: Failed to decode cached global TV ratings: \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - Cache Management
+    
+    func getLastSyncDate(userId: String) -> Date? {
+        return userDefaults.object(forKey: CacheKeys.lastSync(userId: userId)) as? Date
+    }
+    
+    func clearCache(userId: String) {
+        userDefaults.removeObject(forKey: CacheKeys.personalMovies(userId: userId))
+        userDefaults.removeObject(forKey: CacheKeys.personalTVShows(userId: userId))
+        userDefaults.removeObject(forKey: CacheKeys.lastSync(userId: userId))
+        print("CacheManager: Cleared cache for user \(userId)")
+    }
+    
+    func clearGlobalCache() {
+        userDefaults.removeObject(forKey: CacheKeys.globalMovieRatings())
+        userDefaults.removeObject(forKey: CacheKeys.globalTVRatings())
+        print("CacheManager: Cleared global cache")
+    }
+}
+
+// MARK: - Network Monitor
+class NetworkMonitor: ObservableObject {
+    static let shared = NetworkMonitor()
+    
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "NetworkMonitor")
+    
+    @Published var isConnected = false
+    @Published var connectionType: NWInterface.InterfaceType?
+    
+    init() {
+        startMonitoring()
+    }
+    
+    private func startMonitoring() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isConnected = path.status == .satisfied
+                self?.connectionType = path.availableInterfaces.first?.type
+                
+                if self?.isConnected == true {
+                    print("NetworkMonitor: Connected to internet")
+                } else {
+                    print("NetworkMonitor: Disconnected from internet")
+                }
+            }
+        }
+        monitor.start(queue: queue)
+    }
+    
+    deinit {
+        monitor.cancel()
+    }
+}
+
+// MARK: - Settings View
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var authService: AuthenticationService
+    
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var newUsername = ""
+    
+    @State private var isChangingPassword = false
+    @State private var isChangingUsername = false
+    @State private var isCheckingUsername = false
+    
+    @State private var passwordErrorMessage: String?
+    @State private var usernameErrorMessage: String?
+    @State private var passwordSuccessMessage: String?
+    @State private var usernameSuccessMessage: String?
+    
+    @State private var showingSignOutAlert = false
+    
+    var body: some View {
+        NavigationView {
+            List {
+                // Account Section
+                Section("Account") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Email")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(authService.currentUser?.email ?? "Not available")
+                        }
+                        
+                        HStack {
+                            Text("Username")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("@\(authService.username ?? "Unknown")")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                
+                // Change Password Section
+                Section("Change Password") {
+                    VStack(spacing: 12) {
+                        SecureField("Current Password", text: $currentPassword)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        
+                        SecureField("New Password", text: $newPassword)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        
+                        SecureField("Confirm New Password", text: $confirmPassword)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        
+                        if let errorMessage = passwordErrorMessage {
+                            Text(errorMessage)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
+                        
+                        if let successMessage = passwordSuccessMessage {
+                            Text(successMessage)
+                                .foregroundColor(.green)
+                                .font(.caption)
+                        }
+                        
+                        Button(action: changePassword) {
+                            HStack {
+                                if isChangingPassword {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Text("Change Password")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isChangingPassword || currentPassword.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                // Change Username Section
+                Section("Change Username") {
+                    VStack(spacing: 12) {
+                        TextField("New Username", text: $newUsername)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        
+                        if let errorMessage = usernameErrorMessage {
+                            Text(errorMessage)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
+                        
+                        if let successMessage = usernameSuccessMessage {
+                            Text(successMessage)
+                                .foregroundColor(.green)
+                                .font(.caption)
+                        }
+                        
+                        Button(action: changeUsername) {
+                            HStack {
+                                if isChangingUsername || isCheckingUsername {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Text("Change Username")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isChangingUsername || isCheckingUsername || newUsername.isEmpty || newUsername == authService.username)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                // Sign Out Section
+                Section {
+                    Button(action: { showingSignOutAlert = true }) {
+                        HStack {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Text("Sign Out")
+                        }
+                        .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Sign Out", isPresented: $showingSignOutAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign Out", role: .destructive) {
+                    try? authService.signOut()
+                    dismiss()
+                }
+            } message: {
+                Text("Are you sure you want to sign out?")
+            }
+        }
+    }
+    
+    private func changePassword() {
+        // Clear previous messages
+        passwordErrorMessage = nil
+        passwordSuccessMessage = nil
+        
+        // Validate passwords match
+        guard newPassword == confirmPassword else {
+            passwordErrorMessage = "New passwords don't match"
+            return
+        }
+        
+        // Validate password strength
+        guard newPassword.count >= 6 else {
+            passwordErrorMessage = "Password must be at least 6 characters"
+            return
+        }
+        
+        isChangingPassword = true
+        
+        Task {
+            do {
+                try await authService.changePassword(currentPassword: currentPassword, newPassword: newPassword)
+                
+                await MainActor.run {
+                    isChangingPassword = false
+                    passwordSuccessMessage = "Password changed successfully"
+                    
+                    // Clear form
+                    currentPassword = ""
+                    newPassword = ""
+                    confirmPassword = ""
+                    
+                    // Clear success message after 3 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        passwordSuccessMessage = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isChangingPassword = false
+                    passwordErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+    
+    private func changeUsername() {
+        // Clear previous messages
+        usernameErrorMessage = nil
+        usernameSuccessMessage = nil
+        
+        // Validate username format
+        let trimmedUsername = newUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUsername.isEmpty else {
+            usernameErrorMessage = "Username cannot be empty"
+            return
+        }
+        
+        guard trimmedUsername.count >= 3 else {
+            usernameErrorMessage = "Username must be at least 3 characters"
+            return
+        }
+        
+        guard trimmedUsername.count <= 20 else {
+            usernameErrorMessage = "Username cannot be longer than 20 characters"
+            return
+        }
+        
+        // Check for valid characters (alphanumeric and underscore only)
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
+        guard trimmedUsername.rangeOfCharacter(from: allowedCharacters.inverted) == nil else {
+            usernameErrorMessage = "Username can only contain letters, numbers, and underscores"
+            return
+        }
+        
+        isCheckingUsername = true
+        
+        Task {
+            do {
+                // First check if username is available
+                let isAvailable = try await authService.isUsernameAvailable(trimmedUsername)
+                
+                guard isAvailable else {
+                    await MainActor.run {
+                        isCheckingUsername = false
+                        usernameErrorMessage = "Username is already taken"
+                    }
+                    return
+                }
+                
+                // Username is available, proceed with change
+                await MainActor.run {
+                    isCheckingUsername = false
+                    isChangingUsername = true
+                }
+                
+                try await authService.changeUsername(to: trimmedUsername)
+                
+                await MainActor.run {
+                    isChangingUsername = false
+                    usernameSuccessMessage = "Username changed successfully"
+                    
+                    // Clear form
+                    newUsername = ""
+                    
+                    // Clear success message after 3 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        usernameSuccessMessage = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isCheckingUsername = false
+                    isChangingUsername = false
+                    usernameErrorMessage = error.localizedDescription
+                }
             }
         }
     }

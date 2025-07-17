@@ -145,6 +145,68 @@ class AuthenticationService: ObservableObject {
         }
     }
     
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        guard let user = currentUser else {
+            throw AuthError.custom("No user is currently signed in")
+        }
+        
+        guard let email = user.email else {
+            throw AuthError.custom("Unable to get user email")
+        }
+        
+        // Reauthenticate user with current password
+        let credential = EmailAuthProvider.credential(withEmail: email, password: currentPassword)
+        
+        do {
+            try await user.reauthenticate(with: credential)
+            try await user.updatePassword(to: newPassword)
+        } catch {
+            throw mapAuthError(error)
+        }
+    }
+    
+    func isUsernameAvailable(_ username: String) async throws -> Bool {
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        // Query Firestore to check if username exists
+        let snapshot = try await firestore.collection("users")
+            .whereField("username", isEqualTo: trimmedUsername)
+            .getDocuments()
+        
+        return snapshot.documents.isEmpty
+    }
+    
+    func changeUsername(to newUsername: String) async throws {
+        guard let user = currentUser else {
+            throw AuthError.custom("No user is currently signed in")
+        }
+        
+        let trimmedUsername = newUsername.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        // Double-check username availability
+        let isAvailable = try await isUsernameAvailable(trimmedUsername)
+        guard isAvailable else {
+            throw AuthError.custom("Username is already taken")
+        }
+        
+        // Update username in Firestore
+        let userDocRef = firestore.collection("users").document(user.uid)
+        
+        do {
+            try await userDocRef.updateData([
+                "username": trimmedUsername,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+            
+            // Update local username
+            await MainActor.run {
+                self.username = trimmedUsername
+            }
+        } catch {
+            throw AuthError.custom("Failed to update username: \(error.localizedDescription)")
+        }
+    }
+    
     private func mapAuthError(_ error: Error) -> Error {
         let nsError = error as NSError
 
@@ -161,6 +223,12 @@ class AuthenticationService: ObservableObject {
             return AuthError.custom("Password must be at least 6 characters.")
         case 17010:
             return AuthError.custom("Too many login attempts. Try again later.")
+        case 17014:
+            return AuthError.custom("Current password is incorrect.")
+        case 17025:
+            return AuthError.custom("The password is invalid or the user does not have a password.")
+        case 17012:
+            return AuthError.custom("This operation is sensitive and requires recent authentication. Please sign in again.")
         default:
             return AuthError.custom("Something went wrong. Please try again.")
         }
