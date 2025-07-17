@@ -73,7 +73,7 @@ enum AppModels {
         }
         
         var mediaType: MediaType {
-            if media_type?.lowercased() == "tv" {
+            if media_type?.lowercased().contains("tv") == true {
                 return .tv
             } else {
                 return .movie
@@ -160,6 +160,37 @@ enum MovieRatingState: String, Codable {
     case scoreUpdate        // When scores are recalculated after comparisons
 }
 
+// MARK: - View Mode
+enum ViewMode: String, CaseIterable {
+    case personal = "My Cannes"
+    case global = "Global Cannes"
+}
+
+// MARK: - Global Rating
+struct GlobalRating: Identifiable, Codable, Hashable {
+    let id: String // This will be the TMDB ID or document ID
+    let title: String
+    let mediaType: AppModels.MediaType
+    let averageRating: Double
+    let numberOfRatings: Int
+    let tmdbId: Int?
+    
+    var displayScore: Double { averageRating.rounded(toPlaces: 1) }
+    
+    var sentimentColor: Color {
+        switch averageRating {
+        case 6.9...10.0:
+            return Color(.systemGreen)  // likedIt range
+        case 4.0..<6.9:
+            return Color(.systemGray)   // itWasFine range
+        case 0.0..<4.0:
+            return Color(.systemRed)    // didntLikeIt range
+        default:
+            return Color(.systemGray)
+        }
+    }
+}
+
 // MARK: - Local State Management
 enum LocalMovieState {
     case comparing
@@ -171,6 +202,8 @@ final class MovieStore: ObservableObject {
     let firestoreService = FirestoreService()
     @Published var movies: [Movie] = []
     @Published var tvShows: [Movie] = []
+    @Published var globalMovieRatings: [GlobalRating] = []
+    @Published var globalTVRatings: [GlobalRating] = []
     @Published var selectedMediaType: AppModels.MediaType = .movie
     
     private var isDeleting = false // Flag to prevent reloading during deletion
@@ -830,6 +863,77 @@ final class MovieStore: ObservableObject {
         
         return updatedList
     }
+    
+    func getUserPersonalScore(for tmdbId: Int) -> Double? {
+        let allMovies = movies + tvShows
+        return allMovies.first { $0.tmdbId == tmdbId }?.score
+    }
+    
+    func hasUserRated(tmdbId: Int) -> Bool {
+        return getUserPersonalScore(for: tmdbId) != nil
+    }
+    
+    func loadGlobalRatings() async {
+        guard !isLoading else {
+            print("loadGlobalRatings: Already loading, skipping")
+            return
+        }
+        
+        isLoading = true
+        defer { isLoading = false }
+        
+        do {
+            print("loadGlobalRatings: Starting to fetch global community ratings")
+            
+            let snapshot = try await Firestore.firestore().collection("ratings").getDocuments()
+            
+            var movieRatings: [GlobalRating] = []
+            var tvRatings: [GlobalRating] = []
+            
+            for document in snapshot.documents {
+                let data = document.data()
+                
+                guard let title = data["title"] as? String,
+                      let averageRating = data["averageRating"] as? Double,
+                      let numberOfRatings = data["numberOfRatings"] as? Int,
+                      numberOfRatings > 0 else {
+                    continue
+                }
+                
+                let mediaTypeString = data["mediaType"] as? String ?? "movie"
+                let mediaType: AppModels.MediaType = mediaTypeString.lowercased().contains("tv") ? .tv : .movie
+                let tmdbId = data["tmdbId"] as? Int
+                
+                let globalRating = GlobalRating(
+                    id: document.documentID,
+                    title: title,
+                    mediaType: mediaType,
+                    averageRating: averageRating,
+                    numberOfRatings: numberOfRatings,
+                    tmdbId: tmdbId
+                )
+                
+                if mediaType == .movie {
+                    movieRatings.append(globalRating)
+                } else {
+                    tvRatings.append(globalRating)
+                }
+            }
+            
+            // Sort by rating (highest first)
+            movieRatings.sort { $0.averageRating > $1.averageRating }
+            tvRatings.sort { $0.averageRating > $1.averageRating }
+            
+            await MainActor.run {
+                self.globalMovieRatings = movieRatings
+                self.globalTVRatings = tvRatings
+                print("loadGlobalRatings: Loaded \(movieRatings.count) movie ratings and \(tvRatings.count) TV ratings")
+            }
+            
+        } catch {
+            print("loadGlobalRatings: Error loading global ratings: \(error)")
+        }
+    }
 }
 
 // MARK: - Add Movie View
@@ -1146,6 +1250,7 @@ struct ComparisonView: View {
     @State private var right = 0
     @State private var mid = 0
     @State private var searching = true
+    @State private var isProcessing = false
 
     private var sortedMovies: [Movie] { 
         let targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
@@ -1154,17 +1259,28 @@ struct ComparisonView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            if sortedMovies.isEmpty {
+            if isProcessing {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Saving your rating...")
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+            } else if sortedMovies.isEmpty {
                 Color.clear.onAppear {
-                    store.insertNewMovie(newMovie, at: 1)
-                    onComplete()
+                    isProcessing = true
+                    Task {
+                        await insertMovieAndComplete(at: 1)
+                    }
                 }
             } else if searching {
                 comparisonPrompt
             } else {
                 Color.clear.onAppear {
-                    store.insertNewMovie(newMovie, at: left + 1)
-                    onComplete()
+                    isProcessing = true
+                    Task {
+                        await insertMovieAndComplete(at: left + 1)
+                    }
                 }
             }
         }
@@ -1173,6 +1289,145 @@ struct ComparisonView: View {
             left = 0
             right = sortedMovies.count - 1
             mid = (left + right) / 2
+        }
+    }
+    
+    private func insertMovieAndComplete(at rank: Int) async {
+        // Wait for the movie insertion to complete
+        await insertMovie(at: rank)
+        
+        // Only call onComplete after everything is done
+        await MainActor.run {
+            onComplete()
+        }
+    }
+    
+    private func insertMovie(at rank: Int) async {
+        return await withCheckedContinuation { continuation in
+            // Check if movie already exists to prevent duplicates
+            if let tmdbId = newMovie.tmdbId {
+                let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
+                if existingMovie != nil {
+                    print("insertMovie: Movie already exists with TMDB ID \(tmdbId), skipping completely")
+                    continuation.resume()
+                    return
+                }
+            }
+            
+            // Find the appropriate section for this sentiment
+            let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
+            guard let sentimentIndex = sentimentSections.firstIndex(of: newMovie.sentiment) else { 
+                continuation.resume()
+                return 
+            }
+            
+            // Get the appropriate list based on media type
+            var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
+            
+            // Find the start and end indices for this sentiment section
+            let sectionStart = targetList.firstIndex { $0.sentiment == newMovie.sentiment } ?? targetList.count
+            let sectionEnd: Int
+            if sentimentIndex < sentimentSections.count - 1 {
+                sectionEnd = targetList.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? targetList.count
+            } else {
+                sectionEnd = targetList.count
+            }
+            
+            // Calculate the actual insertion index within the section
+            let sectionLength = sectionEnd - sectionStart
+            let insertionIndex = sectionStart + min(rank - 1, sectionLength)
+            
+            // Insert the movie with its original score first
+            targetList.insert(newMovie, at: insertionIndex)
+            
+            // Update the appropriate list
+            if newMovie.mediaType == .movie {
+                store.movies = targetList
+            } else {
+                store.tvShows = targetList
+            }
+            
+            // Save to Firebase and wait for completion
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                Task {
+                    do {
+                        print("insertMovie: Starting for movie: \(newMovie.title) with initial score: \(newMovie.score)")
+                        
+                        // Capture scores before insertion for community rating updates
+                        let beforeScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
+                            result[movie.id] = movie.score
+                        }
+                        
+                        // First save the movie with initial sentiment state (no community update)
+                        try await store.firestoreService.updateMovieRanking(
+                            userId: userId, 
+                            movie: newMovie,
+                            state: .initialSentiment
+                        )
+                        
+                        // Then recalculate scores (personal only, no community updates yet)
+                        try await store.recalculateScoresAndUpdateCommunityRatings(skipCommunityUpdates: true)
+                        
+                        // Capture scores after recalculation
+                        let afterScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
+                            result[movie.id] = movie.score
+                        }
+                        
+                        // Find the newly inserted movie with its final score
+                        let updatedMovie = newMovie.mediaType == .movie ? store.movies : store.tvShows
+                        let finalMovie = updatedMovie.first { $0.id == newMovie.id } ?? newMovie
+                        
+                        print("insertMovie: Final movie score after recalculation: \(finalMovie.score)")
+                        
+                        // Update community rating for the NEW movie (add new user rating)
+                        try await store.firestoreService.updateMovieRanking(
+                            userId: userId, 
+                            movie: finalMovie,
+                            state: .finalInsertion
+                        )
+                        
+                        // Update community ratings for existing movies that had score changes
+                        var existingMovieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
+                        
+                        for existingMovie in updatedMovie {
+                            // Skip the newly inserted movie (already handled above)
+                            if existingMovie.id == newMovie.id { continue }
+                            
+                            let oldScore = beforeScores[existingMovie.id] ?? existingMovie.score
+                            let newScore = afterScores[existingMovie.id] ?? existingMovie.score
+                            
+                            // Only update if score actually changed
+                            if abs(oldScore - newScore) > 0.001 {
+                                existingMovieUpdates.append((
+                                    movie: existingMovie,
+                                    newScore: newScore,
+                                    oldScore: oldScore,
+                                    isNewRating: false // This is updating an existing user's rating
+                                ))
+                            }
+                        }
+                        
+                        // Batch update community ratings for affected existing movies
+                        if !existingMovieUpdates.isEmpty {
+                            print("insertMovie: Updating community ratings for \(existingMovieUpdates.count) existing movies due to reordering")
+                            for update in existingMovieUpdates {
+                                print("insertMovie: \(update.movie.title) - oldScore=\(update.oldScore), newScore=\(update.newScore)")
+                            }
+                            try await store.firestoreService.batchUpdateRatingsWithMovies(movieUpdates: existingMovieUpdates)
+                        }
+                        
+                        print("insertMovie: Completed saving movie: \(finalMovie.title) with score: \(finalMovie.score)")
+                        
+                        // Resume continuation after all operations complete
+                        continuation.resume()
+                    } catch {
+                        print("Error saving movie: \(error)")
+                        continuation.resume()
+                    }
+                }
+            } else {
+                continuation.resume()
+            }
         }
     }
 
@@ -1225,127 +1480,37 @@ struct ComparisonView: View {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
                 
-                // Check if movie already exists to prevent duplicates
-                if let tmdbId = newMovie.tmdbId {
-                    let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
-                    if existingMovie != nil {
-                        print("Too close to call: Movie already exists with TMDB ID \(tmdbId), skipping completely")
-                        onComplete()
-                        return
-                    }
+                isProcessing = true
+                Task {
+                    await handleTooCloseToCall()
                 }
-                
-                // Insert at mid+2 position without going through insertNewMovie to avoid double operations
-                let finalRank = mid + 2
-                
-                // Find the appropriate section for this sentiment
-                let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
-                guard let sentimentIndex = sentimentSections.firstIndex(of: newMovie.sentiment) else { 
-                    onComplete()
-                    return 
-                }
-                
-                // Get the appropriate list based on media type
-                var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
-                
-                // Find the start and end indices for this sentiment section
-                let sectionStart = targetList.firstIndex { $0.sentiment == newMovie.sentiment } ?? targetList.count
-                let sectionEnd: Int
-                if sentimentIndex < sentimentSections.count - 1 {
-                    sectionEnd = targetList.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? targetList.count
-                } else {
-                    sectionEnd = targetList.count
-                }
-                
-                // Calculate the actual insertion index within the section
-                let sectionLength = sectionEnd - sectionStart
-                let insertionIndex = sectionStart + min(finalRank - 1, sectionLength)
-                
-                // Insert the movie locally
-                targetList.insert(newMovie, at: insertionIndex)
-                
-                // Update the appropriate list locally
-                if newMovie.mediaType == .movie {
-                    store.movies = targetList
-                } else {
-                    store.tvShows = targetList
-                }
-                
-                // Save to Firebase using the atomic operation
-                if let userId = AuthenticationService.shared.currentUser?.uid {
-                    Task {
-                        do {
-                            // Capture scores before insertion for community rating updates
-                            let beforeScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
-                                result[movie.id] = movie.score
-                            }
-                            
-                            // Save with initial sentiment state first
-                            try await store.firestoreService.updateMovieRanking(
-                                userId: userId, 
-                                movie: newMovie,
-                                state: .initialSentiment
-                            )
-                            
-                            // Then do atomic recalculation (personal only)
-                            try await store.recalculateScoresAndUpdateCommunityRatings(skipCommunityUpdates: true)
-                            
-                            // Capture scores after recalculation
-                            let afterScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
-                                result[movie.id] = movie.score
-                            }
-                            
-                            // Find the newly inserted movie with its final score
-                            let updatedMovie = newMovie.mediaType == .movie ? store.movies : store.tvShows
-                            let finalMovie = updatedMovie.first { $0.id == newMovie.id } ?? newMovie
-                            
-                            // Update community rating for the NEW movie (add new user rating)
-                            try await store.firestoreService.updateMovieRanking(
-                                userId: userId, 
-                                movie: finalMovie,
-                                state: .finalInsertion
-                            )
-                            
-                            // Update community ratings for existing movies that had score changes
-                            var existingMovieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
-                            
-                            for existingMovie in updatedMovie {
-                                // Skip the newly inserted movie (already handled above)
-                                if existingMovie.id == newMovie.id { continue }
-                                
-                                let oldScore = beforeScores[existingMovie.id] ?? existingMovie.score
-                                let newScore = afterScores[existingMovie.id] ?? existingMovie.score
-                                
-                                // Only update if score actually changed
-                                if abs(oldScore - newScore) > 0.001 {
-                                    existingMovieUpdates.append((
-                                        movie: existingMovie,
-                                        newScore: newScore,
-                                        oldScore: oldScore,
-                                        isNewRating: false // This is updating an existing user's rating
-                                    ))
-                                }
-                            }
-                            
-                            // Batch update community ratings for affected existing movies
-                            if !existingMovieUpdates.isEmpty {
-                                print("Too close to call: Updating community ratings for \(existingMovieUpdates.count) existing movies due to reordering")
-                                for update in existingMovieUpdates {
-                                    print("Too close to call: \(update.movie.title) - oldScore=\(update.oldScore), newScore=\(update.newScore)")
-                                }
-                                try await store.firestoreService.batchUpdateRatingsWithMovies(movieUpdates: existingMovieUpdates)
-                            }
-                        } catch {
-                            print("Error in too close to call: \(error)")
-                        }
-                    }
-                }
-                
-                onComplete()
             }
             .font(.headline)
             .foregroundColor(.gray)
             .padding(.top, 8)
+        }
+    }
+    
+    private func handleTooCloseToCall() async {
+        // Check if movie already exists to prevent duplicates
+        if let tmdbId = newMovie.tmdbId {
+            let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
+            if existingMovie != nil {
+                print("Too close to call: Movie already exists with TMDB ID \(tmdbId), skipping completely")
+                await MainActor.run {
+                    onComplete()
+                }
+                return
+            }
+        }
+        
+        // Insert at mid+2 position using the existing insertMovie function
+        let finalRank = mid + 2
+        await insertMovie(at: finalRank)
+        
+        // Call onComplete after all Firebase operations are done
+        await MainActor.run {
+            onComplete()
         }
     }
 
@@ -1362,9 +1527,7 @@ struct ComparisonView: View {
                 }
             }
             
-            // Insert the movie at the final position
-            store.insertNewMovie(newMovie, at: left + 1)
-            // Note: insertNewMovie now handles all Firebase operations atomically
+            // The insertion will be handled when the view updates and shows the processing state
         } else {
             mid = (left + right) / 2
         }
@@ -1873,19 +2036,31 @@ struct ContentView: View {
     @State private var showingAddMovie = false
     @State private var editMode: EditMode = .inactive
     @State private var selectedMovie: Movie?
+    @State private var selectedGlobalRating: GlobalRating?
     @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingFilters = false
+    @State private var viewMode: ViewMode = .personal
     @EnvironmentObject var authService: AuthenticationService
 
     private var filteredMovies: [Movie] {
+        guard viewMode == .personal else { return [] }
         let targetList = store.selectedMediaType == .movie ? store.movies : store.tvShows
         return targetList.filter { movie in
             let genreMatch = selectedGenres.isEmpty || !Set(movie.genres).isDisjoint(with: selectedGenres)
             return genreMatch
         }
     }
+    
+    private var filteredGlobalRatings: [GlobalRating] {
+        guard viewMode == .global else { return [] }
+        let targetList = store.selectedMediaType == .movie ? store.globalMovieRatings : store.globalTVRatings
+        // Note: For now, global ratings don't have genre filtering since we don't store genres in the ratings collection
+        // This could be enhanced later by joining with movie data
+        return targetList
+    }
 
     private var availableGenres: [AppModels.Genre] {
+        guard viewMode == .personal else { return [] }
         let targetList = store.selectedMediaType == .movie ? store.movies : store.tvShows
         let genres = Array(Set(targetList.flatMap { $0.genres })).sorted { $0.name < $1.name }
         return genres
@@ -1917,43 +2092,79 @@ struct ContentView: View {
                     .padding()
                     
                     List {
-                        ForEach(Array(filteredMovies.enumerated()), id: \.element.id) { (index, movie) in
-                            MovieRow(
-                                movie: movie,
-                                position: index + 1,
-                                accessory: accessory(for: movie),
-                                onTap: {
-                                    if editMode.isEditing == false {
-                                        selectedMovie = movie
-                                    }
-                                },
-                                editMode: editMode
-                            )
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(
-                                EdgeInsets(top: UI.vGap, leading: UI.hPad,
-                                           bottom: UI.vGap, trailing: UI.hPad))
+                        if viewMode == .personal {
+                            ForEach(Array(filteredMovies.enumerated()), id: \.element.id) { (index, movie) in
+                                MovieRow(
+                                    movie: movie,
+                                    position: index + 1,
+                                    accessory: accessory(for: movie),
+                                    onTap: {
+                                        if editMode.isEditing == false {
+                                            selectedMovie = movie
+                                        }
+                                    },
+                                    editMode: editMode
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(
+                                    EdgeInsets(top: UI.vGap, leading: UI.hPad,
+                                               bottom: UI.vGap, trailing: UI.hPad))
+                            }
+                        } else {
+                            ForEach(Array(filteredGlobalRatings.enumerated()), id: \.element.id) { (index, rating) in
+                                GlobalRatingRow(
+                                    rating: rating,
+                                    position: index + 1,
+                                    onTap: {
+                                        selectedGlobalRating = rating
+                                    },
+                                    store: store
+                                )
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(
+                                    EdgeInsets(top: UI.vGap, leading: UI.hPad,
+                                               bottom: UI.vGap, trailing: UI.hPad))
+                            }
                         }
                     }
                     .listStyle(.plain)
                 }
-                .navigationTitle("My Cannes")
+                .navigationTitle(viewMode.rawValue)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: { showingAddMovie = true }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                        }
-                    }
                     ToolbarItem(placement: .navigationBarLeading) {
-                        EditButton()
-                    }
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: { showingFilters = true }) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
+                        Button(action: { 
+                            withAnimation {
+                                viewMode = viewMode == .personal ? .global : .personal
+                                if viewMode == .global {
+                                    Task {
+                                        await store.loadGlobalRatings()
+                                    }
+                                }
+                            }
+                        }) {
+                            Image(systemName: viewMode == .personal ? "globe" : "person.circle")
                                 .font(.title2)
                         }
                     }
+                    
+                    if viewMode == .personal {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: { showingAddMovie = true }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title2)
+                            }
+                        }
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            EditButton()
+                        }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(action: { showingFilters = true }) {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                    .font(.title2)
+                            }
+                        }
+                    }
+                    
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(action: {
                             try? authService.signOut()
@@ -1974,6 +2185,17 @@ struct ContentView: View {
                 }
                 .navigationDestination(item: $selectedMovie) { movie in
                     TMDBMovieDetailView(movie: movie)
+                }
+                .navigationDestination(item: $selectedGlobalRating) { rating in
+                    GlobalRatingDetailView(rating: rating, store: store)
+                }
+                .onChange(of: viewMode) { oldValue, newValue in
+                    // Load global ratings when switching to global view
+                    if newValue == .global {
+                        Task {
+                            await store.loadGlobalRatings()
+                        }
+                    }
                 }
             }
             .navigationViewStyle(.stack)
@@ -2164,5 +2386,627 @@ class ComparisonManager {
     func loadIncompleteComparisons() -> [Movie] {
         // Load any movies that were in the middle of comparison
         return [] // Return empty array for now
+    }
+}
+
+struct GlobalRatingRow: View {
+    let rating: GlobalRating
+    let position: Int
+    let onTap: () -> Void
+    @ObservedObject var store: MovieStore
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: UI.vGap) {
+                Text("\(position)")
+                    .font(.headline).foregroundColor(.gray)
+                    .frame(width: 30)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rating.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack(spacing: 4) {
+                    // Show user's rating difference if they have rated this movie
+                    if let tmdbId = rating.tmdbId,
+                       let userScore = store.getUserPersonalScore(for: tmdbId) {
+                        let difference = userScore - rating.averageRating
+                        let isHigher = difference > 0
+                        let color: Color = isHigher ? .green : .red
+                        let arrow = isHigher ? "arrow.up" : "arrow.down"
+                        
+                        VStack(spacing: 1) {
+                            if abs(difference) < 0.1 {
+                                // Show dash for very small differences (essentially zero)
+                                Text("—")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            } else {
+                                Image(systemName: arrow)
+                                    .foregroundColor(color)
+                                    .font(.caption2)
+                                Text(String(format: "%.1f", abs(difference)))
+                                    .font(.caption2)
+                                    .foregroundColor(color)
+                            }
+                        }
+                        .frame(width: 20)
+                    } else {
+                        // Empty space to maintain alignment when user hasn't rated
+                        Spacer()
+                            .frame(width: 20)
+                    }
+                    
+                    Text(String(format: "%.1f", rating.displayScore))
+                        .font(.headline).bold()
+                        .foregroundColor(rating.sentimentColor)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle()
+                                .stroke(rating.sentimentColor, lineWidth: 2)
+                        )
+                }
+
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.gray)
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .padding(.vertical, 6)
+            .background(Color(.systemGray6))
+            .cornerRadius(UI.corner)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Global Rating Detail View
+struct GlobalRatingDetailView: View {
+    let rating: GlobalRating
+    @ObservedObject var store: MovieStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var movieDetails: AppModels.Movie?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var isAppearing = false
+    @State private var showingAddMovie = false
+    @EnvironmentObject var authService: AuthenticationService
+    
+    private let tmdbService = TMDBService()
+    
+    var body: some View {
+        ScrollView {
+            if isLoading {
+                loadingView
+            } else if let error = errorMessage {
+                errorView(message: error)
+            } else if let details = movieDetails {
+                detailView(details: details)
+            } else {
+                // Fallback view when no TMDB details available
+                fallbackView
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Community Rating")
+        .task {
+            loadMovieDetails()
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.3)) {
+                isAppearing = true
+            }
+        }
+    }
+    
+    private var loadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Loading details...")
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .transition(.opacity)
+    }
+    
+    private func errorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+                .foregroundColor(.orange)
+            Text("Couldn't load details")
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again") {
+                loadMovieDetails()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .transition(.opacity)
+    }
+    
+    private var fallbackView: some View {
+        VStack(spacing: 20) {
+            // Community Rating Display
+            VStack(spacing: 4) {
+                Text("Community Rating")
+                    .font(.title2)
+                    .fontWeight(.medium)
+                Text(String(format: "%.1f", rating.displayScore))
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .foregroundColor(rating.sentimentColor)
+                    .frame(width: 80, height: 80)
+                    .background(
+                        Circle()
+                            .stroke(rating.sentimentColor, lineWidth: 3)
+                    )
+                Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 40)
+            
+            // User rating comparison or "Rank This" button
+            userRatingSection
+            
+            VStack(alignment: .leading, spacing: 16) {
+                Text(rating.title)
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                
+                Text(rating.mediaType.rawValue)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.accentColor.opacity(0.1))
+                    .cornerRadius(8)
+            }
+            .padding(.horizontal)
+            
+            Spacer()
+        }
+        .opacity(isAppearing ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: isAppearing)
+        .sheet(isPresented: $showingAddMovie) {
+            if let movieDetails = movieDetails {
+                AddMovieFromGlobalView(
+                    tmdbMovie: movieDetails,
+                    store: store,
+                    onComplete: { 
+                        Task {
+                            await store.loadGlobalRatings()
+                        }
+                        dismiss() 
+                    }
+                )
+                .onAppear {
+                    // Set the correct media type before starting the rating process
+                    store.selectedMediaType = movieDetails.mediaType
+                }
+            }
+        }
+    }
+    
+    private var userRatingSection: some View {
+        Group {
+            if let tmdbId = rating.tmdbId {
+                if let userScore = store.getUserPersonalScore(for: tmdbId) {
+                    // User has rated this movie - show comparison
+                    VStack(spacing: 8) {
+                        Text("Your Rating vs Community")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        HStack(spacing: 20) {
+                            VStack(spacing: 4) {
+                                Text("Your Rating")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(String(format: "%.1f", userScore))
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.accentColor)
+                            }
+                            
+                            VStack(spacing: 4) {
+                                let difference = userScore - rating.averageRating
+                                let isHigher = difference > 0
+                                let color: Color = isHigher ? .green : .red
+                                let arrow = isHigher ? "arrow.up" : "arrow.down"
+                                
+                                if abs(difference) < 0.1 {
+                                    // Show dash for very small differences (essentially zero)
+                                    Text("—")
+                                        .font(.title2)
+                                        .foregroundColor(.gray)
+                                    Text("Same")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                } else {
+                                    Image(systemName: arrow)
+                                        .foregroundColor(color)
+                                        .font(.title2)
+                                    Text(String(format: "%.1f", abs(difference)))
+                                        .font(.headline)
+                                        .foregroundColor(color)
+                                }
+                            }
+                            
+                            VStack(spacing: 4) {
+                                Text("Community")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(String(format: "%.1f", rating.displayScore))
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(rating.sentimentColor)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                } else {
+                    // User hasn't rated this movie - show "Rank This" button
+                    Button(action: {
+                        // Set the correct media type before starting the rating process
+                        store.selectedMediaType = rating.mediaType
+                        showingAddMovie = true
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Rank This \(rating.mediaType.rawValue)")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.accentColor)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+    
+    private func detailView(details: AppModels.Movie) -> some View {
+        VStack(spacing: 20) {
+            // Poster
+            if let posterPath = details.poster_path {
+                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fit)
+                } placeholder: {
+                    Color.gray
+                }
+                .frame(maxHeight: 400)
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .scale))
+            }
+            
+            VStack(alignment: .leading, spacing: 16) {
+                // Title and Release Date
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(details.displayTitle)
+                        .font(.title)
+                        .fontWeight(.bold)
+                    
+                    if let releaseDate = details.displayDate {
+                        Text("Released: \(formatDate(releaseDate))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // Community Rating Display (prominent placement)
+                VStack(spacing: 4) {
+                    Text("Community Rating")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.1f", rating.displayScore))
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(rating.sentimentColor)
+                        .frame(width: 80, height: 80)
+                        .background(
+                            Circle()
+                                .stroke(rating.sentimentColor, lineWidth: 3)
+                        )
+                    Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                
+                // User rating comparison or "Rank This" button
+                userRatingSection
+                .padding(.horizontal, -16) // Compensate for the outer padding
+                
+                // Runtime
+                if let runtime = details.displayRuntime {
+                    HStack {
+                        Image(systemName: "clock")
+                        Text(formatRuntime(runtime))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                }
+                
+                // TMDB Rating
+                if let tmdbRating = details.vote_average, tmdbRating > 0 {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text(String(format: "%.1f", tmdbRating))
+                            .font(.headline)
+                        Text("TMDB")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if let votes = details.vote_count {
+                            Text("(\(votes) votes)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                // Overview
+                if let overview = details.overview, !overview.isEmpty {
+                    Text("Overview")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    Text(overview)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical)
+        .opacity(isAppearing ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: isAppearing)
+        .sheet(isPresented: $showingAddMovie) {
+            if let movieDetails = movieDetails {
+                AddMovieFromGlobalView(
+                    tmdbMovie: movieDetails,
+                    store: store,
+                    onComplete: { 
+                        Task {
+                            await store.loadGlobalRatings()
+                        }
+                        dismiss() 
+                    }
+                )
+                .onAppear {
+                    // Set the correct media type before starting the rating process
+                    store.selectedMediaType = movieDetails.mediaType
+                }
+            }
+        }
+    }
+    
+    private func loadMovieDetails() {
+        guard let tmdbId = rating.tmdbId else {
+            // No TMDB ID available, show fallback view
+            isLoading = false
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let tmdbMovie: TMDBMovie
+                if rating.mediaType == .tv {
+                    tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                } else {
+                    tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                }
+                
+                await MainActor.run {
+                    movieDetails = AppModels.Movie(
+                        id: tmdbMovie.id,
+                        title: tmdbMovie.title,
+                        name: tmdbMovie.name,
+                        overview: tmdbMovie.overview,
+                        poster_path: tmdbMovie.posterPath,
+                        release_date: tmdbMovie.releaseDate,
+                        first_air_date: tmdbMovie.firstAirDate,
+                        vote_average: tmdbMovie.voteAverage,
+                        vote_count: tmdbMovie.voteCount,
+                        genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
+                        media_type: rating.mediaType.rawValue, // Use the media type from our GlobalRating, not TMDB
+                        runtime: tmdbMovie.runtime,
+                        episode_run_time: tmdbMovie.episodeRunTime
+                    )
+                    isLoading = false
+                }
+            } catch {
+                if (error as NSError).code != NSURLErrorCancelled {
+                    await MainActor.run {
+                        errorMessage = error.localizedDescription
+                        isLoading = false
+                    }
+                }
+            }
+        }
+    }
+    
+    private func formatDate(_ dateString: String) -> String {
+        let inputFormatter = DateFormatter()
+        inputFormatter.dateFormat = "yyyy-MM-dd"
+        
+        let outputFormatter = DateFormatter()
+        outputFormatter.dateFormat = "MMMM d, yyyy"
+        
+        if let date = inputFormatter.date(from: dateString) {
+            return outputFormatter.string(from: date)
+        }
+        return dateString
+    }
+    
+    private func formatRuntime(_ runtime: String) -> String {
+        // Extract the number from the string (e.g., "120 min" -> 120)
+        if let minutes = Int(runtime.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if hours > 0 {
+                return "\(hours)h \(remainingMinutes)m"
+            } else {
+                return "\(remainingMinutes)m"
+            }
+        }
+        return runtime // Return original string if parsing fails
+    }
+}
+
+// MARK: - Add Movie From Global View
+struct AddMovieFromGlobalView: View {
+    let tmdbMovie: AppModels.Movie
+    @ObservedObject var store: MovieStore
+    let onComplete: () -> Void
+    
+    @Environment(\.dismiss) private var dismiss
+    @State private var sentiment: MovieSentiment = .likedIt
+    @State private var currentStep = 1
+    @State private var newMovie: Movie? = nil
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 40) {
+                Group {
+                    switch currentStep {
+                    case 1:
+                        sentimentStep
+                    case 2:
+                        comparisonStep
+                    default:
+                        EmptyView()
+                    }
+                }
+                .transition(.opacity)
+                .animation(.easeInOut, value: currentStep)
+                
+                Spacer()
+            }
+            .navigationTitle("Rate \(tmdbMovie.displayTitle)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: { dismiss() })
+                }
+            }
+            .onAppear {
+                // Ensure user's personal rankings are loaded for comparison
+                Task {
+                    if let userId = AuthenticationService.shared.currentUser?.uid {
+                        do {
+                            let userRankings = try await store.firestoreService.getUserRankings(userId: userId)
+                            await MainActor.run {
+                                // Update the store with personal rankings
+                                store.movies = userRankings.filter { $0.mediaType == .movie }
+                                store.tvShows = userRankings.filter { $0.mediaType == .tv }
+                                print("AddMovieFromGlobalView: Loaded \(store.movies.count) movies and \(store.tvShows.count) TV shows for comparison")
+                                print("AddMovieFromGlobalView: Target media type for new item: \(tmdbMovie.mediaType)")
+                            }
+                        } catch {
+                            print("AddMovieFromGlobalView: Error loading personal rankings: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private var sentimentStep: some View {
+        VStack(spacing: 30) {
+            VStack(spacing: 16) {
+                // Movie info
+                Text(tmdbMovie.displayTitle)
+                    .font(.title2)
+                    .fontWeight(.medium)
+                    .multilineTextAlignment(.center)
+                
+                if let releaseDate = tmdbMovie.displayDate {
+                    Text(releaseDate.prefix(4))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Text("How did you feel about it?")
+                .font(.headline)
+                .fontWeight(.medium)
+            
+            VStack(spacing: 16) {
+                ForEach(MovieSentiment.allCasesOrdered) { sentiment in
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .medium)
+                        generator.impactOccurred()
+                        self.sentiment = sentiment
+                        withAnimation {
+                            currentStep = 2
+                            
+                            // Create the movie object
+                            newMovie = Movie(
+                                title: tmdbMovie.displayTitle,
+                                sentiment: self.sentiment,
+                                tmdbId: tmdbMovie.id,
+                                mediaType: tmdbMovie.mediaType,
+                                genres: tmdbMovie.genres ?? [],
+                                score: self.sentiment.midpoint,
+                                comparisonsCount: 0
+                            )
+                        }
+                    }) {
+                        HStack {
+                            Text(sentiment.rawValue)
+                                .font(.headline)
+                                .fontWeight(.medium)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.gray)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(sentiment.color.opacity(0.15))
+                        .cornerRadius(12)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(.primary)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private var comparisonStep: some View {
+        VStack {
+            if let movie = newMovie {
+                ComparisonView(store: store, newMovie: movie) {
+                    onComplete()
+                }
+            } else {
+                ProgressView()
+            }
+        }
     }
 }
