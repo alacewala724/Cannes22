@@ -14,7 +14,6 @@ struct ContentView: View {
     @State private var showingAddMovie = false
     @State private var showingSettings = false
     @State private var showingFilter = false
-    @State private var selectedGenres: Set<AppModels.Genre> = []
     @State private var showingGlobalRatingDetail: GlobalRating?
     @State private var isEditing = false
     
@@ -44,7 +43,7 @@ struct ContentView: View {
             SettingsView()
         }
         .sheet(isPresented: $showingFilter) {
-            FilterView(selectedGenres: $selectedGenres, availableGenres: availableGenres)
+            FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
         }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
@@ -74,7 +73,7 @@ struct ContentView: View {
             // Top navigation bar
             HStack {
                 HStack(spacing: 12) {
-                    Button(action: { 
+                    Button(action: {
                         viewMode = viewMode == .personal ? .global : .personal
                     }) {
                         Image(systemName: viewMode == .personal ? "globe" : "person")
@@ -82,11 +81,14 @@ struct ContentView: View {
                             .foregroundColor(viewMode == .global ? .accentColor : .primary)
                     }
                     
-                    Button("Edit") {
-                        isEditing.toggle()
+                    // Only show Edit button in personal view
+                    if viewMode == .personal {
+                        Button(isEditing ? "Done" : "Edit") {
+                            isEditing.toggle()
+                        }
+                        .font(.subheadline)
+                        .foregroundColor(.accentColor)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.accentColor)
                 }
                 
                 Spacer()
@@ -244,12 +246,17 @@ struct ContentView: View {
         ScrollView {
             LazyVStack(spacing: UI.vGap) {
                 ForEach(Array(store.getMovies().enumerated()), id: \.element.id) { index, movie in
-                    MovieRow(movie: movie, position: index + 1, store: store)
+                    MovieRow(movie: movie, position: index + 1, store: store, isEditing: isEditing)
                 }
+                .onDelete(perform: isEditing ? deleteMovies : nil)
             }
             .padding(.horizontal, 4)
             .padding(.vertical, UI.vGap)
         }
+    }
+    
+    private func deleteMovies(at offsets: IndexSet) {
+        store.deleteMovies(at: offsets)
     }
     
     private var globalRatingListView: some View {
@@ -270,13 +277,11 @@ struct ContentView: View {
     }
     
     private var globalRatings: [GlobalRating] {
-        store.selectedMediaType == .movie ? store.globalMovieRatings : store.globalTVRatings
+        store.getGlobalRatings()
     }
 
     private var availableGenres: [AppModels.Genre] {
-        let allMovies = store.movies + store.tvShows
-        let allGenres = allMovies.flatMap { $0.genres }
-        return Array(Set(allGenres)).sorted { $0.name < $1.name }
+        store.getAllAvailableGenres()
     }
 }
 
@@ -285,44 +290,69 @@ struct MovieRow: View {
     let movie: Movie
     let position: Int
     @ObservedObject var store: MovieStore
+    let isEditing: Bool
     @State private var showingDetail = false
 
     var body: some View {
-        Button(action: { showingDetail = true }) {
-            HStack(spacing: UI.vGap) {
-                Text("\(position)")
-                    .font(.headline)
-                    .foregroundColor(.gray)
-                    .frame(width: 30)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(movie.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: UI.vGap) {
+            // Show delete button when editing
+            if isEditing {
+                Button(action: {
+                    // Delete this specific movie
+                    if let index = store.getMovies().firstIndex(where: { $0.id == movie.id }) {
+                        store.deleteMovies(at: IndexSet([index]))
+                    }
+                }) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.red)
                 }
-
-                Text(String(format: "%.1f", movie.displayScore))
-                    .font(.headline).bold()
-                    .foregroundColor(movie.sentiment.color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        Circle()
-                            .stroke(movie.sentiment.color, lineWidth: 2)
-                    )
-
-                Image(systemName: "chevron.right")
-                    .foregroundColor(.gray)
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
-            .background(Color(.systemGray6))
-            .cornerRadius(UI.corner)
+            
+            Button(action: { 
+                if !isEditing {
+                    showingDetail = true 
+                }
+            }) {
+                HStack(spacing: UI.vGap) {
+                    Text("\(position)")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(movie.title)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Text(String(format: "%.1f", movie.displayScore))
+                        .font(.headline).bold()
+                        .foregroundColor(movie.sentiment.color)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle()
+                                .stroke(movie.sentiment.color, lineWidth: 2)
+                        )
+
+                    if !isEditing {
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.gray)
+                            .font(.title3)
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .background(Color(.systemGray6))
+                .cornerRadius(UI.corner)
+            }
+            .buttonStyle(.plain)
+            .disabled(isEditing)
         }
-        .buttonStyle(.plain)
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
                 TMDBMovieDetailView(movie: movie)

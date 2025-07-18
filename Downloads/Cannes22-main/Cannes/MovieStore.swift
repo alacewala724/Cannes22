@@ -14,6 +14,9 @@ final class MovieStore: ObservableObject {
     @Published var globalTVRatings: [GlobalRating] = []
     @Published var selectedMediaType: AppModels.MediaType = .movie
     
+    // Published properties for filtering
+    @Published var selectedGenres: Set<AppModels.Genre> = []
+    
     // Error handling
     @Published var errorMessage: String?
     @Published var showError = false
@@ -148,34 +151,36 @@ final class MovieStore: ObservableObject {
         // If online, try to load from server
         if networkMonitor.isConnected {
             await loadFromServer(userId: userId)
-        } else if movies.isEmpty && tvShows.isEmpty {
-            // We're offline and have no cached data
-            showError(message: "No internet connection. Unable to load your rankings.")
+        } else {
+            // We're offline - make sure we loaded from cache
+            if movies.isEmpty && tvShows.isEmpty {
+                // Try loading from cache even if we already tried (in case of issues)
+                await loadFromCache(userId: userId)
+                
+                // If still no data, show error
+                if movies.isEmpty && tvShows.isEmpty {
+                    showError(message: "No internet connection. Unable to load your rankings.")
+                }
+            }
         }
     }
     
     private func loadFromCache(userId: String) async {
         await MainActor.run { isLoadingFromCache = true }
-        defer { 
-            Task { @MainActor in 
-                self.isLoadingFromCache = false 
-            }
-        }
         
         print("loadFromCache: Loading personal rankings from cache")
         
         let cachedMovies = cacheManager.getCachedPersonalMovies(userId: userId) ?? []
         let cachedTVShows = cacheManager.getCachedPersonalTVShows(userId: userId) ?? []
         
-        if !cachedMovies.isEmpty || !cachedTVShows.isEmpty {
-            await MainActor.run {
-                self.movies = cachedMovies
-                self.tvShows = cachedTVShows
-                self.lastSyncDate = cacheManager.getLastSyncDate(userId: userId)
-            }
-            
-            print("loadFromCache: Loaded \(cachedMovies.count) movies and \(cachedTVShows.count) TV shows from cache")
+        await MainActor.run {
+            self.movies = cachedMovies
+            self.tvShows = cachedTVShows
+            self.lastSyncDate = cacheManager.getLastSyncDate(userId: userId)
+            self.isLoadingFromCache = false
         }
+        
+        print("loadFromCache: Loaded \(cachedMovies.count) movies and \(cachedTVShows.count) TV shows from cache")
     }
     
     private func loadFromServer(userId: String) async {
@@ -642,9 +647,24 @@ final class MovieStore: ObservableObject {
     }
 
     func getMovies() -> [Movie] {
-        return selectedMediaType == .movie ? movies : tvShows
+        let movies = selectedMediaType == .movie ? self.movies : tvShows
+        
+        if selectedGenres.isEmpty {
+            return movies
+        }
+        
+        return movies.filter { movie in
+            // Check if the movie has any of the selected genres
+            return movie.genres.contains { genre in
+                selectedGenres.contains(genre)
+            }
+        }
     }
 
+    func getAllMovies() -> [Movie] {
+        return selectedMediaType == .movie ? movies : tvShows
+    }
+    
     func recalculateScoresAndUpdateCommunityRatings(skipCommunityUpdates: Bool = false) async throws {
         guard !isRecalculating else {
             print("recalculateScoresAndUpdateCommunityRatings: Already recalculating, skipping")
@@ -877,33 +897,35 @@ final class MovieStore: ObservableObject {
         // If online, try to load from server
         if networkMonitor.isConnected {
             await loadGlobalRatingsFromServer()
-        } else if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
-            // We're offline and have no cached data
-            showError(message: "No internet connection. Unable to load community rankings.")
+        } else {
+            // We're offline - make sure we loaded from cache
+            if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
+                // Try loading from cache even if we already tried (in case of issues)
+                await loadGlobalRatingsFromCache()
+                
+                // If still no data, show error
+                if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
+                    showError(message: "No internet connection. Unable to load community rankings.")
+                }
+            }
         }
     }
     
     private func loadGlobalRatingsFromCache() async {
         await MainActor.run { isLoadingFromCache = true }
-        defer { 
-            Task { @MainActor in 
-                self.isLoadingFromCache = false 
-            }
-        }
         
         print("loadGlobalRatingsFromCache: Loading global ratings from cache")
         
         let cachedMovieRatings = cacheManager.getCachedGlobalMovieRatings() ?? []
         let cachedTVRatings = cacheManager.getCachedGlobalTVRatings() ?? []
         
-        if !cachedMovieRatings.isEmpty || !cachedTVRatings.isEmpty {
-            await MainActor.run {
-                self.globalMovieRatings = cachedMovieRatings
-                self.globalTVRatings = cachedTVRatings
-            }
-            
-            print("loadGlobalRatingsFromCache: Loaded \(cachedMovieRatings.count) movie ratings and \(cachedTVRatings.count) TV ratings from cache")
+        await MainActor.run {
+            self.globalMovieRatings = cachedMovieRatings
+            self.globalTVRatings = cachedTVRatings
+            self.isLoadingFromCache = false
         }
+        
+        print("loadGlobalRatingsFromCache: Loaded \(cachedMovieRatings.count) movie ratings and \(cachedTVRatings.count) TV ratings from cache")
     }
     
     private func loadGlobalRatingsFromServer() async {
@@ -963,5 +985,38 @@ final class MovieStore: ObservableObject {
             print("loadGlobalRatingsFromServer: Error loading global ratings: \(error)")
             showError(message: handleError(error))
         }
+    }
+    
+    func getGlobalRatings() -> [GlobalRating] {
+        let ratings = selectedMediaType == .movie ? globalMovieRatings : globalTVRatings
+        
+        if selectedGenres.isEmpty {
+            return ratings
+        }
+        
+        // Filter global ratings based on TMDB ID matching with personal movies that have the selected genres
+        let filteredMovieIds = Set(getAllMovies().filter { movie in
+            movie.genres.contains { genre in
+                selectedGenres.contains(genre)
+            }
+        }.compactMap { $0.tmdbId })
+        
+        return ratings.filter { rating in
+            if let tmdbId = rating.tmdbId {
+                return filteredMovieIds.contains(tmdbId)
+            }
+            return false
+        }
+    }
+    
+    func getAllGlobalRatings() -> [GlobalRating] {
+        return selectedMediaType == .movie ? globalMovieRatings : globalTVRatings
+    }
+    
+    func getAllAvailableGenres() -> [AppModels.Genre] {
+        // Get genres from both personal movies and any cached TMDB data
+        let personalMovies = movies + tvShows
+        let allGenres = personalMovies.flatMap { $0.genres }
+        return Array(Set(allGenres)).sorted { $0.name < $1.name }
     }
 } 

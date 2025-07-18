@@ -7,7 +7,7 @@ struct TMDBMovieDetailView: View {
     let movie: Movie
     @Environment(\.dismiss) private var dismiss
     @State private var movieDetails: AppModels.Movie?
-    @State private var isLoading = true
+    @State private var isLoading = true // Start with loading state
     @State private var errorMessage: String?
     @State private var isAppearing = false
     @State private var seasons: [TMDBSeason] = []
@@ -31,13 +31,129 @@ struct TMDBMovieDetailView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
                 
-                if isLoading {
-                    loadingView
-                } else if let error = errorMessage {
-                    errorView(message: error)
-                } else if let details = movieDetails {
-                    detailView(details: details)
+                // Always show skeleton first, then content
+                VStack(spacing: 20) {
+                        // Poster area - always reserve this space
+                    Group {
+                        if isLoading {
+                            // Loading skeleton
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 400)
+                                .cornerRadius(12)
+                                .opacity(0.3)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                        } else if let details = movieDetails {
+                            // Show poster or placeholder
+                            if let posterPath = details.poster_path {
+                                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(height: 400)
+                                            .cornerRadius(12)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: true)
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(maxHeight: 400)
+                                            .cornerRadius(12)
+                                    case .failure:
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(height: 400)
+                                            .cornerRadius(12)
+                                            .overlay(
+                                                VStack {
+                                                    Image(systemName: "photo")
+                                                        .font(.largeTitle)
+                                                        .foregroundColor(.secondary)
+                                                    Text("Image unavailable")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                            )
+                                    @unknown default:
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(height: 400)
+                                            .cornerRadius(12)
+                                    }
+                                }
+                            } else {
+                                // No poster path available
+                                Rectangle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(height: 400)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        VStack {
+                                            Image(systemName: "photo")
+                                                .font(.largeTitle)
+                                                .foregroundColor(.secondary)
+                                            Text("No poster available")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    )
+                            }
+                        } else {
+                            // Fallback placeholder
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 400)
+                                .cornerRadius(12)
+                                .opacity(0.3)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                        }
+                    }
+                    
+                    // Content area
+                    if isLoading {
+                        // Content skeleton
+                        VStack(alignment: .leading, spacing: 16) {
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 32)
+                                .cornerRadius(8)
+                                .opacity(0.3)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                            
+                            HStack(spacing: 20) {
+                                Rectangle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(Circle())
+                                    .opacity(0.3)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                Rectangle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(Circle())
+                                    .opacity(0.3)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                            }
+                            
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 24)
+                                .cornerRadius(8)
+                                .opacity(0.3)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                        }
+                        .padding(.horizontal)
+                    } else if let error = errorMessage {
+                        // Error state
+                        errorView(message: error)
+                    } else if let details = movieDetails {
+                        // Actual content
+                        actualContentView(details: details)
+                    }
                 }
+                .padding(.vertical)
             }
         }
         .navigationBarHidden(true)
@@ -48,7 +164,6 @@ struct TMDBMovieDetailView: View {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
             }
-            print("TMDBMovieDetailView: onAppear - fetching average rating for movie: \(movie.title) (ID: \(movie.id.uuidString))")
             fetchAverageRating(for: movie.id.uuidString)
         }
         .onChange(of: selectedSeason) { (oldValue: TMDBSeason?, newValue: TMDBSeason?) in
@@ -56,16 +171,6 @@ struct TMDBMovieDetailView: View {
                 loadEpisodes(for: season)
             }
         }
-    }
-    
-    private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading movie details...")
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .transition(.opacity)
     }
     
     private func errorView(message: String) -> some View {
@@ -88,164 +193,146 @@ struct TMDBMovieDetailView: View {
         .transition(.opacity)
     }
     
-    private func detailView(details: AppModels.Movie) -> some View {
-        VStack(spacing: 20) {
-            // Poster
-            if let posterPath = details.poster_path {
-                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fit)
-                } placeholder: {
-                    Color.gray
-                }
-                .frame(maxHeight: 400)
-                .cornerRadius(12)
-                .transition(.opacity.combined(with: .scale))
-            }
-            
-            VStack(alignment: .leading, spacing: 16) {
-                // Title and Release Date
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(details.displayTitle)
-                        .font(.title)
-                        .fontWeight(.bold)
-                    
-                    if let releaseDate = details.displayDate {
-                        Text("Released: \(formatDate(releaseDate))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
+    private func actualContentView(details: AppModels.Movie) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Title and Release Date
+            VStack(alignment: .leading, spacing: 8) {
+                Text(details.displayTitle)
+                    .font(.title)
+                    .fontWeight(.bold)
                 
-                // Runtime
-                if let runtime = details.displayRuntime {
-                    HStack {
-                        Image(systemName: "clock")
-                        Text(formatRuntime(runtime))
-                    }
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                }
-                
-                // Rating
-                if let rating = details.vote_average, rating > 0 {
-                    HStack {
-                        Image(systemName: "star.fill")
-                            .foregroundColor(.yellow)
-                        Text(String(format: "%.1f", rating))
-                            .font(.headline)
-                        if let votes = details.vote_count {
-                            Text("(\(votes) votes)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                // Display ratings side by side (moved above genres)
-                HStack(spacing: 20) {
-                    // Personal Rating
-                    VStack(spacing: 4) {
-                        Text("Your Rating")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(String(format: "%.1f", movie.displayScore))
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(movie.sentiment.color)
-                            .frame(width: 60, height: 60)
-                            .background(
-                                Circle()
-                                    .stroke(movie.sentiment.color, lineWidth: 2)
-                            )
-                    }
-                    
-                    // Community Rating
-                    VStack(spacing: 4) {
-                        Text("Community")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        if let avg = averageRating {
-                            Text(String(format: "%.1f", avg))
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.accentColor)
-                                .frame(width: 60, height: 60)
-                                .background(
-                                    Circle()
-                                        .stroke(Color.accentColor, lineWidth: 2)
-                                )
-                        } else {
-                            Text("—")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.secondary)
-                                .frame(width: 60, height: 60)
-                                .background(
-                                    Circle()
-                                        .stroke(Color.secondary, lineWidth: 2)
-                                )
-                        }
-                    }
-                }
-                .padding(.top, 8)
-                
-                // Genres
-                if let genres = details.genres, !genres.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Genres")
-                            .font(.headline)
-                            .padding(.top, 8)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(8)
-                        if #available(iOS 16.0, *) {
-                            FlowLayout(spacing: 8) {
-                                ForEach(genres) { genre in
-                                    Text(genre.name)
-                                        .font(.subheadline)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.accentColor.opacity(0.1))
-                                        .cornerRadius(8)
-                                }
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(genres) { genre in
-                                    Text(genre.name)
-                                        .font(.subheadline)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.accentColor.opacity(0.1))
-                                        .cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // TV Show specific content
-                if movie.mediaType == .tv {
-                    tvShowContent
-                }
-                
-                // Overview
-                if let overview = details.overview, !overview.isEmpty {
-                    Text("Overview")
-                        .font(.headline)
-                        .padding(.top, 8)
-                    Text(overview)
-                        .font(.body)
+                if let releaseDate = details.displayDate {
+                    Text("Released: \(formatDate(releaseDate))")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal)
+            
+            // Runtime
+            if let runtime = details.displayRuntime {
+                HStack {
+                    Image(systemName: "clock")
+                    Text(formatRuntime(runtime))
+                }
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            }
+            
+            // Rating
+            if let rating = details.vote_average, rating > 0 {
+                HStack {
+                    Image(systemName: "star.fill")
+                        .foregroundColor(.yellow)
+                    Text(String(format: "%.1f", rating))
+                        .font(.headline)
+                    if let votes = details.vote_count {
+                        Text("(\(votes) votes)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            // Display ratings side by side
+            HStack(spacing: 20) {
+                // Personal Rating
+                VStack(spacing: 4) {
+                    Text("Your Rating")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.1f", movie.displayScore))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(movie.sentiment.color)
+                        .frame(width: 60, height: 60)
+                        .background(
+                            Circle()
+                                .stroke(movie.sentiment.color, lineWidth: 2)
+                        )
+                }
+                
+                // Community Rating
+                VStack(spacing: 4) {
+                    Text("Community")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    if let avg = averageRating {
+                        Text(String(format: "%.1f", avg))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.accentColor)
+                            .frame(width: 60, height: 60)
+                            .background(
+                                Circle()
+                                    .stroke(Color.accentColor, lineWidth: 2)
+                            )
+                    } else {
+                        Text("—")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                            .frame(width: 60, height: 60)
+                            .background(
+                                Circle()
+                                    .stroke(Color.secondary, lineWidth: 2)
+                            )
+                    }
+                }
+            }
+            .padding(.top, 8)
+            
+            // Genres
+            if let genres = details.genres, !genres.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Genres")
+                        .font(.headline)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.accentColor.opacity(0.1))
+                        .cornerRadius(8)
+                    if #available(iOS 16.0, *) {
+                        FlowLayout(spacing: 8) {
+                            ForEach(genres) { genre in
+                                Text(genre.name)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.accentColor.opacity(0.1))
+                                    .cornerRadius(8)
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(genres) { genre in
+                                Text(genre.name)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.accentColor.opacity(0.1))
+                                    .cornerRadius(8)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // TV Show specific content
+            if movie.mediaType == .tv {
+                tvShowContent
+            }
+            
+            // Overview
+            if let overview = details.overview, !overview.isEmpty {
+                Text("Overview")
+                    .font(.headline)
+                    .padding(.top, 8)
+                Text(overview)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+            }
         }
-        .padding(.vertical)
-        .opacity(isAppearing ? 1 : 0)
-        .animation(.easeOut(duration: 0.3), value: isAppearing)
+        .padding(.horizontal)
     }
     
     private var tvShowContent: some View {
@@ -316,6 +403,7 @@ struct TMDBMovieDetailView: View {
             return
         }
         
+        print("loadMovieDetails: Starting to load details for \(movie.title)")
         isLoading = true
         errorMessage = nil
         
@@ -342,6 +430,7 @@ struct TMDBMovieDetailView: View {
                 }
                 
                 await MainActor.run {
+                    print("loadMovieDetails: Setting movieDetails and ending loading state")
                     movieDetails = AppModels.Movie(
                         id: tmdbMovie.id,
                         title: tmdbMovie.title,
@@ -362,6 +451,7 @@ struct TMDBMovieDetailView: View {
             } catch {
                 if (error as NSError).code != NSURLErrorCancelled {
                     await MainActor.run {
+                        print("loadMovieDetails: Error occurred: \(error)")
                         errorMessage = error.localizedDescription
                         isLoading = false
                     }
