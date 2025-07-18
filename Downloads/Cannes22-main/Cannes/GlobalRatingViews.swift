@@ -130,13 +130,58 @@ struct GlobalRatingDetailView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading details...")
-                .foregroundColor(.secondary)
+        VStack(spacing: 20) {
+            // Poster placeholder
+            Rectangle()
+                .fill(Color(.systemGray5))
+                .frame(maxHeight: 400)
+                .cornerRadius(12)
+                .opacity(0.3)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+            
+            // Content placeholder
+            VStack(alignment: .leading, spacing: 16) {
+                // Title placeholder
+                Rectangle()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 32)
+                    .cornerRadius(8)
+                    .opacity(0.3)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                
+                // Community rating placeholder
+                VStack(spacing: 4) {
+                    Rectangle()
+                        .fill(Color(.systemGray5))
+                        .frame(width: 80, height: 80)
+                        .clipShape(Circle())
+                        .opacity(0.3)
+                        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                
+                // User rating section placeholder
+                Rectangle()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 60)
+                    .cornerRadius(12)
+                    .opacity(0.3)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                
+                // Additional content placeholders
+                Rectangle()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 24)
+                    .cornerRadius(8)
+                    .opacity(0.3)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+            }
+            .padding(.horizontal)
         }
-        .padding()
-        .transition(.opacity)
+        .padding(.vertical)
+        .opacity(isAppearing ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: isAppearing)
     }
     
     private func errorView(message: String) -> some View {
@@ -310,17 +355,63 @@ struct GlobalRatingDetailView: View {
     
     private func detailView(details: AppModels.Movie) -> some View {
         VStack(spacing: 20) {
-            // Poster
-            if let posterPath = details.poster_path {
-                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { image in
-                    image.resizable()
-                        .aspectRatio(contentMode: .fit)
-                } placeholder: {
-                    Color.gray
+            // Poster area - always reserve this space
+            Group {
+                if let posterPath = details.poster_path {
+                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { phase in
+                        switch phase {
+                        case .empty:
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 400)
+                                .cornerRadius(12)
+                                .opacity(0.3)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: true)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 400)
+                                .cornerRadius(12)
+                        case .failure:
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 400)
+                                .cornerRadius(12)
+                                .overlay(
+                                    VStack {
+                                        Image(systemName: "photo")
+                                            .font(.largeTitle)
+                                            .foregroundColor(.secondary)
+                                        Text("Image unavailable")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                )
+                        @unknown default:
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 400)
+                                .cornerRadius(12)
+                        }
+                    }
+                } else {
+                    // No poster path available
+                    Rectangle()
+                        .fill(Color(.systemGray5))
+                        .frame(height: 400)
+                        .cornerRadius(12)
+                        .overlay(
+                            VStack {
+                                Image(systemName: "photo")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.secondary)
+                                Text("No poster available")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        )
                 }
-                .frame(maxHeight: 400)
-                .cornerRadius(12)
-                .transition(.opacity.combined(with: .scale))
             }
             
             VStack(alignment: .leading, spacing: 16) {
