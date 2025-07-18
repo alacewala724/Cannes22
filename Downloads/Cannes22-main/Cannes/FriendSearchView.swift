@@ -468,15 +468,13 @@ struct UserProfile: Identifiable {
     let uid: String
     let username: String
     let email: String?
-    let phoneNumber: String?
     let movieCount: Int?
     let createdAt: Date?
     
-    init(uid: String, username: String, email: String? = nil, phoneNumber: String? = nil, movieCount: Int? = nil, createdAt: Date? = nil) {
+    init(uid: String, username: String, email: String? = nil, movieCount: Int? = nil, createdAt: Date? = nil) {
         self.uid = uid
         self.username = username
         self.email = email
-        self.phoneNumber = phoneNumber
         self.movieCount = movieCount
         self.createdAt = createdAt
     }

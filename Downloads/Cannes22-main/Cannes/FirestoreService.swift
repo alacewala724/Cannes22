@@ -984,7 +984,6 @@ extension FirestoreService {
             let data = document.data()
             let username = data["username"] as? String ?? ""
             let email = data["email"] as? String
-            let phoneNumber = data["phoneNumber"] as? String
             let createdAt = data["createdAt"] as? Timestamp
             
             // Don't try to access private movie count - just show the user
@@ -992,7 +991,6 @@ extension FirestoreService {
                 uid: document.documentID,
                 username: username,
                 email: email,
-                phoneNumber: phoneNumber,
                 movieCount: 0, // We'll get this when viewing their profile
                 createdAt: createdAt?.dateValue()
             )
@@ -1015,7 +1013,6 @@ extension FirestoreService {
         let data = document.data() ?? [:]
         let username = data["username"] as? String ?? ""
         let email = data["email"] as? String
-        let phoneNumber = data["phoneNumber"] as? String
         let createdAt = data["createdAt"] as? Timestamp
         
         // Get movie count from user document
@@ -1025,7 +1022,6 @@ extension FirestoreService {
             uid: userId,
             username: username,
             email: email,
-            phoneNumber: phoneNumber,
             movieCount: movieCount,
             createdAt: createdAt?.dateValue()
         )
