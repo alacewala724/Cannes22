@@ -11,10 +11,14 @@ struct SetUsernameView: View {
     
     var body: some View {
         VStack {
-            Text("You've verified your email. Now set your username.")
-            Text("Choose a Username")
+            Text("Welcome to Cannes!")
                 .font(.title)
                 .fontWeight(.bold)
+            
+            Text("Choose a Username")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.top, 8)
             
             Text("This will be your unique identifier in the app")
                 .foregroundColor(.secondary)
@@ -26,6 +30,7 @@ struct SetUsernameView: View {
                 .textContentType(.username)
                 .autocapitalization(.none)
                 .padding(.horizontal)
+                .padding(.top, 20)
             
             Button(action: {
                 Task {
@@ -46,6 +51,7 @@ struct SetUsernameView: View {
             .cornerRadius(10)
             .disabled(username.count < 3 || isLoading)
             .padding(.horizontal)
+            .padding(.top, 16)
         }
         .padding()
         .alert("Error", isPresented: $showError) {
