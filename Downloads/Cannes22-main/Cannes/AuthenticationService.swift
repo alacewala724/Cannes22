@@ -103,7 +103,8 @@ class AuthenticationService: ObservableObject {
             if !document.exists {
                 // Create user document with appropriate data
                 var userData: [String: Any] = [
-                    "createdAt": FieldValue.serverTimestamp()
+                    "createdAt": FieldValue.serverTimestamp(),
+                    "movieCount": 0  // Initialize movie count for new users
                 ]
                 
                 // Add email if available
@@ -117,6 +118,7 @@ class AuthenticationService: ObservableObject {
                 }
                 
                 try await userDocRef.setData(userData)
+                print("ensureUserDocument: Created new user document with movieCount: 0")
             } else {
                 // Update existing document with new auth methods if needed
                 var updateData: [String: Any] = [:]
@@ -132,10 +134,19 @@ class AuthenticationService: ObservableObject {
                     updateData["email"] = email
                 }
                 
+                // Initialize movieCount if it doesn't exist (for existing users)
+                if existingData["movieCount"] == nil {
+                    updateData["movieCount"] = 0
+                    print("ensureUserDocument: Initializing movieCount for existing user")
+                }
+                
                 if !updateData.isEmpty {
                     updateData["updatedAt"] = FieldValue.serverTimestamp()
                     try await userDocRef.updateData(updateData)
                 }
+                
+                // Sync movie count for existing users
+                await syncMovieCount(for: user.uid)
             }
 
             if let username = document.data()?["username"] as? String {
@@ -149,6 +160,28 @@ class AuthenticationService: ObservableObject {
             }
         } catch {
             print("Error ensuring user document: \(error.localizedDescription)")
+        }
+    }
+    
+    // Sync movie count for existing users
+    private func syncMovieCount(for userId: String) async {
+        do {
+            let snapshot = try await firestore.collection("users")
+                .document(userId)
+                .collection("rankings")
+                .getDocuments()
+            
+            let movieCount = snapshot.documents.count
+            
+            try await firestore.collection("users")
+                .document(userId)
+                .updateData([
+                    "movieCount": movieCount
+                ])
+            
+            print("syncMovieCount: Synced movie count to \(movieCount) for user \(userId)")
+        } catch {
+            print("syncMovieCount: Error syncing movie count: \(error.localizedDescription)")
         }
     }
     

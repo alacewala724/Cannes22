@@ -14,8 +14,11 @@ struct TMDBMovieDetailView: View {
     @State private var selectedSeason: TMDBSeason?
     @State private var episodes: [TMDBEpisode] = []
     @State private var averageRating: Double?
+    @State private var friendsRatings: [FriendRating] = []
+    @State private var isLoadingFriendsRatings = false
     
     private let tmdbService = TMDBService()
+    private let firestoreService = FirestoreService()
     
     var body: some View {
         ScrollView {
@@ -165,6 +168,7 @@ struct TMDBMovieDetailView: View {
                 isAppearing = true
             }
             fetchAverageRating(for: movie.id.uuidString)
+            loadFriendsRatings()
         }
         .onChange(of: selectedSeason) { (oldValue: TMDBSeason?, newValue: TMDBSeason?) in
             if let season = newValue {
@@ -240,6 +244,7 @@ struct TMDBMovieDetailView: View {
                     Text("Your Rating")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                    
                     Text(String(format: "%.1f", movie.displayScore))
                         .font(.title2)
                         .fontWeight(.bold)
@@ -280,6 +285,39 @@ struct TMDBMovieDetailView: View {
                 }
             }
             .padding(.top, 8)
+            
+            // Friends' Ratings
+            if !friendsRatings.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Friends' Ratings")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(friendsRatings) { friendRating in
+                                VStack(spacing: 4) {
+                                    Text("@\(friendRating.friend.username)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                    
+                                    Text(String(format: "%.1f", friendRating.score))
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.accentColor)
+                                        .frame(width: 50, height: 50)
+                                        .background(
+                                            Circle()
+                                                .stroke(Color.accentColor, lineWidth: 2)
+                                        )
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                }
+            }
             
             // Genres
             if let genres = details.genres, !genres.isEmpty {
@@ -391,6 +429,32 @@ struct TMDBMovieDetailView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                }
+            }
+        }
+    }
+    
+    private func loadFriendsRatings() {
+        guard let tmdbId = movie.tmdbId else { 
+            print("loadFriendsRatings: No TMDB ID available for movie: \(movie.title)")
+            return 
+        }
+        
+        print("loadFriendsRatings: Starting to load friends ratings for movie: \(movie.title) (TMDB ID: \(tmdbId))")
+        isLoadingFriendsRatings = true
+        
+        Task {
+            do {
+                let ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+                print("loadFriendsRatings: Successfully loaded \(ratings.count) friend ratings")
+                await MainActor.run {
+                    friendsRatings = ratings
+                    isLoadingFriendsRatings = false
+                }
+            } catch {
+                print("loadFriendsRatings: Error loading friends ratings: \(error)")
+                await MainActor.run {
+                    isLoadingFriendsRatings = false
                 }
             }
         }

@@ -54,14 +54,36 @@ struct GlobalRatingRow: View {
                             .frame(width: 20)
                     }
                     
-                    Text(String(format: "%.1f", rating.displayScore))
-                        .font(.headline).bold()
-                        .foregroundColor(rating.sentimentColor)
-                        .frame(width: 44, height: 44)
-                        .background(
+                    // Golden circle for high scores in top 5
+                    if position <= 5 && rating.displayScore >= 9.0 {
+                        ZStack {
+                            // Halo effect
                             Circle()
-                                .stroke(rating.sentimentColor, lineWidth: 2)
-                        )
+                                .fill(Color.yellow.opacity(0.3))
+                                .frame(width: 52, height: 52)
+                                .blur(radius: 2)
+                            
+                            // Main golden circle
+                            Circle()
+                                .fill(Color.yellow)
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", rating.displayScore))
+                                        .font(position == 1 ? .title : .headline).bold()
+                                        .foregroundColor(.black)
+                                )
+                                .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
+                        }
+                    } else {
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", rating.displayScore))
+                            .font(position == 1 ? .title : .headline).bold()
+                            .foregroundColor(rating.sentimentColor)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle()
+                                    .stroke(rating.sentimentColor, lineWidth: 2)
+                            )
+                    }
                 }
 
                 Image(systemName: "chevron.right")
@@ -88,9 +110,12 @@ struct GlobalRatingDetailView: View {
     @State private var errorMessage: String?
     @State private var isAppearing = false
     @State private var showingAddMovie = false
+    @State private var friendsRatings: [FriendRating] = []
+    @State private var isLoadingFriendsRatings = false
     @EnvironmentObject var authService: AuthenticationService
     
     private let tmdbService = TMDBService()
+    private let firestoreService = FirestoreService()
     
     var body: some View {
         ScrollView {
@@ -125,6 +150,33 @@ struct GlobalRatingDetailView: View {
         .onAppear {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
+            }
+            loadFriendsRatings()
+        }
+    }
+    
+    private func loadFriendsRatings() {
+        guard let tmdbId = rating.tmdbId else { 
+            print("GlobalRatingDetailView: No TMDB ID available for rating: \(rating.title)")
+            return 
+        }
+        
+        print("GlobalRatingDetailView: Starting to load friends ratings for movie: \(rating.title) (TMDB ID: \(tmdbId))")
+        isLoadingFriendsRatings = true
+        
+        Task {
+            do {
+                let ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+                print("GlobalRatingDetailView: Successfully loaded \(ratings.count) friend ratings")
+                await MainActor.run {
+                    friendsRatings = ratings
+                    isLoadingFriendsRatings = false
+                }
+            } catch {
+                print("GlobalRatingDetailView: Error loading friends ratings: \(error)")
+                await MainActor.run {
+                    isLoadingFriendsRatings = false
+                }
             }
         }
     }
@@ -211,6 +263,7 @@ struct GlobalRatingDetailView: View {
                 Text("Community Rating")
                     .font(.title2)
                     .fontWeight(.medium)
+                
                 Text(String(format: "%.1f", rating.displayScore))
                     .font(.largeTitle)
                     .fontWeight(.bold)
@@ -220,6 +273,7 @@ struct GlobalRatingDetailView: View {
                         Circle()
                             .stroke(rating.sentimentColor, lineWidth: 3)
                     )
+                
                 Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -433,6 +487,7 @@ struct GlobalRatingDetailView: View {
                     Text("Community Rating")
                         .font(.headline)
                         .foregroundColor(.secondary)
+                    
                     Text(String(format: "%.1f", rating.displayScore))
                         .font(.largeTitle)
                         .fontWeight(.bold)
@@ -442,6 +497,7 @@ struct GlobalRatingDetailView: View {
                             Circle()
                                 .stroke(rating.sentimentColor, lineWidth: 3)
                         )
+                    
                     Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -452,6 +508,39 @@ struct GlobalRatingDetailView: View {
                 // User rating comparison or "Rank This" button
                 userRatingSection
                 .padding(.horizontal, -16) // Compensate for the outer padding
+                
+                // Friends' Ratings
+                if !friendsRatings.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Friends' Ratings")
+                            .font(.headline)
+                            .padding(.top, 8)
+                        
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(friendsRatings) { friendRating in
+                                    VStack(spacing: 4) {
+                                        Text("@\(friendRating.friend.username)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                        
+                                        Text(String(format: "%.1f", friendRating.score))
+                                            .font(.subheadline)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.accentColor)
+                                            .frame(width: 50, height: 50)
+                                            .background(
+                                                Circle()
+                                                    .stroke(Color.accentColor, lineWidth: 2)
+                                            )
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                        }
+                    }
+                }
                 
                 // Runtime
                 if let runtime = details.displayRuntime {
