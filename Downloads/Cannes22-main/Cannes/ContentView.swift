@@ -122,7 +122,7 @@ struct ContentView: View {
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Text("@lasyaaa")
+                Text("@\(authService.username ?? "user")")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
