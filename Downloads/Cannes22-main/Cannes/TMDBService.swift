@@ -2,7 +2,20 @@ import Foundation
 
 class TMDBService {
     private let baseURL = "https://api.themoviedb.org/3"
-    private let apiKey = "1b707e00ba3e60f3b0bbcb81a6ae5f21"
+    private let apiKey: String
+    
+    init() {
+        // Read API key from Config.plist
+        if let path = Bundle.main.path(forResource: "Config", ofType: "plist"),
+           let config = NSDictionary(contentsOfFile: path),
+           let key = config["TMDB_API_KEY"] as? String {
+            self.apiKey = key
+        } else {
+            // Fallback for development - you should replace this with your actual key
+            self.apiKey = "1b707e00ba3e60f3b0bbcb81a6ae5f21"
+            print("⚠️ WARNING: Using fallback API key. Make sure Config.plist is properly configured.")
+        }
+    }
     
     func searchMovies(query: String) async throws -> [TMDBMovie] {
         let urlString = "\(baseURL)/search/movie?api_key=\(apiKey)&query=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
