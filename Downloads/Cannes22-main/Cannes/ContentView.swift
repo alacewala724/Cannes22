@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var showingFilter = false
     @State private var showingGlobalRatingDetail: GlobalRating?
     @State private var isEditing = false
+    @State private var showingFriendSearch = false
     
     var body: some View {
         NavigationView {
@@ -44,6 +45,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingFilter) {
             FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
+        }
+        .sheet(isPresented: $showingFriendSearch) {
+            FriendSearchView()
         }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
@@ -102,6 +106,12 @@ struct ContentView: View {
                     
                     Button(action: { showingFilter = true }) {
                         Image(systemName: "list.bullet")
+                            .font(.title)
+                            .foregroundColor(.accentColor)
+                    }
+                    
+                    Button(action: { showingFriendSearch = true }) {
+                        Image(systemName: "person.2.circle.fill")
                             .font(.title)
                             .foregroundColor(.accentColor)
                     }
@@ -329,14 +339,36 @@ struct MovieRow: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Text(String(format: "%.1f", movie.displayScore))
-                        .font(.headline).bold()
-                        .foregroundColor(movie.sentiment.color)
-                        .frame(width: 44, height: 44)
-                        .background(
+                    // Golden circle for high scores in top 5
+                    if position <= 5 && movie.displayScore >= 9.0 {
+                        ZStack {
+                            // Halo effect
                             Circle()
-                                .stroke(movie.sentiment.color, lineWidth: 2)
-                        )
+                                .fill(Color.yellow.opacity(0.3))
+                                .frame(width: 52, height: 52)
+                                .blur(radius: 2)
+                            
+                            // Main golden circle
+                            Circle()
+                                .fill(Color.yellow)
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", movie.displayScore))
+                                        .font(position == 1 ? .title : .headline).bold()
+                                        .foregroundColor(.black)
+                                )
+                                .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
+                        }
+                    } else {
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", movie.displayScore))
+                            .font(position == 1 ? .title : .headline).bold()
+                            .foregroundColor(movie.sentiment.color)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle()
+                                    .stroke(movie.sentiment.color, lineWidth: 2)
+                            )
+                    }
 
                     if !isEditing {
                         Image(systemName: "chevron.right")

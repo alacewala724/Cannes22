@@ -9,12 +9,28 @@ class FirestoreService: ObservableObject {
     func getUserRankings(userId: String) async throws -> [Movie] {
         print("getUserRankings: Loading rankings for user: \(userId)")
         
-        let snapshot = try await db.collection("users")
+        // Check if user is authenticated
+        guard let currentUser = Auth.auth().currentUser else {
+            print("getUserRankings: No current user authenticated")
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        print("getUserRankings: Current user ID: \(currentUser.uid)")
+        print("getUserRankings: Target user ID: \(userId)")
+        print("getUserRankings: Are they the same user? \(currentUser.uid == userId)")
+        
+        let rankingsRef = db.collection("users")
             .document(userId)
             .collection("rankings")
+        
+        print("getUserRankings: Querying path: users/\(userId)/rankings")
+        
+        let snapshot = try await rankingsRef
             .order(by: "score", descending: true)
             .getDocuments()
             
+        print("getUserRankings: Successfully got snapshot with \(snapshot.documents.count) documents")
+        
         let movies = snapshot.documents.compactMap { document in
             let data = document.data()
             let score = data["score"] as? Double ?? 0.0
@@ -322,6 +338,7 @@ class FirestoreService: ObservableObject {
         let oldSnapshot = try await userDocRef.getDocument()
         let oldState = oldSnapshot.get("ratingState") as? String
         let oldScore = oldSnapshot.get("score") as? Double ?? 0.0
+        let isNewMovie = !oldSnapshot.exists
 
         let movieData: [String: Any] = [
             "id": movie.id.uuidString,
@@ -645,6 +662,44 @@ class FirestoreService: ObservableObject {
         let state = try await getMovieRatingState(userId: userId, movieId: movieId)
         return state == .finalInsertion
     }
+    
+    // Sync movie counts for all existing users (run this once to fix current issues)
+    func syncAllUserMovieCounts() async throws {
+        print("syncAllUserMovieCounts: Starting sync for all users")
+        
+        let snapshot = try await db.collection("users").getDocuments()
+        var syncedCount = 0
+        
+        for document in snapshot.documents {
+            let userId = document.documentID
+            let data = document.data()
+            
+            // Only sync if movieCount doesn't exist or is 0
+            if data["movieCount"] == nil || (data["movieCount"] as? Int ?? 0) == 0 {
+                do {
+                    let rankingsSnapshot = try await db.collection("users")
+                        .document(userId)
+                        .collection("rankings")
+                        .getDocuments()
+                    
+                    let movieCount = rankingsSnapshot.documents.count
+                    
+                    try await db.collection("users")
+                        .document(userId)
+                        .updateData([
+                            "movieCount": movieCount
+                        ])
+                    
+                    print("syncAllUserMovieCounts: Synced user \(userId) with \(movieCount) movies")
+                    syncedCount += 1
+                } catch {
+                    print("syncAllUserMovieCounts: Error syncing user \(userId): \(error)")
+                }
+            }
+        }
+        
+        print("syncAllUserMovieCounts: Completed sync for \(syncedCount) users")
+    }
 }
 
 extension FirestoreService {
@@ -897,5 +952,253 @@ extension FirestoreService {
         }
         
         return scores
+    }
+    
+    // MARK: - User Search Methods
+    
+    func searchUsersByUsername(query: String) async throws -> [UserProfile] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        guard !trimmedQuery.isEmpty else {
+            return []
+        }
+        
+        // Get current user to exclude from search results
+        let currentUserId = Auth.auth().currentUser?.uid
+        
+        // Search for users whose username starts with the query
+        let snapshot = try await db.collection("users")
+            .whereField("username", isGreaterThanOrEqualTo: trimmedQuery)
+            .whereField("username", isLessThan: trimmedQuery + "\u{f8ff}")
+            .limit(to: 20)
+            .getDocuments()
+        
+        var userProfiles: [UserProfile] = []
+        
+        for document in snapshot.documents {
+            // Skip current user
+            if document.documentID == currentUserId {
+                continue
+            }
+            
+            let data = document.data()
+            let username = data["username"] as? String ?? ""
+            let email = data["email"] as? String
+            let phoneNumber = data["phoneNumber"] as? String
+            let createdAt = data["createdAt"] as? Timestamp
+            
+            // Don't try to access private movie count - just show the user
+            let userProfile = UserProfile(
+                uid: document.documentID,
+                username: username,
+                email: email,
+                phoneNumber: phoneNumber,
+                movieCount: 0, // We'll get this when viewing their profile
+                createdAt: createdAt?.dateValue()
+            )
+            
+            userProfiles.append(userProfile)
+        }
+        
+        return userProfiles
+    }
+    
+    func getUserProfile(userId: String) async throws -> UserProfile? {
+        let document = try await db.collection("users")
+            .document(userId)
+            .getDocument()
+        
+        guard document.exists else {
+            return nil
+        }
+        
+        let data = document.data() ?? [:]
+        let username = data["username"] as? String ?? ""
+        let email = data["email"] as? String
+        let phoneNumber = data["phoneNumber"] as? String
+        let createdAt = data["createdAt"] as? Timestamp
+        
+        // Get movie count from user document
+        let movieCount = data["movieCount"] as? Int ?? 0
+        
+        return UserProfile(
+            uid: userId,
+            username: username,
+            email: email,
+            phoneNumber: phoneNumber,
+            movieCount: movieCount,
+            createdAt: createdAt?.dateValue()
+        )
+    }
+    
+    // Get a user's public movie list (this will work if the user has made their rankings public)
+    func getUserPublicMovies(userId: String) async throws -> [Movie] {
+        // For now, we'll try to get their movies directly
+        // In the future, you might want to add a "public" flag to user documents
+        return try await getUserRankings(userId: userId)
+    }
+    
+    // MARK: - Friends System
+    
+    // Add a friend
+    func addFriend(friendUserId: String) async throws {
+        print("addFriend: Starting to add friend \(friendUserId)")
+        
+        guard let currentUser = Auth.auth().currentUser else {
+            print("addFriend: No current user authenticated")
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        print("addFriend: Current user ID: \(currentUserId)")
+        
+        // Add to current user's friends list
+        let friendRef = db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .document(friendUserId)
+        
+        print("addFriend: Adding friend document at path: users/\(currentUserId)/friends/\(friendUserId)")
+        
+        do {
+            try await friendRef.setData([
+                "addedAt": FieldValue.serverTimestamp()
+            ])
+            print("addFriend: Successfully added friend \(friendUserId) to user \(currentUserId)")
+        } catch {
+            print("addFriend: Error adding friend: \(error)")
+            print("addFriend: Error details: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    // Remove a friend
+    func removeFriend(friendUserId: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Remove from current user's friends list
+        try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .document(friendUserId)
+            .delete()
+        
+        print("removeFriend: Removed friend \(friendUserId) from user \(currentUserId)")
+    }
+    
+    // Get current user's friends
+    func getFriends() async throws -> [UserProfile] {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .getDocuments()
+        
+        var friends: [UserProfile] = []
+        
+        for document in snapshot.documents {
+            let friendUserId = document.documentID
+            
+            // Get friend's profile
+            if let friendProfile = try await getUserProfile(userId: friendUserId) {
+                friends.append(friendProfile)
+            }
+        }
+        
+        return friends
+    }
+    
+    // Check if a user is a friend
+    func isFriend(userId: String) async throws -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            return false
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let document = try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .document(userId)
+            .getDocument()
+        
+        return document.exists
+    }
+    
+    // Get friends' ratings for a specific movie
+    func getFriendsRatingsForMovie(tmdbId: Int) async throws -> [FriendRating] {
+        guard let currentUser = Auth.auth().currentUser else {
+            return []
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Get current user's friends
+        let friendsSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .getDocuments()
+        
+        var friendRatings: [FriendRating] = []
+        
+        for friendDoc in friendsSnapshot.documents {
+            let friendUserId = friendDoc.documentID
+            
+            // Get friend's rating for this movie
+            let movieSnapshot = try await db.collection("users")
+                .document(friendUserId)
+                .collection("rankings")
+                .whereField("tmdbId", isEqualTo: tmdbId)
+                .getDocuments()
+            
+            if let movieDoc = movieSnapshot.documents.first {
+                let data = movieDoc.data()
+                let score = data["score"] as? Double ?? 0.0
+                let title = data["title"] as? String ?? ""
+                
+                // Get friend's profile
+                if let friendProfile = try await getUserProfile(userId: friendUserId) {
+                    let friendRating = FriendRating(
+                        friend: friendProfile,
+                        score: score,
+                        title: title
+                    )
+                    friendRatings.append(friendRating)
+                }
+            }
+        }
+        
+        return friendRatings
+    }
+    
+    // Get number of movies in common with a friend
+    func getMoviesInCommonWithFriend(friendUserId: String) async throws -> Int {
+        guard let currentUser = Auth.auth().currentUser else {
+            return 0
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Get current user's movies
+        let currentUserMovies = try await getUserRankings(userId: currentUserId)
+        let currentUserTmdbIds = Set(currentUserMovies.compactMap { $0.tmdbId })
+        
+        // Get friend's movies
+        let friendMovies = try await getUserRankings(userId: friendUserId)
+        let friendTmdbIds = Set(friendMovies.compactMap { $0.tmdbId })
+        
+        // Calculate intersection
+        let moviesInCommon = currentUserTmdbIds.intersection(friendTmdbIds)
+        
+        return moviesInCommon.count
     }
 } 
