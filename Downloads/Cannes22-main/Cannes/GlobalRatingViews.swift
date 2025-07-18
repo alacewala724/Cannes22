@@ -23,6 +23,8 @@ struct GlobalRatingRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                Spacer()
+
                 HStack(spacing: 4) {
                     // Show user's rating difference if they have rated this movie
                     if let tmdbId = rating.tmdbId,
@@ -74,6 +76,7 @@ struct GlobalRatingRow: View {
                                 )
                                 .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
                         }
+                        .frame(width: 52, height: 52)
                     } else {
                         Text(position == 1 ? "🐐" : String(format: "%.1f", rating.displayScore))
                             .font(position == 1 ? .title : .headline).bold()
@@ -83,6 +86,7 @@ struct GlobalRatingRow: View {
                                 Circle()
                                     .stroke(rating.sentimentColor, lineWidth: 2)
                             )
+                            .frame(width: 52, height: 52)
                     }
                 }
 

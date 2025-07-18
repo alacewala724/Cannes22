@@ -339,6 +339,8 @@ struct MovieRow: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    Spacer()
+
                     // Golden circle for high scores in top 5
                     if position <= 5 && movie.displayScore >= 9.0 {
                         ZStack {
@@ -359,6 +361,7 @@ struct MovieRow: View {
                                 )
                                 .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
                         }
+                        .frame(width: 52, height: 52)
                     } else {
                         Text(position == 1 ? "🐐" : String(format: "%.1f", movie.displayScore))
                             .font(position == 1 ? .title : .headline).bold()
@@ -368,6 +371,7 @@ struct MovieRow: View {
                                 Circle()
                                     .stroke(movie.sentiment.color, lineWidth: 2)
                             )
+                            .frame(width: 52, height: 52)
                     }
 
                     if !isEditing {
