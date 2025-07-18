@@ -274,5 +274,3 @@ For support, please:
 4. Create an issue with detailed error information
 
 ---
-
-**Made with ❤️ using SwiftUI and Firebase** 
