@@ -767,6 +767,95 @@ class AuthenticationService: ObservableObject {
             return error.localizedDescription
         }
     }
+    
+    // MARK: - Email Linking for Phone Users
+    
+    /// Link an email address to a phone-authenticated user
+    func linkEmail(_ email: String, password: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw AuthError.custom("No user is currently signed in")
+        }
+        
+        // Check if user has phone number but no email
+        guard currentUser.phoneNumber != nil && currentUser.email == nil else {
+            throw AuthError.custom("Email linking is only available for phone-authenticated users without an email")
+        }
+        
+        // Create email credential
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        
+        do {
+            // Link the email credential to the current user
+            let result = try await currentUser.link(with: credential)
+            print("✅ Email linked successfully: \(result.user.email ?? "unknown")")
+            
+            // Update the current user info
+            await MainActor.run {
+                self.currentUser = result.user
+            }
+            
+        } catch let error as NSError {
+            print("❌ Email linking failed: \(error.localizedDescription)")
+            
+            switch error.code {
+            case AuthErrorCode.emailAlreadyInUse.rawValue:
+                throw AuthError.custom("This email is already associated with another account")
+            case AuthErrorCode.invalidEmail.rawValue:
+                throw AuthError.custom("Please enter a valid email address")
+            case AuthErrorCode.weakPassword.rawValue:
+                throw AuthError.custom("Password is too weak. Please choose a stronger password")
+            case AuthErrorCode.wrongPassword.rawValue:
+                throw AuthError.custom("Incorrect password for this email address")
+            default:
+                throw AuthError.custom("Failed to link email: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Unlink email from a phone-authenticated user
+    func unlinkEmail() async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw AuthError.custom("No user is currently signed in")
+        }
+        
+        // Check if user has both phone and email
+        guard currentUser.phoneNumber != nil && currentUser.email != nil else {
+            throw AuthError.custom("Can only unlink email from users with both phone and email")
+        }
+        
+        do {
+            // Unlink the email provider
+            let result = try await currentUser.unlink(fromProvider: "password")
+            print("✅ Email unlinked successfully")
+            
+            // Update the current user info
+            await MainActor.run {
+                self.currentUser = result
+            }
+            
+        } catch let error as NSError {
+            print("❌ Email unlinking failed: \(error.localizedDescription)")
+            throw AuthError.custom("Failed to unlink email: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Check if the current user can link an email
+    var canLinkEmail: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.phoneNumber != nil && currentUser.email == nil
+    }
+    
+    /// Check if the current user can unlink their email
+    var canUnlinkEmail: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.phoneNumber != nil && currentUser.email != nil
+    }
+    
+    /// Check if the current user signed up with phone
+    var isPhoneUser: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.phoneNumber != nil
+    }
 }
 
 // MARK: - PhoneAuthProviderDelegate for reCAPTCHA
