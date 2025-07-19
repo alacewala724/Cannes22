@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - Debug Helper
 private func debugDifference(userScore: Double, averageRating: Double, difference: Double) {
-    print("DEBUG DIFFERENCE: userScore=\(userScore), averageRating=\(averageRating), raw difference=\(difference)")
+    print("DEBUG DIFFERENCE: communityRating=\(averageRating), userScore=\(userScore), raw difference=\(difference)")
     let roundedDifference = (difference * 10).rounded() / 10
     print("DEBUG DIFFERENCE: roundedDifference=\(roundedDifference)")
 }
@@ -342,23 +342,23 @@ struct GlobalRatingDetailView: View {
                 if let userScore = store.getUserPersonalScore(for: tmdbId) {
                     // User has rated this movie - show comparison
                     VStack(spacing: 8) {
-                        Text("Your Rating vs Community")
+                        Text("Community vs Your Rating")
                             .font(.headline)
                             .foregroundColor(.secondary)
                         
                         HStack(spacing: 20) {
                             VStack(spacing: 4) {
-                                Text("Your Rating")
+                                Text("Community")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(String(format: "%.1f", userScore))
+                                Text(String(format: "%.1f", rating.averageRating))
                                     .font(.title3)
                                     .fontWeight(.bold)
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(rating.sentimentColor)
                             }
                             
                             VStack(spacing: 4) {
-                                let difference = userScore - rating.averageRating
+                                let difference = rating.averageRating - userScore
                                 let isHigher = difference > 0
                                 let color: Color = isHigher ? .green : .red
                                 let arrow = isHigher ? "arrow.up" : "arrow.down"
@@ -386,13 +386,13 @@ struct GlobalRatingDetailView: View {
                             }
                             
                             VStack(spacing: 4) {
-                                Text("Community")
+                                Text("Your Rating")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(String(format: "%.1f", rating.averageRating))
+                                Text(String(format: "%.1f", userScore))
                                     .font(.title3)
                                     .fontWeight(.bold)
-                                    .foregroundColor(rating.sentimentColor)
+                                    .foregroundColor(.accentColor)
                             }
                         }
                     }
