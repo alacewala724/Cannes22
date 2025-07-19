@@ -177,35 +177,6 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Debug Section (only show in development)
-                #if DEBUG
-                Section("Debug") {
-                    Button("Check for Duplicate Phone Accounts") {
-                        Task {
-                            let duplicates = await authService.checkForDuplicatePhoneAccounts()
-                            if duplicates.isEmpty {
-                                emailLinkSuccessMessage = "No duplicate phone accounts found"
-                            } else {
-                                emailLinkErrorMessage = "Found \(duplicates.count) duplicate phone numbers: \(duplicates.joined(separator: ", "))"
-                            }
-                        }
-                    }
-                    .foregroundColor(.orange)
-                    
-                    Button("Clean Up Duplicate Accounts") {
-                        Task {
-                            do {
-                                try await authService.cleanupDuplicatePhoneAccounts()
-                                emailLinkSuccessMessage = "Duplicate accounts cleaned up successfully"
-                            } catch {
-                                emailLinkErrorMessage = "Error cleaning up duplicates: \(error.localizedDescription)"
-                            }
-                        }
-                    }
-                    .foregroundColor(.red)
-                }
-                #endif
-                
                 // Password Change Section
                 Section("Security") {
                     VStack(spacing: 12) {
