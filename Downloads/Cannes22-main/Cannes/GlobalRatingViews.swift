@@ -36,7 +36,7 @@ struct GlobalRatingRow: View {
                     // Show user's rating difference if they have rated this movie
                     if let tmdbId = rating.tmdbId,
                        let userScore = store.getUserPersonalScore(for: tmdbId) {
-                        let difference = rating.averageRating - userScore
+                        let difference = userScore - rating.averageRating
                         let isHigher = difference > 0
                         let color: Color = isHigher ? .green : .red
                         let arrow = isHigher ? "arrow.up" : "arrow.down"
@@ -376,17 +376,19 @@ struct GlobalRatingDetailView: View {
                                         .font(.caption)
                                         .foregroundColor(.gray)
                                 } else {
-                                    Image(systemName: arrow)
-                                        .foregroundColor(color)
-                                        .font(.title2)
-                                    Text(String(format: "%.1f", abs(roundedDifference)))
-                                        .font(.headline)
-                                        .foregroundColor(color)
+                                    HStack(spacing: 4) {
+                                        Text(String(format: "%+.1f", roundedDifference))
+                                            .font(.headline)
+                                            .foregroundColor(color)
+                                        Image(systemName: arrow)
+                                            .foregroundColor(color)
+                                            .font(.title2)
+                                    }
                                 }
                             }
                             
                             VStack(spacing: 4) {
-                                Text("Your Rating")
+                                Text("Personal")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 Text(String(format: "%.1f", userScore))
