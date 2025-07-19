@@ -1,6 +1,13 @@
 import SwiftUI
 import Foundation
 
+// MARK: - Debug Helper
+private func debugDifference(userScore: Double, averageRating: Double, difference: Double) {
+    print("DEBUG DIFFERENCE: userScore=\(userScore), averageRating=\(averageRating), raw difference=\(difference)")
+    let roundedDifference = (difference * 10).rounded() / 10
+    print("DEBUG DIFFERENCE: roundedDifference=\(roundedDifference)")
+}
+
 struct GlobalRatingRow: View {
     let rating: GlobalRating
     let position: Int
@@ -46,7 +53,7 @@ struct GlobalRatingRow: View {
                                     .font(.caption2)
                                 // Round the difference to 1 decimal place to avoid floating-point precision issues
                                 let roundedDifference = (difference * 10).rounded() / 10
-                                print("DEBUG DIFFERENCE SMALL: userScore=\(userScore), rating.averageRating=\(rating.averageRating), raw difference=\(difference), rounded=\(roundedDifference)")
+                                let _ = debugDifference(userScore: userScore, averageRating: rating.averageRating, difference: difference)
                                 Text(String(format: "%.1f", abs(roundedDifference)))
                                     .font(.caption2)
                                     .foregroundColor(color)
@@ -356,14 +363,9 @@ struct GlobalRatingDetailView: View {
                                 let color: Color = isHigher ? .green : .red
                                 let arrow = isHigher ? "arrow.up" : "arrow.down"
                                 
-                                // Debug logging to track precision issues
-                                print("DEBUG DIFFERENCE: userScore=\(userScore), rating.averageRating=\(rating.averageRating), raw difference=\(difference)")
-                                print("DEBUG DIFFERENCE DETAILS: userScore type=\(type(of: userScore)), rating.averageRating type=\(type(of: rating.averageRating))")
-                                
                                 // Round the difference to 1 decimal place to avoid floating-point precision issues
                                 let roundedDifference = (difference * 10).rounded() / 10
-                                
-                                print("DEBUG DIFFERENCE: roundedDifference=\(roundedDifference)")
+                                let _ = debugDifference(userScore: userScore, averageRating: rating.averageRating, difference: difference)
                                 
                                 if abs(roundedDifference) < 0.1 {
                                     // Show dash for very small differences (essentially zero)
