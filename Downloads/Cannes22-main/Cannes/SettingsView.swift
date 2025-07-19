@@ -125,6 +125,34 @@ struct SettingsView: View {
                     .padding(.vertical, 8)
                 }
                 
+                // Privacy Policy Section
+                Section("Legal") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Privacy Policy")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        Text("Cannes respects your privacy. We collect only the data necessary to provide our movie ranking service:")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("• Your email address for account creation")
+                            Text("• Your username for social features")
+                            Text("• Your movie ratings and preferences")
+                            Text("• Basic usage analytics to improve the app")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        
+                        Text("We do not sell your data to third parties. Your ratings are shared with the community to enable the ranking system, but your personal information remains private.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                    .padding(.vertical, 4)
+                }
+                
                 // Sign Out Section
                 Section {
                     Button(action: { showingSignOutAlert = true }) {
