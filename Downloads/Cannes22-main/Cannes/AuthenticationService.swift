@@ -342,10 +342,18 @@ class AuthenticationService: ObservableObject {
             throw AuthError.custom("Please enter a valid phone number (e.g., +1234567890)")
         }
         
-        // Check if running on simulator and warn user
+        // TEMPORARY: Allow testing with specific numbers while APNs is being configured
+        let testPhoneNumbers = ["+1234567890", "+1555123456", "+1999999999"]
+        if testPhoneNumbers.contains(formattedPhoneNumber) {
+            print("🔵 PHONE AUTH DEBUG: Using test phone number: \(formattedPhoneNumber)")
+            print("⚠️ NOTE: This is a test number. For production, configure APNs in Firebase Console.")
+        }
+        
+        // Check if running on simulator and provide helpful guidance
         #if targetEnvironment(simulator)
-        print("⚠️ WARNING: Phone authentication may not work properly on iOS Simulator. Please test on a real device.")
-        throw AuthError.custom("Phone authentication requires a real device. Please test on an iPhone, not the simulator.")
+        print("⚠️ WARNING: Phone authentication may not work properly on iOS Simulator.")
+        print("💡 TIP: Test on a real device for best results.")
+        // Don't throw error for simulator - let it try anyway
         #endif
         
         // Additional Firebase Auth debugging
@@ -385,6 +393,7 @@ class AuthenticationService: ObservableObject {
                         print("❌ CRITICAL: Missing client identifier. This usually means APNs is not configured in Firebase Console.")
                         print("❌ SOLUTION: Go to Firebase Console → Project Settings → Cloud Messaging → iOS app configuration")
                         print("❌ You need to upload your APNs authentication key or certificate.")
+                        print("💡 TEMPORARY WORKAROUND: Use test phone numbers like +1234567890 for development")
                     case 17032: // FIRAuthErrorCodeAppNotAuthorized
                         print("❌ CRITICAL: App not authorized for phone authentication. Check Firebase Console APNs configuration.")
                     case 17046: // FIRAuthErrorCodeCaptchaCheckFailed
@@ -635,7 +644,7 @@ class AuthenticationService: ObservableObject {
         
         switch nsError.code {
         case 17093: // FIRAuthErrorCodeMissingClientIdentifier
-            return "Phone authentication is not properly configured. Please contact support to enable SMS verification."
+            return "APNs not configured. For development, try test numbers like +1234567890. For production, configure APNs in Firebase Console."
         case 17010: // FIRAuthErrorCodeTooManyRequests
             return "Too many SMS requests. Please wait before trying again."
         case 17052: // FIRAuthErrorCodeInvalidPhoneNumber
