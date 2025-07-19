@@ -348,7 +348,7 @@ struct GlobalRatingDetailView: View {
                         
                         HStack(spacing: 20) {
                             VStack(spacing: 4) {
-                                Text("Community")
+                                Text("Global")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 Text(String(format: "%.1f", rating.averageRating))
@@ -358,7 +358,7 @@ struct GlobalRatingDetailView: View {
                             }
                             
                             VStack(spacing: 4) {
-                                let difference = rating.averageRating - userScore
+                                let difference = userScore - rating.averageRating
                                 let isHigher = difference > 0
                                 let color: Color = isHigher ? .green : .red
                                 let arrow = isHigher ? "arrow.up" : "arrow.down"
@@ -376,14 +376,18 @@ struct GlobalRatingDetailView: View {
                                         .font(.caption)
                                         .foregroundColor(.gray)
                                 } else {
-                                    HStack(spacing: 4) {
-                                        Text(String(format: "%+.1f", roundedDifference))
-                                            .font(.headline)
-                                            .foregroundColor(color)
-                                        Image(systemName: arrow)
-                                            .foregroundColor(color)
-                                            .font(.title2)
+                                    VStack(spacing: 0) {
+                                        Spacer()
+                                        HStack(spacing: 4) {
+                                            Text(String(format: "%.1f", abs(roundedDifference)))
+                                                .font(.headline)
+                                                .foregroundColor(color)
+                                            Image(systemName: arrow)
+                                                .foregroundColor(color)
+                                                .font(.headline)
+                                        }
                                     }
+                                    .frame(height: 44)
                                 }
                             }
                             

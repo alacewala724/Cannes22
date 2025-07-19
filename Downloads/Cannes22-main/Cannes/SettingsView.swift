@@ -23,8 +23,6 @@ struct SettingsView: View {
     @State private var usernameSuccessMessage: String?
     
     @State private var showingSignOutAlert = false
-    @State private var isFixingRatings = false
-    @State private var ratingsFixMessage: String?
     
     var body: some View {
         NavigationView {
@@ -123,35 +121,6 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(isChangingUsername || newUsername.isEmpty || isCheckingUsername)
-                    }
-                    .padding(.vertical, 8)
-                }
-                
-                // Data Management Section
-                Section("Data Management") {
-                    VStack(spacing: 12) {
-                        Text("Fix existing community ratings that have floating-point precision issues")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                        
-                        if let message = ratingsFixMessage {
-                            Text(message)
-                                .foregroundColor(.green)
-                                .font(.caption)
-                        }
-                        
-                        Button(action: fixCommunityRatings) {
-                            HStack {
-                                if isFixingRatings {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                }
-                                Text("Fix Community Ratings")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(isFixingRatings)
                     }
                     .padding(.vertical, 8)
                 }
@@ -280,27 +249,6 @@ struct SettingsView: View {
             dismiss()
         } catch {
             print("Error signing out: \(error)")
-        }
-    }
-    
-    private func fixCommunityRatings() {
-        isFixingRatings = true
-        ratingsFixMessage = nil
-        
-        Task {
-            do {
-                let firestoreService = FirestoreService()
-                try await firestoreService.fixExistingCommunityRatings()
-                await MainActor.run {
-                    ratingsFixMessage = "Community ratings fixed successfully"
-                    isFixingRatings = false
-                }
-            } catch {
-                await MainActor.run {
-                    ratingsFixMessage = "Error fixing ratings: \(error.localizedDescription)"
-                    isFixingRatings = false
-                }
-            }
         }
     }
 } 
