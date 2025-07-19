@@ -46,6 +46,7 @@ struct GlobalRatingRow: View {
                                     .font(.caption2)
                                 // Round the difference to 1 decimal place to avoid floating-point precision issues
                                 let roundedDifference = (difference * 10).rounded() / 10
+                                print("DEBUG DIFFERENCE SMALL: userScore=\(userScore), rating.averageRating=\(rating.averageRating), raw difference=\(difference), rounded=\(roundedDifference)")
                                 Text(String(format: "%.1f", abs(roundedDifference)))
                                     .font(.caption2)
                                     .foregroundColor(color)
@@ -355,8 +356,14 @@ struct GlobalRatingDetailView: View {
                                 let color: Color = isHigher ? .green : .red
                                 let arrow = isHigher ? "arrow.up" : "arrow.down"
                                 
+                                // Debug logging to track precision issues
+                                print("DEBUG DIFFERENCE: userScore=\(userScore), rating.averageRating=\(rating.averageRating), raw difference=\(difference)")
+                                print("DEBUG DIFFERENCE DETAILS: userScore type=\(type(of: userScore)), rating.averageRating type=\(type(of: rating.averageRating))")
+                                
                                 // Round the difference to 1 decimal place to avoid floating-point precision issues
                                 let roundedDifference = (difference * 10).rounded() / 10
+                                
+                                print("DEBUG DIFFERENCE: roundedDifference=\(roundedDifference)")
                                 
                                 if abs(roundedDifference) < 0.1 {
                                     // Show dash for very small differences (essentially zero)
