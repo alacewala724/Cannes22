@@ -1,6 +1,6 @@
 # Privacy Policy for Cannes
 
-**Last updated:** December 2024
+**Last updated:** [Current Date]
 
 ## Introduction
 
@@ -9,7 +9,7 @@ Cannes ("we," "our," or "us") is a movie ranking app that helps users discover, 
 ## Information We Collect
 
 ### Information You Provide
-- **Account Information**: When you create an account, we collect your email address and username.
+- **Account Information**: When you create an account, we collect your email address, phone number (if using phone authentication), and username.
 - **Movie Rankings**: Your personal movie and TV show rankings, ratings, and preferences.
 - **Social Features**: Information about your friends, friend requests, and social interactions within the app.
 
@@ -37,7 +37,7 @@ Cannes ("we," "our," or "us") is a movie ranking app that helps users discover, 
 ### To Communicate With You
 - Send important app updates and notifications
 - Respond to your support requests
-- Send verification emails for account creation
+- Send verification codes for phone authentication
 
 ## Data Storage and Security
 

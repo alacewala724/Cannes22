@@ -400,13 +400,13 @@ class FirestoreService: ObservableObject {
             print("updateMovieRanking: Old state: \(oldState ?? "nil"), old score: \(oldScore)")
             
             if isNewUserRating {
-                // This is a new rating - add to community ratings with the original sentiment-based score
-                print("updateMovieRanking: Adding new user rating with original sentiment-based score: \(movie.originalScore)")
-                try await addNewRating(movieId: movie.id.uuidString, score: movie.originalScore, movie: movie)
+                // This is a new rating - add to community ratings with the final ranking-based score
+                print("updateMovieRanking: Adding new user rating with final ranking-based score: \(movie.score)")
+                try await addNewRating(movieId: movie.id.uuidString, score: movie.score, movie: movie)
             } else {
                 // This is an update to an existing rating
-                print("updateMovieRanking: Updating existing user rating from \(oldScore) to \(movie.originalScore)")
-                await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.originalScore, oldScore: oldScore, isNewRating: false))
+                print("updateMovieRanking: Updating existing user rating from \(oldScore) to \(movie.score)")
+                await updateSingleMovieRatingWithMovie(update: (movie: movie, newScore: movie.score, oldScore: oldScore, isNewRating: false))
             }
             
         case .scoreUpdate:
@@ -426,9 +426,9 @@ class FirestoreService: ObservableObject {
         let communityRatingId = movie.tmdbId?.description ?? movieId
         print("addNewRating: Using community rating ID: \(communityRatingId) (TMDB ID: \(movie.tmdbId?.description ?? "nil"))")
         
-        // Use the original sentiment-based score for community ratings
+        // Use the final recalculated score for community ratings
         let communityScore = score
-        print("addNewRating: Using original sentiment-based score for community rating: \(communityScore)")
+        print("addNewRating: Using final recalculated score for community rating: \(communityScore)")
         
         // Validate score to prevent NaN or infinite values
         guard !communityScore.isNaN && !communityScore.isInfinite else {
@@ -522,9 +522,9 @@ class FirestoreService: ObservableObject {
         let communityRatingId = movie.tmdbId?.description ?? movieId
         print("updateExistingRating: movieId: \(movieId), communityRatingId: \(communityRatingId), oldScore: \(oldScore), newScore: \(newScore)")
         
-        // Use the original sentiment-based score for community ratings
+        // Use the final recalculated score for community ratings
         let communityScore = newScore
-        print("updateExistingRating: Using original sentiment-based score for community rating: \(communityScore)")
+        print("updateExistingRating: Using final recalculated score for community rating: \(communityScore)")
         
         let ratingsRef = db.collection("ratings").document(communityRatingId)
         _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
@@ -781,9 +781,9 @@ extension FirestoreService {
         print("updateSingleMovieRatingWithMovie: Using community rating ID: \(communityRatingId) for movie: \(update.movie.title)")
         print("updateSingleMovieRatingWithMovie: newScore=\(update.newScore), oldScore=\(update.oldScore), isNewRating=\(update.isNewRating)")
         
-        // Use the original sentiment-based score for community ratings
+        // Use the final recalculated score for community ratings
         let communityScore = update.newScore
-        print("updateSingleMovieRatingWithMovie: Using original sentiment-based score for community rating: \(communityScore)")
+        print("updateSingleMovieRatingWithMovie: Using final recalculated score for community rating: \(communityScore)")
         
         // Validate scores to prevent NaN or infinite values
         guard !communityScore.isNaN && !communityScore.isInfinite && !update.oldScore.isNaN && !update.oldScore.isInfinite else {

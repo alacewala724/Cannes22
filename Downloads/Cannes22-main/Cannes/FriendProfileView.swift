@@ -224,7 +224,7 @@ struct FriendMovieRow: View {
                 Spacer()
 
                 // Golden circle for high scores in top 5
-                if position <= 5 && movie.displayScore >= 9.0 {
+                if position <= 5 && movie.score >= 9.0 {
                     ZStack {
                         // Halo effect
                         Circle()
@@ -237,7 +237,7 @@ struct FriendMovieRow: View {
                             .fill(Color.yellow)
                             .frame(width: 44, height: 44)
                             .overlay(
-                                Text(position == 1 ? "🐐" : String(format: "%.1f", movie.displayScore))
+                                Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
                                     .font(position == 1 ? .title : .headline).bold()
                                     .foregroundColor(.black)
                             )
@@ -245,7 +245,7 @@ struct FriendMovieRow: View {
                     }
                     .frame(width: 52, height: 52)
                 } else {
-                    Text(position == 1 ? "🐐" : String(format: "%.1f", movie.displayScore))
+                    Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
                         .font(position == 1 ? .title : .headline).bold()
                         .foregroundColor(movie.sentiment.color)
                         .frame(width: 44, height: 44)

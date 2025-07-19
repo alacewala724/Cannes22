@@ -57,7 +57,7 @@ struct GlobalRatingRow: View {
                     }
                     
                     // Golden circle for high scores in top 5
-                    if position <= 5 && rating.displayScore >= 9.0 {
+                    if position <= 5 && rating.averageRating >= 9.0 {
                         ZStack {
                             // Halo effect
                             Circle()
@@ -70,7 +70,7 @@ struct GlobalRatingRow: View {
                                 .fill(Color.yellow)
                                 .frame(width: 44, height: 44)
                                 .overlay(
-                                    Text(position == 1 ? "🐐" : String(format: "%.1f", rating.displayScore))
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
@@ -78,7 +78,7 @@ struct GlobalRatingRow: View {
                         }
                         .frame(width: 52, height: 52)
                     } else {
-                        Text(position == 1 ? "🐐" : String(format: "%.1f", rating.displayScore))
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
                             .font(position == 1 ? .title : .headline).bold()
                             .foregroundColor(rating.sentimentColor)
                             .frame(width: 44, height: 44)
@@ -268,7 +268,7 @@ struct GlobalRatingDetailView: View {
                     .font(.title2)
                     .fontWeight(.medium)
                 
-                Text(String(format: "%.1f", rating.displayScore))
+                Text(String(format: "%.1f", rating.averageRating))
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundColor(rating.sentimentColor)
@@ -375,7 +375,7 @@ struct GlobalRatingDetailView: View {
                                 Text("Community")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(String(format: "%.1f", rating.displayScore))
+                                Text(String(format: "%.1f", rating.averageRating))
                                     .font(.title3)
                                     .fontWeight(.bold)
                                     .foregroundColor(rating.sentimentColor)
@@ -492,7 +492,7 @@ struct GlobalRatingDetailView: View {
                         .font(.headline)
                         .foregroundColor(.secondary)
                     
-                    Text(String(format: "%.1f", rating.displayScore))
+                    Text(String(format: "%.1f", rating.averageRating))
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .foregroundColor(rating.sentimentColor)
