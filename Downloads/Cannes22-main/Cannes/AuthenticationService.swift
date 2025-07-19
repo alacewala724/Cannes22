@@ -521,7 +521,7 @@ class AuthenticationService: ObservableObject {
                 print("❌ SMS quota exceeded for project")
             case 17020: // FIRAuthErrorCodeNetworkError
                 print("❌ Network error. Check internet connection.")
-            case 17021: // FIRAuthErrorCodeTooManyRequests
+            case 17010: // FIRAuthErrorCodeTooManyRequests
                 print("❌ Too many requests. Please wait before trying again.")
             case 17022: // FIRAuthErrorCodeAppNotVerified
                 print("❌ App not verified. This might be a simulator issue.")
@@ -536,6 +536,12 @@ class AuthenticationService: ObservableObject {
             }
             throw error
         }
+    }
+    
+    // Check if a phone number is available for sign-up
+    func isPhoneNumberAvailable(_ phoneNumber: String) async -> Bool {
+        let formattedPhoneNumber = formatPhoneNumber(phoneNumber)
+        return !(await checkIfPhoneNumberExists(formattedPhoneNumber))
     }
     
     func signInWithPhoneNumber(verificationCode: String) async throws {
@@ -581,6 +587,14 @@ class AuthenticationService: ObservableObject {
         )
         
         do {
+            // Check if this phone number is already associated with an account
+            // We need to do this before attempting to create a new account
+            let isExistingAccount = await checkIfPhoneNumberExists(phoneNumber)
+            
+            if isExistingAccount {
+                throw AuthError.custom("An account already exists with this phone number. Please sign in instead.")
+            }
+            
             // For phone authentication, Firebase will either sign in to existing account or create new one
             // We can't easily distinguish between sign-up and sign-in with phone numbers
             let result = try await auth.signIn(with: credential)
@@ -600,6 +614,23 @@ class AuthenticationService: ObservableObject {
                 self.errorMessage = error.localizedDescription
             }
             throw mapAuthError(error)
+        }
+    }
+    
+    // Check if a phone number is already associated with an account
+    private func checkIfPhoneNumberExists(_ phoneNumber: String) async -> Bool {
+        // Query Firestore to check if any user document has this phone number
+        do {
+            let snapshot = try await firestore.collection("users")
+                .whereField("phoneNumber", isEqualTo: phoneNumber)
+                .limit(to: 1)
+                .getDocuments()
+            
+            return !snapshot.documents.isEmpty
+        } catch {
+            print("Error checking if phone number exists: \(error)")
+            // If we can't check, assume it doesn't exist to avoid blocking legitimate sign-ups
+            return false
         }
     }
     
@@ -629,12 +660,23 @@ class AuthenticationService: ObservableObject {
                 self.verificationID = nil
                 self.clearVerificationID()
             }
-        } catch {
+        } catch let error as NSError {
             await MainActor.run {
                 self.isWaitingForSMS = false
                 self.errorMessage = error.localizedDescription
             }
-            throw mapAuthError(error)
+            
+            // Handle specific phone linking errors
+            switch error.code {
+            case AuthErrorCode.credentialAlreadyInUse.rawValue:
+                throw AuthError.custom("This phone number is already associated with another account. Please use a different phone number or contact support.")
+            case AuthErrorCode.accountExistsWithDifferentCredential.rawValue:
+                throw AuthError.custom("An account already exists with this phone number using a different sign-in method.")
+            case AuthErrorCode.requiresRecentLogin.rawValue:
+                throw AuthError.custom("This operation requires recent authentication. Please sign out and sign in again.")
+            default:
+                throw mapAuthError(error)
+            }
         }
     }
     
