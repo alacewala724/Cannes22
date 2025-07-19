@@ -141,7 +141,7 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
         hasher.combine(id)
     }
 
-    var displayScore: Double { score.rounded(toPlaces: 1) }
+    var displayScore: Double { score }
 }
 
 struct MovieComparison: Codable {
@@ -172,7 +172,7 @@ struct GlobalRating: Identifiable, Codable, Hashable {
     let numberOfRatings: Int
     let tmdbId: Int?
     
-    var displayScore: Double { averageRating.rounded(toPlaces: 1) }
+    var displayScore: Double { averageRating }
     
     var sentimentColor: Color {
         switch averageRating {

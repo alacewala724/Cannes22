@@ -245,7 +245,7 @@ struct TMDBMovieDetailView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    Text(String(format: "%.1f", movie.displayScore))
+                    Text(String(format: "%.1f", movie.score))
                         .font(.title2)
                         .fontWeight(.bold)
                         .foregroundColor(movie.sentiment.color)
