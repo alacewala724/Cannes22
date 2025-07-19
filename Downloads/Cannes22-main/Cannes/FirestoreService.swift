@@ -713,6 +713,42 @@ class FirestoreService: ObservableObject {
         
         print("syncAllUserMovieCounts: Completed sync for \(syncedCount) users")
     }
+    
+    // Fix existing community ratings by rounding them to 1 decimal place
+    func fixExistingCommunityRatings() async throws {
+        print("fixExistingCommunityRatings: Starting to fix existing community ratings")
+        
+        let snapshot = try await db.collection("ratings")
+            .getDocuments()
+        
+        var fixedCount = 0
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            let currentAverage = data["averageRating"] as? Double ?? 0.0
+            let totalScore = data["totalScore"] as? Double ?? 0.0
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            
+            // Round the average to 1 decimal place
+            let roundedAverage = (currentAverage * 10).rounded() / 10
+            let roundedTotalScore = (totalScore * 10).rounded() / 10
+            
+            // Only update if the values need rounding
+            if abs(currentAverage - roundedAverage) > 0.001 || abs(totalScore - roundedTotalScore) > 0.001 {
+                print("fixExistingCommunityRatings: Fixing rating for \(document.documentID) - currentAverage=\(currentAverage), roundedAverage=\(roundedAverage)")
+                
+                try await document.reference.updateData([
+                    "averageRating": roundedAverage,
+                    "totalScore": roundedTotalScore,
+                    "lastUpdated": FieldValue.serverTimestamp()
+                ])
+                
+                fixedCount += 1
+            }
+        }
+        
+        print("fixExistingCommunityRatings: Fixed \(fixedCount) community ratings")
+    }
 }
 
 extension FirestoreService {
