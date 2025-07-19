@@ -6,17 +6,26 @@
 //
 
 import SwiftUI
-import FirebaseCore
+import Firebase
 import FirebaseAuth
-import UIKit
+import FirebaseFirestore
 import UserNotifications
 
 // MARK: - App Delegate for Firebase Push Notifications
 class AppDelegate: NSObject, UIApplicationDelegate {
+    // Static flag to track APNs token readiness
+    static var isAPNsTokenSet = false
+    
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         
         print("🚀 APP LAUNCH: Starting Firebase configuration...")
+        
+        // Enable Firebase debug logging for better visibility
+        #if DEBUG
+        FirebaseConfiguration.shared.setLoggerLevel(.debug)
+        print("🔧 DEBUG: Firebase debug logging enabled")
+        #endif
         
         // Configure Firebase
         if FirebaseApp.app() == nil {
@@ -27,11 +36,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         }
         
         // Configure Firebase Auth settings for phone authentication
-        #if DEBUG
-        // For testing - disable app verification (use only during development)
-        Auth.auth().settings?.isAppVerificationDisabledForTesting = true
-        print("🔧 DEBUG: App verification disabled for testing")
-        #endif
+        // Remove the app verification disabled setting to allow proper APNs-based verification
+        // Auth.auth().settings?.isAppVerificationDisabledForTesting = true  // REMOVED
         
         // Log Firebase project info
         if let app = FirebaseApp.app() {
@@ -51,8 +57,14 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                     print("❌ Push notification permission error: \(error)")
                 } else {
                     print("✅ Push notification permission granted: \(granted)")
-                    if !granted {
+                    if granted {
+                        DispatchQueue.main.async {
+                            UIApplication.shared.registerForRemoteNotifications()
+                            print("🔵 Registered for remote notifications after permission granted")
+                        }
+                    } else {
                         print("⚠️ WARNING: Push notifications denied. This may affect SMS delivery.")
+                        print("⚠️ Phone authentication may not work without push notification permission.")
                     }
                 }
             }
@@ -83,19 +95,63 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         completionHandler(.newData)
     }
     
+    // MARK: - Silent Push Handling for Firebase Auth (iOS 10+)
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any]) {
+        
+        print("📬 Received silent push notification: \(userInfo)")
+        
+        // Handle Firebase Auth silent push notifications
+        if Auth.auth().canHandleNotification(userInfo) {
+            print("✅ Firebase handled phone verification push")
+            return
+        }
+        
+        print("📬 Received other push: \(userInfo)")
+    }
+    
+    // MARK: - URL Handling for reCAPTCHA (Required when swizzling is disabled)
+    func application(_ application: UIApplication,
+                     open url: URL,
+                     options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        
+        print("🔗 URL opened: \(url)")
+        
+        // Handle Firebase Auth URL redirects (for reCAPTCHA)
+        if Auth.auth().canHandle(url) {
+            print("✅ Firebase Auth handled the URL")
+            return true
+        }
+        
+        // Handle other URL schemes here
+        print("ℹ️ Other URL scheme processed")
+        return false
+    }
+    
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         print("✅ APNs device token received: \(tokenString)")
         
-        // Forward device token to Firebase Auth
-        #if DEBUG
-        Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
-        print("🔧 DEBUG: Using sandbox APNs token")
-        #else
-        Auth.auth().setAPNSToken(deviceToken, type: .prod)
-        print("🚀 PRODUCTION: Using production APNs token")
-        #endif
+        // Enhanced APNs token handling
+        do {
+            #if DEBUG
+            Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
+            print("🔧 DEBUG: Successfully set sandbox APNs token with Firebase Auth")
+            #else
+            Auth.auth().setAPNSToken(deviceToken, type: .prod)
+            print("🚀 PRODUCTION: Successfully set production APNs token with Firebase Auth")
+            #endif
+            
+            // Set the flag to indicate APNs token is ready
+            AppDelegate.isAPNsTokenSet = true
+            print("🔵 APNs token verification: Firebase Auth should now be ready for phone authentication")
+            print("✅ APNs token flag set: Phone verification can now proceed")
+            
+        } catch {
+            print("❌ CRITICAL: Failed to set APNs token with Firebase Auth: \(error)")
+            print("❌ Phone authentication will not work without APNs token!")
+        }
     }
     
     func application(_ application: UIApplication,
