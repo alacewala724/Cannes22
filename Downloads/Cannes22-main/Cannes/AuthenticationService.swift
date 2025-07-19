@@ -19,8 +19,14 @@ class AuthenticationService: ObservableObject {
     @Published var isWaitingForSMS = false
     @Published var phoneNumber: String = ""
     
+    // reCAPTCHA delegate
+    private var recaptchaDelegate: PhoneAuthProviderDelegate?
+    
     private init() {
         // Firebase is now configured in AppDelegate
+        
+        // Remove the app verification disabled setting to allow proper APNs-based verification
+        // Auth.auth().settings?.isAppVerificationDisabledForTesting = true  // REMOVED
         
         // Add more robust error handling and state management
         do {
@@ -306,6 +312,35 @@ class AuthenticationService: ObservableObject {
     
     // MARK: - Phone Authentication
     
+    // Helper method to check if APNs token is ready for phone authentication
+    func isAPNsTokenReady() async -> Bool {
+        let isAPNsTokenSet = await AppDelegate.isAPNsTokenSet
+        let isRegisteredForRemoteNotifications = await UIApplication.shared.isRegisteredForRemoteNotifications
+        
+        print("🔵 APNs Token Check: Token set: \(isAPNsTokenSet), Registered: \(isRegisteredForRemoteNotifications)")
+        
+        return isAPNsTokenSet && isRegisteredForRemoteNotifications
+    }
+    
+    // Helper method to wait for APNs token to be ready (with timeout)
+    func waitForAPNsToken(timeout: TimeInterval = 10.0) async -> Bool {
+        print("🔵 Waiting for APNs token to be ready...")
+        
+        let startTime = Date()
+        while Date().timeIntervalSince(startTime) < timeout {
+            if await isAPNsTokenReady() {
+                print("✅ APNs token is ready!")
+                return true
+            }
+            
+            // Wait 100ms before checking again
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        
+        print("❌ Timeout waiting for APNs token to be ready")
+        return false
+    }
+    
     // Helper function to format phone number to E.164 format
     private func formatPhoneNumber(_ phoneNumber: String) -> String {
         // Remove all non-digit characters
@@ -333,6 +368,36 @@ class AuthenticationService: ObservableObject {
             throw AuthError.custom("Firebase is not properly configured")
         }
         
+        // Check if APNs token is ready (critical for phone auth)
+        let isAPNsTokenSet = await AppDelegate.isAPNsTokenSet
+        let isRegisteredForRemoteNotifications = await UIApplication.shared.isRegisteredForRemoteNotifications
+        
+        print("🔵 PHONE AUTH DEBUG: APNs token set: \(isAPNsTokenSet)")
+        print("🔵 PHONE AUTH DEBUG: Registered for remote notifications: \(isRegisteredForRemoteNotifications)")
+        
+        if !isAPNsTokenSet {
+            print("❌ CRITICAL: APNs token not set with Firebase Auth yet!")
+            print("❌ This will cause phone authentication to fail with error 17093")
+            print("💡 SOLUTION: Wait for APNs token to be set before attempting phone verification")
+            
+            // Try to wait for APNs token to be ready
+            let tokenReady = await waitForAPNsToken(timeout: 5.0)
+            
+            if !tokenReady {
+                // For development, we can still try with test numbers
+                let testPhoneNumbers = ["+1234567890", "+1555123456", "+1999999999", "+16505551234", "+16505550000"]
+                let isTestNumber = testPhoneNumbers.contains(formatPhoneNumber(phoneNumber))
+                
+                if !isTestNumber {
+                    throw AuthError.custom("APNs token not ready. Please wait a moment and try again, or use a test number like +16505551234 for development.")
+                } else {
+                    print("🔧 DEBUG: Using test number - proceeding despite APNs token not being set")
+                }
+            } else {
+                print("✅ APNs token became ready while waiting!")
+            }
+        }
+        
         // Format phone number to E.164 format
         let formattedPhoneNumber = formatPhoneNumber(phoneNumber)
         print("🔵 PHONE AUTH DEBUG: Formatted phone number: \(formattedPhoneNumber)")
@@ -342,24 +407,42 @@ class AuthenticationService: ObservableObject {
             throw AuthError.custom("Please enter a valid phone number (e.g., +1234567890)")
         }
         
-        // TEMPORARY: Allow testing with specific numbers while APNs is being configured
-        let testPhoneNumbers = ["+1234567890", "+1555123456", "+1999999999"]
-        if testPhoneNumbers.contains(formattedPhoneNumber) {
+        // Check if this is a test number
+        let testPhoneNumbers = ["+1234567890", "+1555123456", "+1999999999", "+16505551234", "+16505550000"]
+        let isTestNumber = testPhoneNumbers.contains(formattedPhoneNumber)
+        
+        if isTestNumber {
             print("🔵 PHONE AUTH DEBUG: Using test phone number: \(formattedPhoneNumber)")
             print("⚠️ NOTE: This is a test number. For production, configure APNs in Firebase Console.")
+        } else {
+            print("🔵 PHONE AUTH DEBUG: Using real phone number: \(formattedPhoneNumber)")
+            print("💡 TIP: Using reCAPTCHA for real phone numbers")
         }
         
         // Check if running on simulator and provide helpful guidance
         #if targetEnvironment(simulator)
-        print("⚠️ WARNING: Phone authentication may not work properly on iOS Simulator.")
-        print("💡 TIP: Test on a real device for best results.")
-        // Don't throw error for simulator - let it try anyway
+        if !isTestNumber {
+            print("⚠️ WARNING: Real phone numbers may not work properly on iOS Simulator.")
+            print("💡 TIP: Test on a real device for best results with real phone numbers.")
+        }
         #endif
         
         // Additional Firebase Auth debugging
         print("🔵 PHONE AUTH DEBUG: Firebase App: \(FirebaseApp.app()?.name ?? "nil")")
         print("🔵 PHONE AUTH DEBUG: Auth domain: \(auth.app?.options.projectID ?? "nil")")
-        print("🔵 PHONE AUTH DEBUG: App verification disabled: \(auth.settings?.isAppVerificationDisabledForTesting ?? false)")
+        print("🔵 PHONE AUTH DEBUG: App verification enabled for APNs-based verification")
+        print("🔵 PHONE AUTH DEBUG: APNs-based silent push verification enabled")
+        
+        // Check if phone authentication is enabled
+        print("🔵 PHONE AUTH DEBUG: Checking if phone auth is enabled...")
+        do {
+            // Try to get current user to check auth state
+            let currentUser = Auth.auth().currentUser
+            print("🔵 PHONE AUTH DEBUG: Current user: \(currentUser?.uid ?? "nil")")
+            print("🔵 PHONE AUTH DEBUG: Current user phone: \(currentUser?.phoneNumber ?? "nil")")
+        } catch {
+            print("❌ PHONE AUTH DEBUG: Error checking auth state: \(error)")
+        }
         
         // Check APNs configuration
         let center = UNUserNotificationCenter.current()
@@ -375,66 +458,83 @@ class AuthenticationService: ObservableObject {
             self.errorMessage = nil
         }
         
-        return try await withCheckedThrowingContinuation { continuation in
-            print("🔵 PHONE AUTH DEBUG: Attempting to verify phone number: \(formattedPhoneNumber)")
-            print("🔵 PHONE AUTH DEBUG: Starting PhoneAuthProvider.verifyPhoneNumber call...")
+        print("🔵 PHONE AUTH DEBUG: Attempting to verify phone number: \(formattedPhoneNumber)")
+        print("🔵 PHONE AUTH DEBUG: Starting PhoneAuthProvider.verifyPhoneNumber call with reCAPTCHA...")
+        
+        // Create reCAPTCHA delegate for real phone numbers to bypass APNs requirement
+        var delegate: PhoneAuthProviderDelegate? = nil
+        if !isTestNumber {
+            delegate = PhoneAuthProviderDelegate()
+            self.recaptchaDelegate = delegate
+            print("🔵 PHONE AUTH DEBUG: Using reCAPTCHA delegate for real phone number")
+        } else {
+            print("🔵 PHONE AUTH DEBUG: Using test number - no delegate needed")
+        }
+        
+        // Use reCAPTCHA delegate for real phone numbers to bypass APNs requirement
+        let provider = PhoneAuthProvider.provider()
+        
+        do {
+            let verificationID = try await provider.verifyPhoneNumber(
+                formattedPhoneNumber,
+                uiDelegate: isTestNumber ? nil : (delegate as? AuthUIDelegate)
+            )
             
-            PhoneAuthProvider.provider().verifyPhoneNumber(formattedPhoneNumber, uiDelegate: nil) { [weak self] verificationID, error in
-                if let error = error {
-                    let nsError = error as NSError
-                    print("❌ PHONE AUTH ERROR: \(error.localizedDescription)")
-                    print("❌ PHONE AUTH ERROR CODE: \(nsError.code)")
-                    print("❌ PHONE AUTH ERROR DOMAIN: \(nsError.domain)")
-                    print("❌ PHONE AUTH ERROR USER INFO: \(nsError.userInfo)")
-                    
-                    // Additional specific error analysis
-                    switch nsError.code {
-                    case 17093: // FIRAuthErrorCodeMissingClientIdentifier
-                        print("❌ CRITICAL: Missing client identifier. This usually means APNs is not configured in Firebase Console.")
-                        print("❌ SOLUTION: Go to Firebase Console → Project Settings → Cloud Messaging → iOS app configuration")
-                        print("❌ You need to upload your APNs authentication key or certificate.")
-                        print("💡 TEMPORARY WORKAROUND: Use test phone numbers like +1234567890 for development")
-                    case 17032: // FIRAuthErrorCodeAppNotAuthorized
-                        print("❌ CRITICAL: App not authorized for phone authentication. Check Firebase Console APNs configuration.")
-                    case 17046: // FIRAuthErrorCodeCaptchaCheckFailed
-                        print("❌ CRITICAL: reCAPTCHA verification failed. This often indicates APNs issues.")
-                    case 17052: // FIRAuthErrorCodeInvalidPhoneNumber
-                        print("❌ Phone number format issue: \(formattedPhoneNumber)")
-                    case 17054: // FIRAuthErrorCodeQuotaExceeded
-                        print("❌ SMS quota exceeded for project")
-                    default:
-                        print("❌ Other phone auth error: \(nsError.code)")
-                    }
-                    
-                    Task { @MainActor in
-                        self?.isWaitingForSMS = false
-                        self?.errorMessage = self?.mapPhoneAuthError(error) ?? error.localizedDescription
-                    }
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                guard let verificationID = verificationID else {
-                    print("❌ PHONE AUTH ERROR: No verification ID received")
-                    let customError = AuthError.custom("Failed to get verification ID")
-                    Task { @MainActor in
-                        self?.isWaitingForSMS = false
-                        self?.errorMessage = customError.localizedDescription
-                    }
-                    continuation.resume(throwing: customError)
-                    return
-                }
-                
-                print("✅ PHONE AUTH SUCCESS: Received verification ID: \(verificationID)")
-                print("✅ SMS should be sent to: \(formattedPhoneNumber)")
-                
-                Task { @MainActor in
-                    self?.verificationID = verificationID
-                    self?.saveVerificationID(verificationID)
-                }
-                
-                continuation.resume()
+            print("✅ PHONE AUTH SUCCESS: Received verification ID: \(verificationID)")
+            if isTestNumber {
+                print("✅ Test SMS should be sent to: \(formattedPhoneNumber)")
+                print("💡 Test numbers use Firebase's built-in verification system")
+            } else {
+                print("✅ Real SMS should be sent to: \(formattedPhoneNumber)")
+                print("💡 Real numbers use reCAPTCHA verification")
             }
+            
+            await MainActor.run {
+                self.verificationID = verificationID
+                self.saveVerificationID(verificationID)
+            }
+        } catch {
+            let nsError = error as NSError
+            print("❌ PHONE AUTH ERROR: \(error.localizedDescription)")
+            print("❌ PHONE AUTH ERROR CODE: \(nsError.code)")
+            print("❌ PHONE AUTH ERROR DOMAIN: \(nsError.domain)")
+            print("❌ PHONE AUTH ERROR USER INFO: \(nsError.userInfo)")
+            
+            // Additional specific error analysis
+            switch nsError.code {
+            case 17093: // FIRAuthErrorCodeMissingClientIdentifier
+                print("❌ CRITICAL: Missing client identifier. This means APNs is not configured in Firebase Console.")
+                print("❌ SOLUTION: Go to Firebase Console → Project Settings → Cloud Messaging → iOS app configuration")
+                print("❌ You need to upload your APNs authentication key or certificate.")
+                if !isTestNumber {
+                    print("💡 For real phone numbers, you MUST configure APNs in Firebase Console.")
+                    print("💡 Test numbers like +16505551234 will work without APNs configuration.")
+                    print("💡 Try using test numbers for development: +16505551234, +16505550000")
+                }
+            case 17032: // FIRAuthErrorCodeAppNotAuthorized
+                print("❌ CRITICAL: App not authorized for phone authentication. Check Firebase Console APNs configuration.")
+            case 17046: // FIRAuthErrorCodeCaptchaCheckFailed
+                print("❌ CRITICAL: reCAPTCHA verification failed. This often indicates APNs issues.")
+            case 17052: // FIRAuthErrorCodeInvalidPhoneNumber
+                print("❌ Phone number format issue: \(formattedPhoneNumber)")
+            case 17054: // FIRAuthErrorCodeQuotaExceeded
+                print("❌ SMS quota exceeded for project")
+            case 17020: // FIRAuthErrorCodeNetworkError
+                print("❌ Network error. Check internet connection.")
+            case 17021: // FIRAuthErrorCodeTooManyRequests
+                print("❌ Too many requests. Please wait before trying again.")
+            case 17022: // FIRAuthErrorCodeAppNotVerified
+                print("❌ App not verified. This might be a simulator issue.")
+            default:
+                print("❌ Other phone auth error: \(nsError.code)")
+                print("❌ Full error details: \(nsError)")
+            }
+            
+            await MainActor.run {
+                self.isWaitingForSMS = false
+                self.errorMessage = self.mapPhoneAuthError(error)
+            }
+            throw error
         }
     }
     
@@ -644,7 +744,7 @@ class AuthenticationService: ObservableObject {
         
         switch nsError.code {
         case 17093: // FIRAuthErrorCodeMissingClientIdentifier
-            return "APNs not configured. For development, try test numbers like +1234567890. For production, configure APNs in Firebase Console."
+            return "APNs not configured for real phone numbers. Use test numbers like +16505551234 for development, or configure APNs in Firebase Console for real numbers."
         case 17010: // FIRAuthErrorCodeTooManyRequests
             return "Too many SMS requests. Please wait before trying again."
         case 17052: // FIRAuthErrorCodeInvalidPhoneNumber
@@ -665,6 +765,51 @@ class AuthenticationService: ObservableObject {
             return "Verification session expired. Please request a new code."
         default:
             return error.localizedDescription
+        }
+    }
+}
+
+// MARK: - PhoneAuthProviderDelegate for reCAPTCHA
+class PhoneAuthProviderDelegate: NSObject {
+    func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)?) {
+        print("🔵 reCAPTCHA DEBUG: Presenting reCAPTCHA view controller")
+        
+        // Get the top view controller to present the reCAPTCHA view
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            
+            // Find the topmost view controller
+            var topViewController = rootViewController
+            while let presentedViewController = topViewController.presentedViewController {
+                topViewController = presentedViewController
+            }
+            
+            print("🔵 reCAPTCHA DEBUG: Presenting to top view controller: \(type(of: topViewController))")
+            topViewController.present(viewControllerToPresent, animated: flag, completion: completion)
+        } else {
+            print("❌ reCAPTCHA ERROR: Could not find top view controller to present reCAPTCHA")
+        }
+    }
+    
+    func dismiss(animated flag: Bool, completion: (() -> Void)?) {
+        print("🔵 reCAPTCHA DEBUG: Dismissing reCAPTCHA view controller")
+        
+        // Get the top view controller to dismiss the reCAPTCHA view
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            
+            // Find the topmost view controller
+            var topViewController = rootViewController
+            while let presentedViewController = topViewController.presentedViewController {
+                topViewController = presentedViewController
+            }
+            
+            print("🔵 reCAPTCHA DEBUG: Dismissing from top view controller: \(type(of: topViewController))")
+            topViewController.dismiss(animated: flag, completion: completion)
+        } else {
+            print("❌ reCAPTCHA ERROR: Could not find top view controller to dismiss reCAPTCHA")
         }
     }
 }

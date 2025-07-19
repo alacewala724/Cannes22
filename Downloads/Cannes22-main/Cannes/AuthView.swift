@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseCore
 import FirebaseFirestore
+import UserNotifications
 
 enum AuthMode {
     case signIn
@@ -61,7 +62,7 @@ struct AuthView: View {
                 
                 Spacer()
                 
-                // Alternative sign-in options
+                // Phone authentication options
                 if authMode == .signIn || authMode == .signUp {
                     alternativeSignInOptions
                 }
@@ -361,14 +362,25 @@ struct AuthView: View {
             }) {
                 HStack {
                     Image(systemName: "phone.fill")
+                        .foregroundColor(.accentColor)
                     Text(authMode == .signUp ? "Sign up with Phone" : "Sign in with Phone")
+                        .fontWeight(.medium)
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color(.systemGray6))
                 .foregroundColor(.primary)
                 .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                )
             }
+            
+            Text("📱 Receive SMS verification code")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 24)
     }
@@ -472,11 +484,20 @@ struct AuthView: View {
     
     private func handlePhoneVerification() async {
         isLoading = true
+        authService.errorMessage = nil
         do {
-            // Combine country code with phone number
-            let fullPhoneNumber = selectedCountry.code + phoneNumber.filter { $0.isNumber }
+            // Clean and format phone number properly
+            let cleanPhoneNumber = phoneNumber.filter { $0.isNumber }
+            let fullPhoneNumber = selectedCountry.code + cleanPhoneNumber
+            
+            print("🔵 PHONE AUTH DEBUG: Country code: \(selectedCountry.code)")
+            print("🔵 PHONE AUTH DEBUG: Clean phone: \(cleanPhoneNumber)")
+            print("🔵 PHONE AUTH DEBUG: Full number: \(fullPhoneNumber)")
+            
             try await authService.verifyPhoneNumber(fullPhoneNumber)
         } catch {
+            print("❌ PHONE AUTH ERROR in AuthView: \(error.localizedDescription)")
+            authService.errorMessage = error.localizedDescription
             showError = true
         }
         isLoading = false
@@ -484,6 +505,7 @@ struct AuthView: View {
     
     private func handlePhoneAuthentication() async {
         isLoading = true
+        authService.errorMessage = nil
         do {
             if authMode == .phoneVerificationSignUp {
                 try await authService.signUpWithPhoneNumber(verificationCode: verificationCode)
@@ -491,6 +513,8 @@ struct AuthView: View {
                 try await authService.signInWithPhoneNumber(verificationCode: verificationCode)
             }
         } catch {
+            print("❌ PHONE AUTH ERROR in AuthView: \(error.localizedDescription)")
+            authService.errorMessage = error.localizedDescription
             showError = true
         }
         isLoading = false
@@ -498,9 +522,12 @@ struct AuthView: View {
     
     private func handleResendCode() async {
         isLoading = true
+        authService.errorMessage = nil
         do {
             try await authService.resendVerificationCode()
         } catch {
+            print("❌ PHONE AUTH ERROR in AuthView: \(error.localizedDescription)")
+            authService.errorMessage = error.localizedDescription
             showError = true
         }
         isLoading = false
