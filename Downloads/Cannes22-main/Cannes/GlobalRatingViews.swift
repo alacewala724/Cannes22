@@ -44,7 +44,9 @@ struct GlobalRatingRow: View {
                                 Image(systemName: arrow)
                                     .foregroundColor(color)
                                     .font(.caption2)
-                                Text(String(format: "%.1f", abs(difference)))
+                                // Round the difference to 1 decimal place to avoid floating-point precision issues
+                                let roundedDifference = (difference * 10).rounded() / 10
+                                Text(String(format: "%.1f", abs(roundedDifference)))
                                     .font(.caption2)
                                     .foregroundColor(color)
                             }
@@ -353,7 +355,10 @@ struct GlobalRatingDetailView: View {
                                 let color: Color = isHigher ? .green : .red
                                 let arrow = isHigher ? "arrow.up" : "arrow.down"
                                 
-                                if abs(difference) < 0.1 {
+                                // Round the difference to 1 decimal place to avoid floating-point precision issues
+                                let roundedDifference = (difference * 10).rounded() / 10
+                                
+                                if abs(roundedDifference) < 0.1 {
                                     // Show dash for very small differences (essentially zero)
                                     Text("—")
                                         .font(.title2)
@@ -365,7 +370,7 @@ struct GlobalRatingDetailView: View {
                                     Image(systemName: arrow)
                                         .foregroundColor(color)
                                         .font(.title2)
-                                    Text(String(format: "%.1f", abs(difference)))
+                                    Text(String(format: "%.1f", abs(roundedDifference)))
                                         .font(.headline)
                                         .foregroundColor(color)
                                 }
