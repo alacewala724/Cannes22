@@ -214,28 +214,23 @@ struct AuthView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             
-            VStack(alignment: .leading, spacing: 8) {
-                // Country code selector
+            VStack(spacing: 12) {
                 HStack {
                     Button(action: { showingCountryPicker = true }) {
-                        HStack(spacing: 8) {
+                        HStack {
                             Text(selectedCountry.flag)
-                                .font(.title2)
                             Text(selectedCountry.code)
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(.subheadline)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(Color(.systemGray6))
                         .cornerRadius(8)
                     }
-                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showingCountryPicker) {
+                        CountryCodePicker(selectedCountry: $selectedCountry)
+                    }
                     
-                    // Phone number input
                     TextField("Phone Number", text: $phoneNumber)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .textContentType(.telephoneNumber)
@@ -262,6 +257,18 @@ struct AuthView: View {
                         }
                 }
                 
+                // Show warning for sign-up if phone number might be taken
+                if authMode == .phoneSignUp && !phoneNumber.isEmpty {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                        Text("We'll check if this number is available before sending the code")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
@@ -283,15 +290,15 @@ struct AuthView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .scaleEffect(0.8)
                     }
-                    Text("Send Code")
+                    Text("Send Verification Code")
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(phoneNumber.count >= 5 ? Color.accentColor : Color.gray)
+                .background(Color.accentColor)
                 .foregroundColor(.white)
                 .cornerRadius(12)
             }
-            .disabled(isLoading || phoneNumber.count < 5)
+            .disabled(isLoading || phoneNumber.isEmpty)
             
             VStack(spacing: 8) {
                 Text("Legal Notice")
@@ -305,9 +312,6 @@ struct AuthView: View {
                     .multilineTextAlignment(.center)
             }
             .padding(.top, 8)
-        }
-        .sheet(isPresented: $showingCountryPicker) {
-            CountryCodePicker(selectedCountry: $selectedCountry)
         }
     }
     
@@ -533,6 +537,17 @@ struct AuthView: View {
             print("🔵 PHONE AUTH DEBUG: Country code: \(selectedCountry.code)")
             print("🔵 PHONE AUTH DEBUG: Clean phone: \(cleanPhoneNumber)")
             print("🔵 PHONE AUTH DEBUG: Full number: \(fullPhoneNumber)")
+            
+            // Check if this is a sign-up attempt and if the phone number is already taken
+            if authMode == .phoneSignUp {
+                let isAvailable = await authService.isPhoneNumberAvailable(fullPhoneNumber)
+                if !isAvailable {
+                    authService.errorMessage = "An account already exists with this phone number. Please sign in instead."
+                    showError = true
+                    isLoading = false
+                    return
+                }
+            }
             
             try await authService.verifyPhoneNumber(fullPhoneNumber)
         } catch {
