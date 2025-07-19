@@ -16,13 +16,22 @@ struct SettingsView: View {
     @State private var isChangingPassword = false
     @State private var isChangingUsername = false
     @State private var isCheckingUsername = false
+    @State private var isLinkingEmail = false
+    @State private var isUnlinkingEmail = false
     
     @State private var passwordErrorMessage: String?
     @State private var usernameErrorMessage: String?
     @State private var passwordSuccessMessage: String?
     @State private var usernameSuccessMessage: String?
+    @State private var emailLinkErrorMessage: String?
+    @State private var emailLinkSuccessMessage: String?
     
     @State private var showingSignOutAlert = false
+    @State private var showingUnlinkEmailAlert = false
+    
+    // Email linking states
+    @State private var emailToLink = ""
+    @State private var emailPassword = ""
     
     var body: some View {
         NavigationView {
@@ -39,6 +48,15 @@ struct SettingsView: View {
                             }
                         }
                         
+                        if let phoneNumber = authService.currentUser?.phoneNumber {
+                            HStack {
+                                Text("Phone")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(phoneNumber)
+                            }
+                        }
+                        
                         HStack {
                             Text("Username")
                                 .foregroundColor(.secondary)
@@ -47,6 +65,116 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+                
+                // Email Linking Section (only for phone users)
+                if authService.isPhoneUser {
+                    Section("Email Linking") {
+                        if authService.canLinkEmail {
+                            // User can link an email
+                            VStack(spacing: 12) {
+                                Text("Link Email Address")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Text("Add an email address to your account for easier sign-in and account recovery.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                
+                                TextField("Email Address", text: $emailToLink)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .textContentType(.emailAddress)
+                                    .autocapitalization(.none)
+                                    .keyboardType(.emailAddress)
+                                    .toolbar {
+                                        ToolbarItemGroup(placement: .keyboard) {
+                                            Spacer()
+                                            Button("Done") {
+                                                hideKeyboard()
+                                            }
+                                            .foregroundColor(.accentColor)
+                                        }
+                                    }
+                                
+                                SecureField("Password for Email", text: $emailPassword)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .textContentType(.password)
+                                    .toolbar {
+                                        ToolbarItemGroup(placement: .keyboard) {
+                                            Spacer()
+                                            Button("Done") {
+                                                hideKeyboard()
+                                            }
+                                            .foregroundColor(.accentColor)
+                                        }
+                                    }
+                                
+                                if let errorMessage = emailLinkErrorMessage {
+                                    Text(errorMessage)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                }
+                                
+                                if let successMessage = emailLinkSuccessMessage {
+                                    Text(successMessage)
+                                        .foregroundColor(.green)
+                                        .font(.caption)
+                                }
+                                
+                                Button(action: linkEmail) {
+                                    HStack {
+                                        if isLinkingEmail {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        }
+                                        Text("Link Email")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isLinkingEmail || emailToLink.isEmpty || emailPassword.isEmpty)
+                            }
+                            .padding(.vertical, 8)
+                        } else if authService.canUnlinkEmail {
+                            // User can unlink their email
+                            VStack(spacing: 12) {
+                                Text("Linked Email Address")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Text("Your email address is linked to your account. You can unlink it if needed.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                
+                                if let errorMessage = emailLinkErrorMessage {
+                                    Text(errorMessage)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                }
+                                
+                                if let successMessage = emailLinkSuccessMessage {
+                                    Text(successMessage)
+                                        .foregroundColor(.green)
+                                        .font(.caption)
+                                }
+                                
+                                Button(action: { showingUnlinkEmailAlert = true }) {
+                                    HStack {
+                                        if isUnlinkingEmail {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        }
+                                        Text("Unlink Email")
+                                    }
+                                    .foregroundColor(.red)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isUnlinkingEmail)
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
                 }
                 
                 // Password Change Section
@@ -182,6 +310,14 @@ struct SettingsView: View {
         } message: {
             Text("Are you sure you want to sign out?")
         }
+        .alert("Unlink Email", isPresented: $showingUnlinkEmailAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Unlink", role: .destructive) {
+                unlinkEmail()
+            }
+        } message: {
+            Text("Are you sure you want to unlink your email address? You'll need to use your phone number to sign in.")
+        }
     }
     
     private func changePassword() {
@@ -278,5 +414,58 @@ struct SettingsView: View {
         } catch {
             print("Error signing out: \(error)")
         }
+    }
+    
+    // MARK: - Email Linking Functions
+    
+    private func linkEmail() {
+        guard !emailToLink.isEmpty && !emailPassword.isEmpty else { return }
+        
+        isLinkingEmail = true
+        emailLinkErrorMessage = nil
+        emailLinkSuccessMessage = nil
+        
+        Task {
+            do {
+                try await authService.linkEmail(emailToLink, password: emailPassword)
+                await MainActor.run {
+                    emailLinkSuccessMessage = "Email linked successfully"
+                    emailToLink = ""
+                    emailPassword = ""
+                    isLinkingEmail = false
+                }
+            } catch {
+                await MainActor.run {
+                    emailLinkErrorMessage = error.localizedDescription
+                    isLinkingEmail = false
+                }
+            }
+        }
+    }
+    
+    private func unlinkEmail() {
+        isUnlinkingEmail = true
+        emailLinkErrorMessage = nil
+        emailLinkSuccessMessage = nil
+        
+        Task {
+            do {
+                try await authService.unlinkEmail()
+                await MainActor.run {
+                    emailLinkSuccessMessage = "Email unlinked successfully"
+                    isUnlinkingEmail = false
+                }
+            } catch {
+                await MainActor.run {
+                    emailLinkErrorMessage = error.localizedDescription
+                    isUnlinkingEmail = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Keyboard Dismissal
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 } 

@@ -71,6 +71,10 @@ struct AuthView: View {
                 authModeSwitcher
             }
             .navigationBarHidden(true)
+            .onTapGesture {
+                // Dismiss keyboard when tapping outside
+                hideKeyboard()
+            }
             .overlay(
                 // Back button overlay for phone auth screens
                 Group {
@@ -141,10 +145,28 @@ struct AuthView: View {
                 .textContentType(.emailAddress)
                 .autocapitalization(.none)
                 .keyboardType(.emailAddress)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            hideKeyboard()
+                        }
+                        .foregroundColor(.accentColor)
+                    }
+                }
             
             SecureField("Password", text: $password)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .textContentType(authMode == .signUp ? .newPassword : .password)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            hideKeyboard()
+                        }
+                        .foregroundColor(.accentColor)
+                    }
+                }
             
             Button(action: {
                 Task {
@@ -229,6 +251,15 @@ struct AuthView: View {
                                 phoneNumber = filtered
                             }
                         }
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") {
+                                    hideKeyboard()
+                                }
+                                .foregroundColor(.accentColor)
+                            }
+                        }
                 }
                 
                 HStack {
@@ -297,6 +328,15 @@ struct AuthView: View {
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.center)
                 .font(.title3)
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            hideKeyboard()
+                        }
+                        .foregroundColor(.accentColor)
+                    }
+                }
             
             Button(action: {
                 Task {
@@ -545,5 +585,12 @@ extension View {
             placeholder().opacity(shouldShow ? 1 : 0)
             self
         }
+    }
+}
+
+// MARK: - Keyboard Dismissal
+extension View {
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 } 
