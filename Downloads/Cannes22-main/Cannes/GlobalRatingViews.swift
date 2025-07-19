@@ -36,7 +36,7 @@ struct GlobalRatingRow: View {
                     // Show user's rating difference if they have rated this movie
                     if let tmdbId = rating.tmdbId,
                        let userScore = store.getUserPersonalScore(for: tmdbId) {
-                        let difference = userScore - rating.averageRating
+                        let difference = rating.averageRating - userScore
                         let isHigher = difference > 0
                         let color: Color = isHigher ? .green : .red
                         let arrow = isHigher ? "arrow.up" : "arrow.down"
