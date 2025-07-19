@@ -216,14 +216,17 @@ class FirestoreService: ObservableObject {
             if let firstMovie = movies.first {
                 let communityScore = firstMovie.score // Use the actual recalculated score
                 
-                print("recreateCommunityRatingsWithActualScores: Recreating rating for TMDB ID \(tmdbId) with score \(communityScore)")
+                // Round the community score to 1 decimal place to prevent floating-point precision issues
+                let roundedCommunityScore = (communityScore * 10).rounded() / 10
+                
+                print("recreateCommunityRatingsWithActualScores: Recreating rating for TMDB ID \(tmdbId) with score \(communityScore), rounded to \(roundedCommunityScore)")
                 
                 let ratingsRef = db.collection("ratings").document(tmdbId.description)
                 
                 try await ratingsRef.setData([
-                    "totalScore": communityScore,
+                    "totalScore": roundedCommunityScore,
                     "numberOfRatings": 1,
-                    "averageRating": communityScore,
+                    "averageRating": roundedCommunityScore,
                     "lastUpdated": FieldValue.serverTimestamp(),
                     "title": firstMovie.title,
                     "mediaType": firstMovie.mediaType.rawValue,
@@ -468,11 +471,14 @@ class FirestoreService: ObservableObject {
                     let newCount = currentCount + 1
                     let newAverage = newTotal / Double(newCount)
                     
+                    // Round the average to 1 decimal place to prevent floating-point precision issues
+                    let roundedAverage = (newAverage * 10).rounded() / 10
+                    
                     print("addNewRating: Adding to existing community rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                    print("addNewRating: Adding score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage)")
+                    print("addNewRating: Adding score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
                     
                     // Validate calculated values
-                    guard !newTotal.isNaN && !newTotal.isInfinite && !newAverage.isNaN && !newAverage.isInfinite else {
+                    guard !newTotal.isNaN && !newTotal.isInfinite && !roundedAverage.isNaN && !roundedAverage.isInfinite else {
                         print("addNewRating: Calculated values are invalid, recreating document")
                         transaction.setData([
                             "totalScore": communityScore,
@@ -489,7 +495,7 @@ class FirestoreService: ObservableObject {
                     transaction.updateData([
                         "totalScore": newTotal,
                         "numberOfRatings": newCount,
-                        "averageRating": newAverage,
+                        "averageRating": roundedAverage,
                         "lastUpdated": FieldValue.serverTimestamp()
                     ], forDocument: ratingsRef)
                 } else {
@@ -538,12 +544,15 @@ class FirestoreService: ObservableObject {
                     let newTotal = currentTotal - oldScore + communityScore
                     let newAverage = newTotal / Double(currentCount)
                     
+                    // Round the average to 1 decimal place to prevent floating-point precision issues
+                    let roundedAverage = (newAverage * 10).rounded() / 10
+                    
                     print("updateExistingRating: currentTotal=\(currentTotal), oldScore=\(oldScore), communityScore=\(communityScore)")
-                    print("updateExistingRating: newTotal=\(newTotal), newAverage=\(newAverage)")
+                    print("updateExistingRating: newTotal=\(newTotal), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
                     
                     transaction.updateData([
                         "totalScore": newTotal,
-                        "averageRating": newAverage,
+                        "averageRating": roundedAverage,
                         "lastUpdated": FieldValue.serverTimestamp(),
                         "title": movie.title,
                         "mediaType": movie.mediaType.rawValue
@@ -622,10 +631,14 @@ class FirestoreService: ObservableObject {
             if newCount > 0 {
                 // Update the document with new total and count
                 let newAverage = newTotal / Double(newCount)
+                
+                // Round the average to 1 decimal place to prevent floating-point precision issues
+                let roundedAverage = (newAverage * 10).rounded() / 10
+                
                 try await ratingsRef.updateData([
                     "totalScore": newTotal,
                     "numberOfRatings": newCount,
-                    "averageRating": newAverage,
+                    "averageRating": roundedAverage,
                     "lastUpdated": FieldValue.serverTimestamp()
                 ])
             } else {
@@ -823,13 +836,16 @@ extension FirestoreService {
                             let newCount = currentCount + 1
                             let newAverage = newTotal / Double(newCount)
                             
+                            // Round the average to 1 decimal place to prevent floating-point precision issues
+                            let roundedAverage = (newAverage * 10).rounded() / 10
+                            
                             print("updateSingleMovieRatingWithMovie: Adding new rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: Adding final score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage)")
+                            print("updateSingleMovieRatingWithMovie: Adding final score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
                             
                             transaction.updateData([
                                 "totalScore": newTotal,
                                 "numberOfRatings": newCount,
-                                "averageRating": newAverage,
+                                "averageRating": roundedAverage,
                                 "lastUpdated": FieldValue.serverTimestamp()
                             ], forDocument: ratingsRef)
                         } else {
@@ -837,11 +853,14 @@ extension FirestoreService {
                             let newTotal = currentTotal - update.oldScore + communityScore
                             let newAverage = newTotal / Double(currentCount)
                             
+                            // Round the average to 1 decimal place to prevent floating-point precision issues
+                            let roundedAverage = (newAverage * 10).rounded() / 10
+                            
                             print("updateSingleMovieRatingWithMovie: Updating existing rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage)")
+                            print("updateSingleMovieRatingWithMovie: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
                             
                             // Validate calculated values
-                            guard !newTotal.isNaN && !newTotal.isInfinite && !newAverage.isNaN && !newAverage.isInfinite else {
+                            guard !newTotal.isNaN && !newTotal.isInfinite && !roundedAverage.isNaN && !roundedAverage.isInfinite else {
                                 print("updateSingleMovieRatingWithMovie: Calculated values are invalid, recreating document")
                                 transaction.setData([
                                     "totalScore": communityScore,
@@ -857,7 +876,7 @@ extension FirestoreService {
                             
                             transaction.updateData([
                                 "totalScore": newTotal,
-                                "averageRating": newAverage,
+                                "averageRating": roundedAverage,
                                 "lastUpdated": FieldValue.serverTimestamp()
                             ], forDocument: ratingsRef)
                         }
