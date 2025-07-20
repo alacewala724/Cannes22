@@ -81,8 +81,6 @@ final class MovieStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     private func syncWhenBackOnline() {
-        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
-        
         // Check if we have cached data that might be stale
         if movies.isEmpty && tvShows.isEmpty {
             // No data loaded, try loading from server
@@ -499,7 +497,7 @@ final class MovieStore: ObservableObject {
                 }
                 
                 // Update UI on main thread
-                await MainActor.run {
+                await MainActor.run { [successfulDeletions, failedDeletions] in
                     withAnimation {
                         var updatedList = self.selectedMediaType == .movie ? self.movies : self.tvShows
                         
@@ -600,7 +598,7 @@ final class MovieStore: ObservableObject {
                 }
                 
                 // Update the UI on main thread
-                await MainActor.run {
+                await MainActor.run { [updatedMovies] in
                     var updatedList = self.selectedMediaType == .movie ? self.movies : self.tvShows
                     
                     // Update the scores for affected movies
@@ -796,7 +794,7 @@ final class MovieStore: ObservableObject {
         }
         
         await MainActor.run {
-            Task {
+            _ = Task {
                 do {
                     try await recalculateScoresAndUpdateCommunityRatings()
                 } catch {
@@ -971,7 +969,7 @@ final class MovieStore: ObservableObject {
             movieRatings.sort { $0.averageRating > $1.averageRating }
             tvRatings.sort { $0.averageRating > $1.averageRating }
             
-            await MainActor.run {
+            await MainActor.run { [movieRatings, tvRatings] in
                 self.globalMovieRatings = movieRatings
                 self.globalTVRatings = tvRatings
                 

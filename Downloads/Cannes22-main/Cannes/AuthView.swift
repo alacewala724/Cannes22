@@ -7,10 +7,8 @@ import UserNotifications
 enum AuthMode {
     case signIn
     case signUp
-    case phoneSignIn
-    case phoneSignUp
+    case phoneAuth
     case phoneVerification
-    case phoneVerificationSignUp
 }
 
 struct AuthView: View {
@@ -52,9 +50,9 @@ struct AuthView: View {
                     switch authMode {
                     case .signIn, .signUp:
                         emailAuthForm
-                    case .phoneSignIn, .phoneSignUp:
+                    case .phoneAuth:
                         phoneNumberForm
-                    case .phoneVerification, .phoneVerificationSignUp:
+                    case .phoneVerification:
                         verificationCodeForm
                     }
                 }
@@ -78,20 +76,14 @@ struct AuthView: View {
             .overlay(
                 // Back button overlay for phone auth screens
                 Group {
-                    if authMode == .phoneSignIn || authMode == .phoneSignUp || authMode == .phoneVerification || authMode == .phoneVerificationSignUp {
+                    if authMode == .phoneAuth || authMode == .phoneVerification {
                         VStack {
                             HStack {
                                 Spacer()
                                 Button(action: {
-                                    if authMode == .phoneSignIn || authMode == .phoneSignUp {
-                                        authMode = authMode == .phoneSignUp ? .signUp : .signIn
-                                        phoneNumber = ""
-                                        authService.cancelPhoneAuth()
-                                    } else {
-                                        authMode = authMode == .phoneVerificationSignUp ? .phoneSignUp : .phoneSignIn
-                                        verificationCode = ""
-                                        authService.cancelPhoneAuth()
-                                    }
+                                    authMode = .signIn
+                                    phoneNumber = ""
+                                    authService.cancelPhoneAuth()
                                 }) {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.title2)
@@ -129,11 +121,7 @@ struct AuthView: View {
         }
         .onReceive(authService.$isWaitingForSMS) { isWaiting in
             if isWaiting {
-                if authMode == .phoneSignIn {
-                    authMode = .phoneVerification
-                } else if authMode == .phoneSignUp {
-                    authMode = .phoneVerificationSignUp
-                }
+                authMode = .phoneVerification
             }
         }
     }
@@ -203,13 +191,11 @@ struct AuthView: View {
     
     private var phoneNumberForm: some View {
         VStack(spacing: 16) {
-            Text(authMode == .phoneSignUp ? "Sign up with Phone" : "Sign in with Phone")
+            Text("Continue with Phone Number")
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text(authMode == .phoneSignUp ? 
-                 "Enter your phone number to create a new account" :
-                 "Enter your phone number to receive a verification code")
+            Text("Enter your phone number to receive a verification code. We'll sign you in or create a new account.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -257,18 +243,6 @@ struct AuthView: View {
                         }
                 }
                 
-                // Show warning for sign-up if phone number might be taken
-                if authMode == .phoneSignUp && !phoneNumber.isEmpty {
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.orange)
-                            .font(.caption)
-                        Text("We'll check if this number is available before sending the code")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
                 HStack {
                     Image(systemName: "info.circle")
                         .foregroundColor(.blue)
@@ -290,7 +264,7 @@ struct AuthView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .scaleEffect(0.8)
                     }
-                    Text("Send Verification Code")
+                    Text("Continue")
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -299,19 +273,6 @@ struct AuthView: View {
                 .cornerRadius(12)
             }
             .disabled(isLoading || phoneNumber.isEmpty)
-            
-            VStack(spacing: 8) {
-                Text("Legal Notice")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-                
-                Text("By using phone sign-in, you may receive an SMS message for verification. Standard rates apply.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 8)
         }
     }
     
@@ -353,7 +314,7 @@ struct AuthView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .scaleEffect(0.8)
                     }
-                    Text(authMode == .phoneVerificationSignUp ? "Verify & Create Account" : "Verify & Sign In")
+                    Text("Continue")
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -375,7 +336,7 @@ struct AuthView: View {
                 
                 Button("Change Number") {
                     authService.cancelPhoneAuth()
-                    authMode = authMode == .phoneVerificationSignUp ? .phoneSignUp : .phoneSignIn
+                    authMode = .phoneAuth
                     phoneNumber = ""
                     verificationCode = ""
                 }
@@ -400,33 +361,20 @@ struct AuthView: View {
             }
             
             Button(action: {
-                let targetMode: AuthMode = authMode == .signUp ? .phoneSignUp : .phoneSignIn
-                authMode = targetMode
+                authMode = .phoneAuth
                 phoneNumber = authService.phoneNumber
             }) {
                 HStack {
                     Image(systemName: "phone.fill")
-                        .foregroundColor(.accentColor)
-                    Text(authMode == .signUp ? "Sign up with Phone" : "Sign in with Phone")
-                        .fontWeight(.medium)
+                    Text("Continue with Phone Number")
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color(.systemGray6))
                 .foregroundColor(.primary)
                 .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
-                )
             }
-            
-            Text("📱 Receive SMS verification code")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .padding(.horizontal, 24)
     }
     
     private var authModeSwitcher: some View {
@@ -448,25 +396,16 @@ struct AuthView: View {
                     password = ""
                 }
                 .foregroundColor(.accentColor)
-            case .phoneSignIn:
-                Text("Don't have an account?")
+            case .phoneAuth:
+                Text("Prefer email authentication?")
                     .foregroundColor(.secondary)
-                Button("Sign Up with Phone") {
-                    authMode = .phoneSignUp
+                Button("Use Email Instead") {
+                    authMode = .signIn
                     phoneNumber = ""
                     verificationCode = ""
                 }
                 .foregroundColor(.accentColor)
-            case .phoneSignUp:
-                Text("Already have an account?")
-                    .foregroundColor(.secondary)
-                Button("Sign In with Phone") {
-                    authMode = .phoneSignIn
-                    phoneNumber = ""
-                    verificationCode = ""
-                }
-                .foregroundColor(.accentColor)
-            case .phoneVerification, .phoneVerificationSignUp:
+            case .phoneVerification:
                 VStack(spacing: 8) {
                     HStack {
                         Text("Prefer email?")
@@ -538,17 +477,6 @@ struct AuthView: View {
             print("🔵 PHONE AUTH DEBUG: Clean phone: \(cleanPhoneNumber)")
             print("🔵 PHONE AUTH DEBUG: Full number: \(fullPhoneNumber)")
             
-            // Check if this is a sign-up attempt and if the phone number is already taken
-            if authMode == .phoneSignUp {
-                let isAvailable = await authService.isPhoneNumberAvailable(fullPhoneNumber)
-                if !isAvailable {
-                    authService.errorMessage = "An account already exists with this phone number. Please sign in instead."
-                    showError = true
-                    isLoading = false
-                    return
-                }
-            }
-            
             try await authService.verifyPhoneNumber(fullPhoneNumber)
         } catch {
             print("❌ PHONE AUTH ERROR in AuthView: \(error.localizedDescription)")
@@ -562,11 +490,7 @@ struct AuthView: View {
         isLoading = true
         authService.errorMessage = nil
         do {
-            if authMode == .phoneVerificationSignUp {
-                try await authService.signUpWithPhoneNumber(verificationCode: verificationCode)
-            } else {
-                try await authService.signInWithPhoneNumber(verificationCode: verificationCode)
-            }
+            try await authService.signInWithPhoneNumber(verificationCode: verificationCode)
         } catch {
             print("❌ PHONE AUTH ERROR in AuthView: \(error.localizedDescription)")
             authService.errorMessage = error.localizedDescription

@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var isCheckingUsername = false
     @State private var isLinkingEmail = false
     @State private var isUnlinkingEmail = false
+    @State private var isLinkingPhone = false
+    @State private var isUnlinkingPhone = false
     
     @State private var passwordErrorMessage: String?
     @State private var usernameErrorMessage: String?
@@ -25,13 +27,23 @@ struct SettingsView: View {
     @State private var usernameSuccessMessage: String?
     @State private var emailLinkErrorMessage: String?
     @State private var emailLinkSuccessMessage: String?
+    @State private var phoneLinkErrorMessage: String?
+    @State private var phoneLinkSuccessMessage: String?
     
     @State private var showingSignOutAlert = false
     @State private var showingUnlinkEmailAlert = false
+    @State private var showingUnlinkPhoneAlert = false
     
     // Email linking states
     @State private var emailToLink = ""
     @State private var emailPassword = ""
+    
+    // Phone linking states
+    @State private var phoneNumberToLink = ""
+    @State private var phoneVerificationCode = ""
+    @State private var selectedCountry = CountryCode.popular[0]
+    @State private var showingCountryPicker = false
+    @State private var isWaitingForPhoneSMS = false
     
     var body: some View {
         NavigationView {
@@ -171,6 +183,189 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .disabled(isUnlinkingEmail)
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
+                }
+                
+                // Phone Linking Section (only for email users)
+                if authService.isEmailUser {
+                    Section("Phone Linking") {
+                        if authService.canLinkPhone {
+                            // User can link a phone number
+                            VStack(spacing: 12) {
+                                Text("Link Phone Number")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Text("Add a phone number to your account for easier sign-in and account recovery.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                
+                                if !isWaitingForPhoneSMS {
+                                    // Phone number input
+                                    VStack(spacing: 8) {
+                                        HStack {
+                                            Button(action: { showingCountryPicker = true }) {
+                                                HStack {
+                                                    Text(selectedCountry.flag)
+                                                    Text(selectedCountry.code)
+                                                        .font(.subheadline)
+                                                }
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(Color(.systemGray6))
+                                                .cornerRadius(8)
+                                            }
+                                            .sheet(isPresented: $showingCountryPicker) {
+                                                CountryCodePicker(selectedCountry: $selectedCountry)
+                                            }
+                                            
+                                            TextField("Phone Number", text: $phoneNumberToLink)
+                                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                                .textContentType(.telephoneNumber)
+                                                .keyboardType(.phonePad)
+                                                .placeholder(when: phoneNumberToLink.isEmpty) {
+                                                    Text(selectedCountry.placeholder)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                        }
+                                        
+                                        HStack {
+                                            Image(systemName: "info.circle")
+                                                .foregroundColor(.blue)
+                                                .font(.caption)
+                                            Text("Enter your phone number without the country code")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    
+                                    if let errorMessage = phoneLinkErrorMessage {
+                                        Text(errorMessage)
+                                            .foregroundColor(.red)
+                                            .font(.caption)
+                                    }
+                                    
+                                    Button(action: sendPhoneVerification) {
+                                        HStack {
+                                            if isLinkingPhone {
+                                                ProgressView()
+                                                    .scaleEffect(0.8)
+                                            }
+                                            Text("Send Verification Code")
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isLinkingPhone || phoneNumberToLink.isEmpty)
+                                } else {
+                                    // Verification code input
+                                    VStack(spacing: 8) {
+                                        Text("We sent a 6-digit code to \(selectedCountry.code + phoneNumberToLink)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.center)
+                                        
+                                        TextField("Verification Code", text: $phoneVerificationCode)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .textContentType(.oneTimeCode)
+                                            .keyboardType(.numberPad)
+                                            .multilineTextAlignment(.center)
+                                            .font(.title3)
+                                        
+                                        if let errorMessage = phoneLinkErrorMessage {
+                                            Text(errorMessage)
+                                                .foregroundColor(.red)
+                                                .font(.caption)
+                                        }
+                                        
+                                        if let successMessage = phoneLinkSuccessMessage {
+                                            Text(successMessage)
+                                                .foregroundColor(.green)
+                                                .font(.caption)
+                                        }
+                                        
+                                        HStack(spacing: 20) {
+                                            Button("Resend Code") {
+                                                sendPhoneVerification()
+                                            }
+                                            .font(.subheadline)
+                                            .foregroundColor(.accentColor)
+                                            .disabled(isLinkingPhone)
+                                            
+                                            Button("Change Number") {
+                                                isWaitingForPhoneSMS = false
+                                                phoneNumberToLink = ""
+                                                phoneVerificationCode = ""
+                                                phoneLinkErrorMessage = nil
+                                                phoneLinkSuccessMessage = nil
+                                            }
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                        }
+                                        
+                                        Button(action: verifyPhoneCode) {
+                                            HStack {
+                                                if isLinkingPhone {
+                                                    ProgressView()
+                                                        .scaleEffect(0.8)
+                                                }
+                                                Text("Link Phone Number")
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(isLinkingPhone || phoneVerificationCode.isEmpty)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        } else if authService.canUnlinkPhone {
+                            // User can unlink their phone number
+                            VStack(spacing: 12) {
+                                Text("Linked Phone Number")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Text("Your phone number is linked to your account. You can unlink it if needed.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                
+                                if let phoneNumber = authService.getUserPhoneNumber() {
+                                    HStack {
+                                        Text("Phone")
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text(phoneNumber)
+                                    }
+                                }
+                                
+                                if let errorMessage = phoneLinkErrorMessage {
+                                    Text(errorMessage)
+                                        .foregroundColor(.red)
+                                        .font(.caption)
+                                }
+                                
+                                if let successMessage = phoneLinkSuccessMessage {
+                                    Text(successMessage)
+                                        .foregroundColor(.green)
+                                        .font(.caption)
+                                }
+                                
+                                Button(action: { showingUnlinkPhoneAlert = true }) {
+                                    HStack {
+                                        if isUnlinkingPhone {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        }
+                                        Text("Unlink Phone Number")
+                                    }
+                                    .foregroundColor(.red)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isUnlinkingPhone)
                             }
                             .padding(.vertical, 8)
                         }
@@ -318,6 +513,14 @@ struct SettingsView: View {
         } message: {
             Text("Are you sure you want to unlink your email address? You'll need to use your phone number to sign in.")
         }
+        .alert("Unlink Phone Number", isPresented: $showingUnlinkPhoneAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Unlink", role: .destructive) {
+                unlinkPhone()
+            }
+        } message: {
+            Text("Are you sure you want to unlink your phone number? You'll need to use your email to sign in.")
+        }
     }
     
     private func changePassword() {
@@ -459,6 +662,79 @@ struct SettingsView: View {
                 await MainActor.run {
                     emailLinkErrorMessage = error.localizedDescription
                     isUnlinkingEmail = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Phone Linking Functions
+    
+    private func sendPhoneVerification() {
+        guard !phoneNumberToLink.isEmpty else { return }
+        
+        isLinkingPhone = true
+        phoneLinkErrorMessage = nil
+        phoneLinkSuccessMessage = nil
+        
+        Task {
+            do {
+                try await authService.sendPhoneVerificationCode(phoneNumber: phoneNumberToLink)
+                await MainActor.run {
+                    phoneLinkSuccessMessage = "Verification code sent"
+                    isWaitingForPhoneSMS = true
+                    isLinkingPhone = false
+                }
+            } catch {
+                await MainActor.run {
+                    phoneLinkErrorMessage = error.localizedDescription
+                    isLinkingPhone = false
+                }
+            }
+        }
+    }
+    
+    private func verifyPhoneCode() {
+        guard !phoneVerificationCode.isEmpty else { return }
+        
+        isLinkingPhone = true
+        phoneLinkErrorMessage = nil
+        phoneLinkSuccessMessage = nil
+        
+        Task {
+            do {
+                try await authService.verifyPhoneCode(verificationCode: phoneVerificationCode)
+                await MainActor.run {
+                    phoneLinkSuccessMessage = "Phone number linked successfully"
+                    isLinkingPhone = false
+                    isWaitingForPhoneSMS = false
+                    phoneNumberToLink = ""
+                    phoneVerificationCode = ""
+                }
+            } catch {
+                await MainActor.run {
+                    phoneLinkErrorMessage = error.localizedDescription
+                    isLinkingPhone = false
+                }
+            }
+        }
+    }
+    
+    private func unlinkPhone() {
+        isUnlinkingPhone = true
+        phoneLinkErrorMessage = nil
+        phoneLinkSuccessMessage = nil
+        
+        Task {
+            do {
+                try await authService.unlinkPhone()
+                await MainActor.run {
+                    phoneLinkSuccessMessage = "Phone number unlinked successfully"
+                    isUnlinkingPhone = false
+                }
+            } catch {
+                await MainActor.run {
+                    phoneLinkErrorMessage = error.localizedDescription
+                    isUnlinkingPhone = false
                 }
             }
         }

@@ -626,11 +626,22 @@ class AuthenticationService: ObservableObject {
                 .limit(to: 1)
                 .getDocuments()
             
-            return !snapshot.documents.isEmpty
+            let hasExistingAccount = !snapshot.documents.isEmpty
+            
+            // Also check if the current user already has this phone number (to allow re-linking)
+            if let currentUser = currentUser {
+                let currentUserPhone = currentUser.phoneNumber
+                if currentUserPhone == phoneNumber {
+                    // Current user already has this phone number, so it's not a duplicate
+                    return false
+                }
+            }
+            
+            return hasExistingAccount
         } catch {
             print("Error checking if phone number exists: \(error)")
-            // If we can't check, assume it doesn't exist to avoid blocking legitimate sign-ups
-            return false
+            // If we can't check, assume it exists to prevent potential security issues
+            return true
         }
     }
     
@@ -642,6 +653,13 @@ class AuthenticationService: ObservableObject {
         
         guard let verificationID = verificationID else {
             throw AuthError.custom("No verification ID available. Please request a new code.")
+        }
+        
+        // Double-check that this phone number isn't already associated with another account
+        let isExistingAccount = await checkIfPhoneNumberExists(phoneNumber)
+        
+        if isExistingAccount {
+            throw AuthError.custom("This phone number is already associated with another account. Please use a different phone number.")
         }
         
         let credential = PhoneAuthProvider.provider().credential(
@@ -897,6 +915,50 @@ class AuthenticationService: ObservableObject {
     var isPhoneUser: Bool {
         guard let currentUser = Auth.auth().currentUser else { return false }
         return currentUser.phoneNumber != nil
+    }
+    
+    /// Check if the current user signed up with email
+    var isEmailUser: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.email != nil
+    }
+    
+    /// Check if the current user can link a phone number
+    var canLinkPhone: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.email != nil && currentUser.phoneNumber == nil
+    }
+    
+    /// Check if the current user can unlink their phone number
+    var canUnlinkPhone: Bool {
+        guard let currentUser = Auth.auth().currentUser else { return false }
+        return currentUser.phoneNumber != nil && currentUser.email != nil
+    }
+    
+    /// Send phone verification code for linking
+    func sendPhoneVerificationCode(phoneNumber: String) async throws {
+        // Format phone number with country code
+        let formattedPhoneNumber = formatPhoneNumber(phoneNumber)
+        
+        // Check if this phone number is already associated with another account
+        let isExistingAccount = await checkIfPhoneNumberExists(formattedPhoneNumber)
+        
+        if isExistingAccount {
+            throw AuthError.custom("This phone number is already associated with another account. Please use a different phone number.")
+        }
+        
+        // Use the existing verifyPhoneNumber method
+        try await verifyPhoneNumber(formattedPhoneNumber)
+    }
+    
+    /// Verify phone code for linking
+    func verifyPhoneCode(verificationCode: String) async throws {
+        try await linkPhoneNumber(verificationCode: verificationCode)
+    }
+    
+    /// Unlink phone number (alias for existing method)
+    func unlinkPhone() async throws {
+        try await unlinkPhoneNumber()
     }
 }
 
