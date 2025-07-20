@@ -11,7 +11,13 @@ struct FriendProfileView: View {
     @State private var selectedMediaType: AppModels.MediaType = .movie
     @State private var hasPermissionError = false
     @State private var allMovies: [Movie] = [] // Store all movies to calculate counts
+    @State private var followersCount = 0
+    @State private var followingCount = 0
+    @State private var isFollowing = false
     @Environment(\.dismiss) private var dismiss
+    @State private var isLoadingFollowData = true // New state for loading follow data
+    @State private var showingUserFollowers: UserProfile?
+    @State private var showingUserFollowing: UserProfile?
     
     var body: some View {
         NavigationView {
@@ -45,11 +51,28 @@ struct FriendProfileView: View {
         .task {
             print("FriendProfileView: Opening profile for user: \(userProfile.username)")
             await loadFriendMovies()
+            await loadFollowData()
         }
         .onChange(of: selectedMediaType) { _, _ in
             Task {
                 await loadFriendMovies()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
+            Task {
+                await loadFollowData()
+            }
+        }
+        .onAppear {
+            Task {
+                await loadFollowData()
+            }
+        }
+        .sheet(item: $showingUserFollowers) { user in
+            UserFollowersListView(user: user)
+        }
+        .sheet(item: $showingUserFollowing) { user in
+            UserFollowingListView(user: user)
         }
     }
     
@@ -71,23 +94,84 @@ struct FriendProfileView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            // Stats - show separate movie and TV counts
-            if !hasPermissionError {
+            // Follow/Unfollow button - only show after data is loaded
+            if !isLoadingFollowData {
+                Button(action: {
+                    Task {
+                        await toggleFollowStatus()
+                    }
+                }) {
+                    Text(isFollowing ? "Unfollow" : "Follow")
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundColor(isFollowing ? .red : .white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(isFollowing ? Color.clear : Color.accentColor)
+                                .stroke(isFollowing ? Color.red : Color.clear, lineWidth: 1)
+                        )
+                }
+            } else {
+                // Loading placeholder for button
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 44)
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    )
+            }
+            
+            // Stats - show followers and following counts only after data is loaded
+            if !isLoadingFollowData {
+                HStack(spacing: 24) {
+                    Button(action: {
+                        showingUserFollowers = userProfile
+                    }) {
+                        VStack(spacing: 4) {
+                            Text("\(followersCount)")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            Text("Followers")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Button(action: {
+                        showingUserFollowing = userProfile
+                    }) {
+                        VStack(spacing: 4) {
+                            Text("\(followingCount)")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            Text("Following")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            } else {
+                // Loading placeholder for stats
                 HStack(spacing: 24) {
                     VStack(spacing: 4) {
-                        Text("\(allMovies.filter { $0.mediaType == .movie }.count)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        Text("Movies")
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color(.systemGray5))
+                            .frame(width: 40, height: 24)
+                        Text("Followers")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     
                     VStack(spacing: 4) {
-                        Text("\(allMovies.filter { $0.mediaType == .tv }.count)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        Text("TV Shows")
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color(.systemGray5))
+                            .frame(width: 40, height: 24)
+                        Text("Following")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -196,6 +280,125 @@ struct FriendProfileView: View {
                     allMovies = []
                 }
                 isLoading = false
+            }
+        }
+    }
+    
+    private func loadFollowData() async {
+        print("FriendProfileView: Starting loadFollowData for user: \(userProfile.username) (UID: \(userProfile.uid))")
+        
+        do {
+            // Get followers and following counts
+            print("FriendProfileView: Getting followers count...")
+            let fetchedFollowersCount = try await firestoreService.getFollowersCount(userId: userProfile.uid)
+            print("FriendProfileView: Followers count: \(fetchedFollowersCount)")
+            
+            print("FriendProfileView: Getting following count...")
+            let fetchedFollowingCount = try await firestoreService.getFollowingCount(userId: userProfile.uid)
+            print("FriendProfileView: Following count: \(fetchedFollowingCount)")
+            
+            // Check if current user is following this user
+            print("FriendProfileView: Checking if current user follows this user...")
+            let fetchedIsFollowing = try await firestoreService.isFollowing(userId: userProfile.uid)
+            print("FriendProfileView: Is following: \(fetchedIsFollowing)")
+            
+            // Debug: Check what's actually in the collections
+            print("🔍 DEBUG: Checking actual Firestore data...")
+            await debugCheckFirestoreData()
+            
+            // Update UI on main thread
+            await MainActor.run {
+                followersCount = fetchedFollowersCount
+                followingCount = fetchedFollowingCount
+                isFollowing = fetchedIsFollowing
+                isLoadingFollowData = false // Set loading to false after data is loaded
+                print("FriendProfileView: UI updated - followers: \(followersCount), following: \(followingCount), isFollowing: \(isFollowing)")
+            }
+            
+            print("FriendProfileView: Loaded follow data - followers: \(fetchedFollowersCount), following: \(fetchedFollowingCount), isFollowing: \(fetchedIsFollowing)")
+        } catch {
+            print("FriendProfileView: Error loading follow data: \(error)")
+            print("FriendProfileView: Error details: \(error.localizedDescription)")
+            
+            // Check if it's a Firestore error
+            if let firestoreError = error as NSError? {
+                print("FriendProfileView: Firestore error domain: \(firestoreError.domain)")
+                print("FriendProfileView: Firestore error code: \(firestoreError.code)")
+                print("FriendProfileView: Firestore error user info: \(firestoreError.userInfo)")
+            }
+        }
+    }
+    
+    private func toggleFollowStatus() async {
+        do {
+            if isFollowing {
+                try await firestoreService.unfollowUser(userIdToUnfollow: userProfile.uid)
+                await MainActor.run {
+                    isFollowing = false
+                    followersCount = max(0, followersCount - 1)
+                }
+            } else {
+                try await firestoreService.followUser(userIdToFollow: userProfile.uid)
+                await MainActor.run {
+                    isFollowing = true
+                    followersCount += 1
+                }
+            }
+            
+            // Post notification to refresh other views
+            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+            
+            print("FriendProfileView: Successfully toggled follow status for \(userProfile.username)")
+        } catch {
+            print("FriendProfileView: Error toggling follow status: \(error)")
+        }
+    }
+    
+    private func debugCheckFirestoreData() async {
+        print("🔍 DEBUG: Checking Firestore data for user: \(userProfile.username) (UID: \(userProfile.uid))")
+        
+        // Check if followers collection exists and has data
+        do {
+            let followersSnapshot = try await Firestore.firestore()
+                .collection("users")
+                .document(userProfile.uid)
+                .collection("followers")
+                .getDocuments()
+            print("🔍 DEBUG: Followers collection has \(followersSnapshot.documents.count) documents")
+            for doc in followersSnapshot.documents {
+                print("🔍 DEBUG: Follower: \(doc.documentID)")
+            }
+        } catch {
+            print("🔍 DEBUG: Error reading followers: \(error)")
+        }
+        
+        // Check if following collection exists and has data
+        do {
+            let followingSnapshot = try await Firestore.firestore()
+                .collection("users")
+                .document(userProfile.uid)
+                .collection("following")
+                .getDocuments()
+            print("🔍 DEBUG: Following collection has \(followingSnapshot.documents.count) documents")
+            for doc in followingSnapshot.documents {
+                print("🔍 DEBUG: Following: \(doc.documentID)")
+            }
+        } catch {
+            print("🔍 DEBUG: Error reading following: \(error)")
+        }
+        
+        // Check current user's following collection to see if they follow this user
+        if let currentUserId = Auth.auth().currentUser?.uid {
+            do {
+                let currentUserFollowingDoc = try await Firestore.firestore()
+                    .collection("users")
+                    .document(currentUserId)
+                    .collection("following")
+                    .document(userProfile.uid)
+                    .getDocument()
+                print("🔍 DEBUG: Current user (\(currentUserId)) follows this user: \(currentUserFollowingDoc.exists)")
+            } catch {
+                print("🔍 DEBUG: Error checking if current user follows this user: \(error)")
             }
         }
     }

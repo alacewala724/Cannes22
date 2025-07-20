@@ -1093,6 +1093,239 @@ extension FirestoreService {
         return try await getUserRankings(userId: userId)
     }
     
+    // MARK: - Following System
+    
+    // Follow a user
+    func followUser(userIdToFollow: String) async throws {
+        print("followUser: Starting to follow user \(userIdToFollow)")
+        
+        guard let currentUser = Auth.auth().currentUser else {
+            print("followUser: No current user authenticated")
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        print("followUser: Current user ID: \(currentUserId)")
+        
+        // Don't allow following yourself
+        guard currentUserId != userIdToFollow else {
+            print("followUser: Cannot follow yourself")
+            throw NSError(domain: "FirestoreService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Cannot follow yourself"])
+        }
+        
+        // Check if already following
+        let followingDoc = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(userIdToFollow)
+            .getDocument()
+        
+        if followingDoc.exists {
+            print("followUser: Already following user \(userIdToFollow)")
+            return
+        }
+        
+        // Add to following collection
+        try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(userIdToFollow)
+            .setData([
+                "followedAt": FieldValue.serverTimestamp()
+            ])
+        
+        // Add to followers collection of the followed user
+        try await db.collection("users")
+            .document(userIdToFollow)
+            .collection("followers")
+            .document(currentUserId)
+            .setData([
+                "followedAt": FieldValue.serverTimestamp()
+            ])
+        
+        print("followUser: Successfully followed user \(userIdToFollow)")
+    }
+    
+    // Unfollow a user
+    func unfollowUser(userIdToUnfollow: String) async throws {
+        print("unfollowUser: Starting to unfollow user \(userIdToUnfollow)")
+        
+        guard let currentUser = Auth.auth().currentUser else {
+            print("unfollowUser: No current user authenticated")
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        print("unfollowUser: Current user ID: \(currentUserId)")
+        
+        // Remove from following collection
+        try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(userIdToUnfollow)
+            .delete()
+        
+        // Remove from followers collection of the unfollowed user
+        try await db.collection("users")
+            .document(userIdToUnfollow)
+            .collection("followers")
+            .document(currentUserId)
+            .delete()
+        
+        print("unfollowUser: Successfully unfollowed user \(userIdToUnfollow)")
+    }
+    
+    // Get users that the current user follows
+    func getFollowing() async throws -> [UserProfile] {
+        guard let currentUser = Auth.auth().currentUser else {
+            return []
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let followingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .getDocuments()
+        
+        var following: [UserProfile] = []
+        
+        for followingDoc in followingSnapshot.documents {
+            let followedUserId = followingDoc.documentID
+            
+            if let userProfile = try await getUserProfile(userId: followedUserId) {
+                following.append(userProfile)
+            }
+        }
+        
+        return following
+    }
+    
+    // Get users who follow the current user
+    func getFollowers(userId: String) async throws -> [UserProfile] {
+        let followersSnapshot = try await db.collection("users")
+            .document(userId)
+            .collection("followers")
+            .getDocuments()
+        
+        var followers: [UserProfile] = []
+        
+        for followerDoc in followersSnapshot.documents {
+            let followerUserId = followerDoc.documentID
+            
+            if let userProfile = try await getUserProfile(userId: followerUserId) {
+                followers.append(userProfile)
+            }
+        }
+        
+        return followers
+    }
+    
+    // Check if current user is following another user
+    func isFollowing(userId: String) async throws -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            return false
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let doc = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .document(userId)
+            .getDocument()
+        
+        return doc.exists
+    }
+    
+    // Get followers count for a user
+    func getFollowersCount(userId: String) async throws -> Int {
+        let followersSnapshot = try await db.collection("users")
+            .document(userId)
+            .collection("followers")
+            .getDocuments()
+        
+        return followersSnapshot.documents.count
+    }
+    
+    // Get following count for a user
+    func getFollowingCount(userId: String) async throws -> Int {
+        let followingSnapshot = try await db.collection("users")
+            .document(userId)
+            .collection("following")
+            .getDocuments()
+        
+        return followingSnapshot.documents.count
+    }
+    
+    // Get number of movies in common with a followed user
+    func getMoviesInCommonWithFollowedUser(followedUserId: String) async throws -> Int {
+        guard let currentUser = Auth.auth().currentUser else {
+            return 0
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Get current user's movies
+        let currentUserMovies = try await getUserRankings(userId: currentUserId)
+        let currentUserTmdbIds = Set(currentUserMovies.compactMap { $0.tmdbId })
+        
+        // Get followed user's movies
+        let followedUserMovies = try await getUserRankings(userId: followedUserId)
+        let followedUserTmdbIds = Set(followedUserMovies.compactMap { $0.tmdbId })
+        
+        // Calculate intersection
+        let moviesInCommon = currentUserTmdbIds.intersection(followedUserTmdbIds)
+        
+        return moviesInCommon.count
+    }
+    
+    // Get ratings from users that the current user follows for a specific movie
+    func getFollowingRatingsForMovie(tmdbId: Int) async throws -> [FriendRating] {
+        guard let currentUser = Auth.auth().currentUser else {
+            return []
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Get users that the current user follows
+        let followingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .getDocuments()
+        
+        var followingRatings: [FriendRating] = []
+        
+        for followingDoc in followingSnapshot.documents {
+            let followedUserId = followingDoc.documentID
+            
+            // Get followed user's rating for this movie
+            let movieSnapshot = try await db.collection("users")
+                .document(followedUserId)
+                .collection("rankings")
+                .whereField("tmdbId", isEqualTo: tmdbId)
+                .getDocuments()
+            
+            if let movieDoc = movieSnapshot.documents.first {
+                let data = movieDoc.data()
+                let score = data["score"] as? Double ?? 0.0
+                let title = data["title"] as? String ?? ""
+                
+                // Get followed user's profile
+                if let userProfile = try await getUserProfile(userId: followedUserId) {
+                    let followingRating = FriendRating(
+                        friend: userProfile,
+                        score: score,
+                        title: title
+                    )
+                    followingRatings.append(followingRating)
+                }
+            }
+        }
+        
+        return followingRatings
+    }
+    
     // MARK: - Friends System
     
     // Add a friend
@@ -1303,7 +1536,7 @@ extension FirestoreService {
         print("addTake: Added take for movie \(movieId) (TMDB: \(tmdbId?.description ?? "nil"))")
     }
     
-    // Get takes for a movie (from friends and current user)
+    // Get takes for a movie (from users you follow and current user)
     func getTakesForMovie(tmdbId: Int?) async throws -> [Take] {
         guard let currentUser = Auth.auth().currentUser else {
             return []
@@ -1315,10 +1548,10 @@ extension FirestoreService {
             return []
         }
         
-        // Get current user's friends
-        let friendsSnapshot = try await db.collection("users")
+        // Get current user's following list
+        let followingSnapshot = try await db.collection("users")
             .document(currentUser.uid)
-            .collection("friends")
+            .collection("following")
             .getDocuments()
         
         var allTakes: [Take] = []
@@ -1327,11 +1560,11 @@ extension FirestoreService {
         let currentUserTakes = try await getTakesForUser(userId: currentUser.uid, tmdbId: tmdbId)
         allTakes.append(contentsOf: currentUserTakes)
         
-        // Get friends' takes for this movie
-        for friendDoc in friendsSnapshot.documents {
-            let friendUserId = friendDoc.documentID
-            let friendTakes = try await getTakesForUser(userId: friendUserId, tmdbId: tmdbId)
-            allTakes.append(contentsOf: friendTakes)
+        // Get takes from users you follow for this movie
+        for followingDoc in followingSnapshot.documents {
+            let followedUserId = followingDoc.documentID
+            let followedUserTakes = try await getTakesForUser(userId: followedUserId, tmdbId: tmdbId)
+            allTakes.append(contentsOf: followedUserTakes)
         }
         
         // Sort by timestamp (newest first)
@@ -1419,4 +1652,290 @@ extension FirestoreService {
         
         print("deleteTake: Deleted take \(takeId) for movie (TMDB: \(tmdbId?.description ?? "nil"))")
     }
+} 
+
+extension FirestoreService {
+    // MARK: - Migration Functions
+    
+    // Migrate existing friends data to following system
+    func migrateFriendsToFollowing() async throws {
+        print("migrateFriendsToFollowing: Starting migration from friends to following system")
+        
+        guard let currentUser = Auth.auth().currentUser else {
+            print("migrateFriendsToFollowing: No current user authenticated")
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        print("migrateFriendsToFollowing: Migrating for user: \(currentUserId)")
+        
+        // Get all existing friends
+        let friendsSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .getDocuments()
+        
+        print("migrateFriendsToFollowing: Found \(friendsSnapshot.documents.count) existing friends")
+        
+        // Convert each friend to following relationship
+        for friendDoc in friendsSnapshot.documents {
+            let friendUserId = friendDoc.documentID
+            
+            // Add to following collection
+            try await db.collection("users")
+                .document(currentUserId)
+                .collection("following")
+                .document(friendUserId)
+                .setData([
+                    "followedAt": FieldValue.serverTimestamp()
+                ])
+            
+            // Add to followers collection of the friend
+            try await db.collection("users")
+                .document(friendUserId)
+                .collection("followers")
+                .document(currentUserId)
+                .setData([
+                    "followedAt": FieldValue.serverTimestamp()
+                ])
+            
+            print("migrateFriendsToFollowing: Migrated friend \(friendUserId) to following relationship")
+        }
+        
+        // Delete the old friends collection
+        for friendDoc in friendsSnapshot.documents {
+            try await friendDoc.reference.delete()
+        }
+        
+        print("migrateFriendsToFollowing: Migration completed successfully")
+    }
+    
+    // Check if migration is needed (if friends collection exists but following doesn't)
+    func needsMigration() async throws -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            return false
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        // Check if friends collection has any documents
+        let friendsSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("friends")
+            .limit(to: 1)
+            .getDocuments()
+        
+        // Check if following collection has any documents
+        let followingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .limit(to: 1)
+            .getDocuments()
+        
+        // If friends exist but following doesn't, migration is needed
+        return !friendsSnapshot.documents.isEmpty && followingSnapshot.documents.isEmpty
+    }
+    
+    // Debug function to test following collection access
+    func testFollowingAccess() async throws -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            return false
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        do {
+            // Try to read from following collection
+            let snapshot = try await db.collection("users")
+                .document(currentUserId)
+                .collection("following")
+                .limit(to: 1)
+                .getDocuments()
+            
+            print("testFollowingAccess: Successfully accessed following collection")
+            return true
+        } catch {
+            print("testFollowingAccess: Failed to access following collection: \(error)")
+            return false
+        }
+    }
+    
+    // MARK: - Following System
+    
+} 
+
+extension FirestoreService {
+    // MARK: - Account Deletion Recovery
+    
+    /// Recalculate all global averages from actual user data to fix issues from manually deleted accounts
+    func recalculateAllGlobalAveragesFromUserData() async throws {
+        print("recalculateAllGlobalAveragesFromUserData: Starting complete recalculation from user data")
+        
+        // 1. Get all users
+        let usersSnapshot = try await db.collection("users").getDocuments()
+        print("recalculateAllGlobalAveragesFromUserData: Found \(usersSnapshot.documents.count) users")
+        
+        // 2. Collect all user ratings by TMDB ID
+        var tmdbRatings: [Int: [Double]] = [:]
+        var tmdbTitles: [Int: String] = [:]
+        var tmdbMediaTypes: [Int: AppModels.MediaType] = [:]
+        
+        for userDoc in usersSnapshot.documents {
+            let userId = userDoc.documentID
+            
+            // Get all rankings for this user
+            let rankingsSnapshot = try await db.collection("users")
+                .document(userId)
+                .collection("rankings")
+                .whereField("ratingState", in: [MovieRatingState.finalInsertion.rawValue, MovieRatingState.scoreUpdate.rawValue])
+                .getDocuments()
+            
+            for rankingDoc in rankingsSnapshot.documents {
+                let data = rankingDoc.data()
+                
+                if let tmdbId = data["tmdbId"] as? Int,
+                   let score = data["score"] as? Double,
+                   let title = data["title"] as? String,
+                   let mediaTypeString = data["mediaType"] as? String {
+                    
+                    let mediaType: AppModels.MediaType = mediaTypeString.lowercased().contains("tv") ? .tv : .movie
+                    
+                    if tmdbRatings[tmdbId] == nil {
+                        tmdbRatings[tmdbId] = []
+                        tmdbTitles[tmdbId] = title
+                        tmdbMediaTypes[tmdbId] = mediaType
+                    }
+                    
+                    tmdbRatings[tmdbId]?.append(score)
+                }
+            }
+        }
+        
+        print("recalculateAllGlobalAveragesFromUserData: Collected ratings for \(tmdbRatings.count) unique TMDB IDs")
+        
+        // 3. Delete all existing global ratings
+        let existingRatingsSnapshot = try await db.collection("ratings").getDocuments()
+        for doc in existingRatingsSnapshot.documents {
+            try await doc.reference.delete()
+        }
+        print("recalculateAllGlobalAveragesFromUserData: Deleted \(existingRatingsSnapshot.documents.count) existing global ratings")
+        
+        // 4. Recreate global ratings from actual user data
+        var recreatedCount = 0
+        
+        for (tmdbId, scores) in tmdbRatings {
+            guard let title = tmdbTitles[tmdbId],
+                  let mediaType = tmdbMediaTypes[tmdbId] else { continue }
+            
+            let totalScore = scores.reduce(0, +)
+            let numberOfRatings = scores.count
+            let averageRating = totalScore / Double(numberOfRatings)
+            
+            // Round to 1 decimal place
+            let roundedAverage = (averageRating * 10).rounded() / 10
+            let roundedTotal = (totalScore * 10).rounded() / 10
+            
+            let ratingsRef = db.collection("ratings").document(tmdbId.description)
+            
+            try await ratingsRef.setData([
+                "totalScore": roundedTotal,
+                "numberOfRatings": numberOfRatings,
+                "averageRating": roundedAverage,
+                "lastUpdated": FieldValue.serverTimestamp(),
+                "title": title,
+                "mediaType": mediaType.rawValue,
+                "tmdbId": tmdbId
+            ])
+            
+            recreatedCount += 1
+        }
+        
+        print("recalculateAllGlobalAveragesFromUserData: Recreated \(recreatedCount) global ratings from actual user data")
+    }
+    
+    /// Get statistics about the current global ratings state
+    func getGlobalRatingsStatistics() async throws -> (totalRatings: Int, totalMovies: Int, averageScore: Double) {
+        let snapshot = try await db.collection("ratings").getDocuments()
+        
+        var totalRatings = 0
+        var totalScore = 0.0
+        var movieCount = 0
+        
+        for doc in snapshot.documents {
+            let data = doc.data()
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            let averageRating = data["averageRating"] as? Double ?? 0.0
+            
+            totalRatings += numberOfRatings
+            totalScore += (averageRating * Double(numberOfRatings))
+            movieCount += 1
+        }
+        
+        let overallAverage = totalRatings > 0 ? totalScore / Double(totalRatings) : 0.0
+        
+        return (totalRatings, movieCount, overallAverage)
+    }
+    
+    /// Validate global ratings for data integrity issues
+    func validateGlobalRatings() async throws -> (validCount: Int, invalidCount: Int, issues: [String]) {
+        let snapshot = try await db.collection("ratings").getDocuments()
+        
+        var validCount = 0
+        var invalidCount = 0
+        var issues: [String] = []
+        
+        for doc in snapshot.documents {
+            let data = doc.data()
+            let totalScore = data["totalScore"] as? Double ?? 0.0
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            let averageRating = data["averageRating"] as? Double ?? 0.0
+            
+            var isValid = true
+            var docIssues: [String] = []
+            
+            // Check for negative values
+            if totalScore < 0 {
+                isValid = false
+                docIssues.append("Negative totalScore: \(totalScore)")
+            }
+            
+            if numberOfRatings < 0 {
+                isValid = false
+                docIssues.append("Negative numberOfRatings: \(numberOfRatings)")
+            }
+            
+            // Check for NaN or infinite values
+            if totalScore.isNaN || totalScore.isInfinite {
+                isValid = false
+                docIssues.append("Invalid totalScore: \(totalScore)")
+            }
+            
+            if averageRating.isNaN || averageRating.isInfinite {
+                isValid = false
+                docIssues.append("Invalid averageRating: \(averageRating)")
+            }
+            
+            // Check if average matches calculated average
+            if numberOfRatings > 0 {
+                let calculatedAverage = totalScore / Double(numberOfRatings)
+                let roundedCalculated = (calculatedAverage * 10).rounded() / 10
+                let roundedStored = (averageRating * 10).rounded() / 10
+                
+                if abs(roundedCalculated - roundedStored) > 0.01 {
+                    isValid = false
+                    docIssues.append("Average mismatch: stored=\(roundedStored), calculated=\(roundedCalculated)")
+                }
+            }
+            
+            if isValid {
+                validCount += 1
+            } else {
+                invalidCount += 1
+                issues.append("Document \(doc.documentID): \(docIssues.joined(separator: ", "))")
+            }
+        }
+        
+        return (validCount, invalidCount, issues)
+    }
+
 } 

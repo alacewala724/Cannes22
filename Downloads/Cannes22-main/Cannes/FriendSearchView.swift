@@ -2,6 +2,11 @@ import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
 
+// MARK: - Notification Names
+extension Notification.Name {
+    static let refreshFollowingList = Notification.Name("refreshFollowingList")
+}
+
 struct FriendSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
@@ -18,7 +23,7 @@ struct FriendSearchView: View {
                 // Tab selector
                 Picker("View", selection: $selectedTab) {
                     Text("Search").tag(0)
-                    Text("Friends").tag(1)
+                    Text("Following").tag(1)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding(.horizontal)
@@ -28,10 +33,10 @@ struct FriendSearchView: View {
                 if selectedTab == 0 {
                     searchView
                 } else {
-                    FriendsListView(store: store)
+                    FollowingListView(store: store)
                 }
             }
-            .navigationTitle("Find Friends")
+            .navigationTitle("Find People")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
         }
@@ -121,11 +126,11 @@ struct FriendSearchView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            Text("Find Friends")
+            Text("Find People")
                 .font(.title2)
                 .fontWeight(.medium)
             
-            Text("Search for users by their username to see their movie lists")
+            Text("Search for users by their username to follow them and see their movie lists")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -209,12 +214,12 @@ struct UserSearchRow: View {
                 
                 Spacer()
                 
-                // Friend button
+                // Follow button
                 if !isLoadingFriendStatus {
                     Button(action: {
-                        print("Friend button tapped for user: \(user.username)")
+                        print("Follow button tapped for user: \(user.username)")
                         Task {
-                            await toggleFriendStatus()
+                            await toggleFollowStatus()
                         }
                     }) {
                         HStack(spacing: 4) {
@@ -222,7 +227,7 @@ struct UserSearchRow: View {
                                 ProgressView()
                                     .scaleEffect(0.8)
                             }
-                            Text(isFriend ? "Remove" : "Add Friend")
+                            Text(isFriend ? "Unfollow" : "Follow")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
@@ -251,24 +256,24 @@ struct UserSearchRow: View {
         .buttonStyle(PlainButtonStyle())
         .onAppear {
             Task {
-                await checkFriendStatus()
+                await checkFollowStatus()
             }
         }
     }
     
-    private func checkFriendStatus() async {
+    private func checkFollowStatus() async {
         isLoadingFriendStatus = true
         do {
-            isFriend = try await firestoreService.isFriend(userId: user.uid)
+            isFriend = try await firestoreService.isFollowing(userId: user.uid)
         } catch {
-            print("Error checking friend status: \(error)")
+            print("Error checking follow status: \(error)")
         }
         isLoadingFriendStatus = false
     }
     
-    private func toggleFriendStatus() async {
-        print("toggleFriendStatus: Starting for user \(user.username) (UID: \(user.uid))")
-        print("toggleFriendStatus: Current friend status: \(isFriend)")
+    private func toggleFollowStatus() async {
+        print("toggleFollowStatus: Starting for user \(user.username) (UID: \(user.uid))")
+        print("toggleFollowStatus: Current follow status: \(isFriend)")
         
         await MainActor.run {
             isUpdatingFriendStatus = true
@@ -276,23 +281,32 @@ struct UserSearchRow: View {
         
         do {
             if isFriend {
-                print("toggleFriendStatus: Removing friend")
-                try await firestoreService.removeFriend(friendUserId: user.uid)
+                print("toggleFollowStatus: Unfollowing user")
+                try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
                 await MainActor.run {
                     isFriend = false
                 }
-                print("toggleFriendStatus: Friend removed successfully")
+                print("toggleFollowStatus: User unfollowed successfully")
+                
+                // Post notification to refresh following list if we're in the following tab
+                NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
             } else {
-                print("toggleFriendStatus: Adding friend")
-                try await firestoreService.addFriend(friendUserId: user.uid)
+                print("toggleFollowStatus: Following user")
+                try await firestoreService.followUser(userIdToFollow: user.uid)
                 await MainActor.run {
                     isFriend = true
                 }
-                print("toggleFriendStatus: Friend added successfully")
+                print("toggleFollowStatus: User followed successfully")
+                
+                // Post notification to refresh following list if we're in the following tab
+                NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
             }
         } catch {
-            print("Error toggling friend status: \(error)")
+            print("Error toggling follow status: \(error)")
             print("Error details: \(error.localizedDescription)")
+            
+            // Re-check the actual status from Firestore in case of error
+            await checkFollowStatus()
         }
         
         await MainActor.run {
@@ -301,28 +315,33 @@ struct UserSearchRow: View {
     }
 }
 
-struct FriendsListView: View {
+struct FollowingListView: View {
     @StateObject private var firestoreService = FirestoreService()
-    @State private var friends: [UserProfile] = []
+    @State private var following: [UserProfile] = []
     @State private var isLoading = true
-    @State private var showingFriendProfile: UserProfile?
-    @State private var moviesInCommon: [String: Int] = [:] // friend UID -> count
+    @State private var showingUserProfile: UserProfile?
+    @State private var moviesInCommon: [String: Int] = [:] // user UID -> count
     @ObservedObject var store: MovieStore
     
     var body: some View {
         VStack {
             if isLoading {
                 loadingView
-            } else if friends.isEmpty {
-                emptyFriendsView
+            } else if following.isEmpty {
+                emptyFollowingView
             } else {
-                friendsList
+                followingList
             }
         }
         .task {
-            await loadFriends()
+            await loadFollowing()
         }
-        .sheet(item: $showingFriendProfile) { profile in
+        .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
+            Task {
+                await loadFollowing()
+            }
+        }
+        .sheet(item: $showingUserProfile) { profile in
             FriendProfileView(userProfile: profile, store: store)
         }
     }
@@ -330,23 +349,23 @@ struct FriendsListView: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-            Text("Loading friends...")
+            Text("Loading following...")
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    private var emptyFriendsView: some View {
+    private var emptyFollowingView: some View {
         VStack(spacing: 20) {
             Image(systemName: "person.2.circle")
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            Text("No friends yet")
+            Text("Not following anyone yet")
                 .font(.title2)
                 .fontWeight(.medium)
             
-            Text("Search for users and add them as friends to see their movie lists")
+            Text("Search for users and follow them to see their movie lists")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -354,12 +373,12 @@ struct FriendsListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    private var friendsList: some View {
+    private var followingList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(friends, id: \.uid) { friend in
-                    FriendRow(friend: friend, moviesInCommon: moviesInCommon[friend.uid] ?? 0) {
-                        showingFriendProfile = friend
+                ForEach(following, id: \.uid) { user in
+                    FollowingRow(user: user, moviesInCommon: moviesInCommon[user.uid] ?? 0) {
+                        showingUserProfile = user
                     }
                 }
             }
@@ -368,38 +387,40 @@ struct FriendsListView: View {
         }
     }
     
-    private func loadFriends() async {
+    private func loadFollowing() async {
         isLoading = true
         do {
-            friends = try await firestoreService.getFriends()
+            following = try await firestoreService.getFollowing()
             
-            // Calculate movies in common for each friend
-            for friend in friends {
+            // Calculate movies in common for each followed user
+            for user in following {
                 do {
-                    let count = try await firestoreService.getMoviesInCommonWithFriend(friendUserId: friend.uid)
-                    moviesInCommon[friend.uid] = count
-                    print("FriendsListView: \(friend.username) has \(count) movies in common")
+                    let count = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+                    moviesInCommon[user.uid] = count
+                    print("FollowingListView: \(user.username) has \(count) movies in common")
                 } catch {
-                    print("FriendsListView: Error getting movies in common for \(friend.username): \(error)")
-                    moviesInCommon[friend.uid] = 0
+                    print("FollowingListView: Error getting movies in common for \(user.username): \(error)")
+                    moviesInCommon[user.uid] = 0
                 }
             }
         } catch {
-            print("Error loading friends: \(error)")
+            print("Error loading following: \(error)")
         }
         isLoading = false
     }
 }
 
-struct FriendRow: View {
-    let friend: UserProfile
+struct FollowingRow: View {
+    let user: UserProfile
     let moviesInCommon: Int
     let onTap: () -> Void
     @StateObject private var firestoreService = FirestoreService()
+    @State private var isUnfollowing = false
+    @State private var isCurrentUser = false
     
     var body: some View {
         Button(action: {
-            print("FriendRow: Tapped on friend \(friend.username) to view movies")
+            print("FollowingRow: Tapped on user \(user.username) to view movies")
             onTap()
         }) {
             HStack(spacing: 12) {
@@ -408,14 +429,14 @@ struct FriendRow: View {
                     .fill(Color.accentColor.opacity(0.2))
                     .frame(width: 50, height: 50)
                     .overlay(
-                        Text(String(friend.username.prefix(1)).uppercased())
+                        Text(String(user.username.prefix(1)).uppercased())
                             .font(.title2)
                             .fontWeight(.semibold)
                             .foregroundColor(.accentColor)
                     )
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("@\(friend.username)")
+                    Text("@\(user.username)")
                         .font(.headline)
                         .foregroundColor(.primary)
                     
@@ -426,14 +447,22 @@ struct FriendRow: View {
                 
                 Spacer()
                 
-                Button(action: {
-                    Task {
-                        await removeFriend()
-                    }
-                }) {
-                    Text("Remove")
-                        .font(.caption)
-                        .fontWeight(.medium)
+                // Only show unfollow button if not current user
+                if !isCurrentUser {
+                    Button(action: {
+                        Task {
+                            await unfollowUser()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            if isUnfollowing {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                            Text("Unfollow")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
                         .foregroundColor(.red)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -441,8 +470,12 @@ struct FriendRow: View {
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(Color.red, lineWidth: 1)
                         )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(isUnfollowing)
+                    .scaleEffect(isUnfollowing ? 0.95 : 1.0)
+                    .animation(.easeInOut(duration: 0.1), value: isUnfollowing)
                 }
-                .buttonStyle(PlainButtonStyle())
                 
                 Image(systemName: "chevron.right")
                     .foregroundColor(.secondary)
@@ -453,14 +486,39 @@ struct FriendRow: View {
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            Task {
+                await checkIfCurrentUser()
+            }
+        }
     }
     
-    private func removeFriend() async {
+    private func checkIfCurrentUser() async {
+        if let currentUser = Auth.auth().currentUser {
+            isCurrentUser = currentUser.uid == user.uid
+        }
+    }
+    
+    private func unfollowUser() async {
+        await MainActor.run {
+            isUnfollowing = true
+        }
+        
         do {
-            try await firestoreService.removeFriend(friendUserId: friend.uid)
-            // Note: In a real app, you'd want to refresh the friends list
+            try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
+            print("FollowingRow: Successfully unfollowed \(user.username)")
+            
+            // Keep the button in loading state and let the parent view refresh
+            // Don't reset isUnfollowing here - let the parent view handle the refresh
+            
+            // Post a notification to refresh the following list
+            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
         } catch {
-            print("Error removing friend: \(error)")
+            print("Error unfollowing user: \(error)")
+            // Only reset on error
+            await MainActor.run {
+                isUnfollowing = false
+            }
         }
     }
 }

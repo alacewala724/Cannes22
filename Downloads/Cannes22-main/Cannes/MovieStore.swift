@@ -383,19 +383,68 @@ final class MovieStore: ObservableObject {
                     state: .initialSentiment
                 )
                 
-                // Then recalculate scores (personal only, no community updates yet)
-                try await recalculateScoresAndUpdateCommunityRatings(skipCommunityUpdates: true)
+                // Get the current list that includes the newly inserted movie
+                let currentListWithNewMovie = movie.mediaType == .movie ? movies : tvShows
                 
-                // Capture scores after recalculation
-                let afterScores: [UUID: Double] = (movie.mediaType == .movie ? movies : tvShows).reduce(into: [:]) { result, movie in
-                    result[movie.id] = movie.score
+                print("insertNewMovie: Current list before recalculation:")
+                for (index, m) in currentListWithNewMovie.enumerated() {
+                    if m.id == movie.id {
+                        print("  [\(index)] \(m.title) (NEW): \(m.score) - sentiment: \(m.sentiment)")
+                    } else {
+                        print("  [\(index)] \(m.title): \(m.score) - sentiment: \(m.sentiment)")
+                    }
                 }
                 
-                // Find the newly inserted movie with its final score
-                let updatedMovie = movie.mediaType == .movie ? movies : tvShows
-                let finalMovie = updatedMovie.first { $0.id == movie.id } ?? movie
+                // Recalculate scores for the list that includes the new movie
+                let (updatedList, personalUpdates) = calculateScoreUpdatesForList(currentListWithNewMovie)
+                
+                print("insertNewMovie: Updated list after recalculation:")
+                for (index, m) in updatedList.enumerated() {
+                    if m.id == movie.id {
+                        print("  [\(index)] \(m.title) (NEW): \(m.score) - sentiment: \(m.sentiment)")
+                    } else {
+                        print("  [\(index)] \(m.title): \(m.score) - sentiment: \(m.sentiment)")
+                    }
+                }
+                
+                print("insertNewMovie: Personal updates to be saved:")
+                for update in personalUpdates {
+                    if update.movie.id == movie.id {
+                        print("  \(update.movie.title) (NEW): \(update.oldScore) -> \(update.newScore)")
+                    } else {
+                        print("  \(update.movie.title): \(update.oldScore) -> \(update.newScore)")
+                    }
+                }
+                
+                // Update the UI with the recalculated scores
+                await MainActor.run {
+                    if movie.mediaType == .movie {
+                        self.movies = updatedList
+                    } else {
+                        self.tvShows = updatedList
+                    }
+                    print("insertNewMovie: Updated UI with recalculated scores")
+                }
+                
+                // Update personal rankings in Firebase
+                if !personalUpdates.isEmpty {
+                    print("insertNewMovie: Updating \(personalUpdates.count) personal rankings")
+                    try await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                }
+                
+                // Small delay to ensure UI updates are processed
+                try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                
+                // Get the updated movie with its final recalculated score
+                let finalMovie = updatedList.first { $0.id == movie.id } ?? movie
                 
                 print("insertNewMovie: Final movie score after recalculation: \(finalMovie.score)")
+                print("insertNewMovie: Original movie score: \(movie.score)")
+                
+                // Ensure we're using the recalculated score, not the original
+                if finalMovie.score == movie.score {
+                    print("insertNewMovie: WARNING - Final movie still has original score, this indicates recalculation didn't work properly")
+                }
                 
                 // Update community rating for the NEW movie (add new user rating)
                 try await firestoreService.updateMovieRanking(
@@ -407,12 +456,12 @@ final class MovieStore: ObservableObject {
                 // Update community ratings for existing movies that had score changes
                 var existingMovieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
                 
-                for existingMovie in updatedMovie {
+                for existingMovie in updatedList {
                     // Skip the newly inserted movie (already handled above)
                     if existingMovie.id == movie.id { continue }
                     
                     let oldScore = beforeScores[existingMovie.id] ?? existingMovie.score
-                    let newScore = afterScores[existingMovie.id] ?? existingMovie.score
+                    let newScore = existingMovie.score
                     
                     // Only update if score actually changed
                     if abs(oldScore - newScore) > 0.001 {
@@ -456,6 +505,143 @@ final class MovieStore: ObservableObject {
         
         // Update last sync time
         lastSyncDate = Date()
+    }
+    
+    private func calculateScoreForMovie(at index: Int, in list: [Movie], sentiment: MovieSentiment) -> Double {
+        guard let band = bands[sentiment] else { return 5.0 }
+        
+        // Find all movies in the same sentiment section
+        let sentimentMovies = list.filter { $0.sentiment == sentiment }
+        let sentimentIndices = list.indices.filter { list[$0].sentiment == sentiment }
+        
+        // Find the rank of this movie within its sentiment section
+        guard let rankInSentiment = sentimentIndices.firstIndex(of: index) else { return band.mid }
+        
+        let n = Double(sentimentMovies.count)
+        let centre = (n - 1) / 2
+        let step = band.half / max(centre, 1)
+        
+        let offset = centre - Double(rankInSentiment)
+        let rawNewScore = band.mid + offset * step
+        
+        // Round to 3 decimal places to avoid floating point precision issues and prevent NaN
+        let newScore = (rawNewScore.isNaN || rawNewScore.isInfinite) ? band.mid : (rawNewScore * 1000).rounded() / 1000
+        
+        print("calculateScoreForMovie: rankInSentiment=\(rankInSentiment), n=\(n), centre=\(centre), step=\(step), offset=\(offset), rawNewScore=\(rawNewScore), newScore=\(newScore)")
+        
+        return newScore
+    }
+    
+    private func recalculateScoresForExistingMoviesOnly(excludingMovieId: UUID) async {
+        guard !isRecalculating else {
+            print("recalculateScoresForExistingMoviesOnly: Already recalculating, skipping")
+            return
+        }
+        
+        await MainActor.run {
+            isRecalculating = true
+        }
+        defer { 
+            Task { @MainActor in
+                isRecalculating = false
+            }
+        }
+        
+        print("recalculateScoresForExistingMoviesOnly: Starting recalculation excluding movie ID: \(excludingMovieId)")
+        
+        guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
+        
+        // Get current lists
+        let currentMovies = movies
+        let currentTVShows = tvShows
+        
+        // Calculate updates for movies (excluding the new movie)
+        let (updatedMovies, moviePersonalUpdates) = calculateScoreUpdatesForListExcluding(currentMovies, excludingMovieId: excludingMovieId)
+        
+        // Calculate updates for TV shows (excluding the new movie)
+        let (updatedTVShows, tvPersonalUpdates) = calculateScoreUpdatesForListExcluding(currentTVShows, excludingMovieId: excludingMovieId)
+        
+        // Update UI immediately on main thread for responsiveness
+        await MainActor.run {
+            if !moviePersonalUpdates.isEmpty {
+                self.movies = updatedMovies
+                print("recalculateScoresForExistingMoviesOnly: Updated movies UI immediately")
+            }
+            if !tvPersonalUpdates.isEmpty {
+                self.tvShows = updatedTVShows
+                print("recalculateScoresForExistingMoviesOnly: Updated TV shows UI immediately")
+            }
+        }
+        
+        // Update Firebase with all changes atomically
+        if !moviePersonalUpdates.isEmpty {
+            print("recalculateScoresForExistingMoviesOnly: Updating \(moviePersonalUpdates.count) movie personal rankings")
+            try? await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: moviePersonalUpdates)
+        }
+        
+        if !tvPersonalUpdates.isEmpty {
+            print("recalculateScoresForExistingMoviesOnly: Updating \(tvPersonalUpdates.count) TV show personal rankings")
+            try? await firestoreService.updatePersonalRankings(userId: userId, movieUpdates: tvPersonalUpdates)
+        }
+        
+        // Force UI reload by triggering a state change
+        await MainActor.run {
+            // Trigger a UI refresh by temporarily setting and then restoring the lists
+            let tempMovies = self.movies
+            let tempTVShows = self.tvShows
+            
+            // Clear and restore to force UI refresh
+            self.movies = []
+            self.tvShows = []
+            
+            // Small delay to ensure UI updates
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.movies = tempMovies
+                self.tvShows = tempTVShows
+                print("recalculateScoresForExistingMoviesOnly: Forced UI reload completed")
+            }
+        }
+        
+        print("recalculateScoresForExistingMoviesOnly: Completed recalculation")
+    }
+    
+    private func calculateScoreUpdatesForListExcluding(_ list: [Movie], excludingMovieId: UUID) -> ([Movie], [(movie: Movie, newScore: Double, oldScore: Double)]) {
+        var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
+        var updatedList = list
+        
+        // Calculate new scores synchronously, excluding the specified movie
+        for sentiment in MovieSentiment.allCasesOrdered {
+            let idxs = updatedList.indices.filter { 
+                updatedList[$0].sentiment == sentiment && updatedList[$0].id != excludingMovieId 
+            }
+            guard let band = bands[sentiment], !idxs.isEmpty else { continue }
+
+            let n = Double(idxs.count)
+            let centre = (n - 1) / 2
+            let step = band.half / max(centre, 1)
+
+            for (rank, arrayIndex) in idxs.enumerated() {
+                let offset = centre - Double(rank)
+                let movie = updatedList[arrayIndex]
+                let oldScore = movie.score
+                let rawNewScore = band.mid + offset * step
+                
+                // Round to 3 decimal places to avoid floating point precision issues and prevent NaN
+                let newScore = (rawNewScore.isNaN || rawNewScore.isInfinite) ? band.mid : (rawNewScore * 1000).rounded() / 1000
+                
+                if abs(oldScore - newScore) > 0.001 { // Use threshold for floating point comparison
+                    personalUpdates.append((
+                        movie: movie,
+                        newScore: newScore,
+                        oldScore: oldScore
+                    ))
+                    
+                    updatedList[arrayIndex].score = newScore
+                }
+            }
+        }
+        
+        return (updatedList, personalUpdates)
     }
     
     func deleteMovies(at offsets: IndexSet) {
@@ -724,6 +910,18 @@ final class MovieStore: ObservableObject {
             }
         }
         
+        // Update UI immediately on main thread for responsiveness
+        await MainActor.run {
+            if !moviePersonalUpdates.isEmpty {
+                self.movies = updatedMovies
+                print("recalculateScoresAndUpdateCommunityRatings: Updated movies UI immediately")
+            }
+            if !tvPersonalUpdates.isEmpty {
+                self.tvShows = updatedTVShows
+                print("recalculateScoresAndUpdateCommunityRatings: Updated TV shows UI immediately")
+            }
+        }
+        
         // Update Firebase with all changes atomically
         if !moviePersonalUpdates.isEmpty {
             print("recalculateScoresAndUpdateCommunityRatings: Updating \(moviePersonalUpdates.count) movie personal rankings")
@@ -751,31 +949,49 @@ final class MovieStore: ObservableObject {
             }
         }
         
-        // Update UI on main thread
+        // Force UI reload by triggering a state change
         await MainActor.run {
-            if !moviePersonalUpdates.isEmpty {
-                self.movies = updatedMovies
-            }
-            if !tvPersonalUpdates.isEmpty {
-                self.tvShows = updatedTVShows
+            // Trigger a UI refresh by temporarily setting and then restoring the lists
+            let tempMovies = self.movies
+            let tempTVShows = self.tvShows
+            
+            // Clear and restore to force UI refresh
+            self.movies = []
+            self.tvShows = []
+            
+            // Small delay to ensure UI updates
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.movies = tempMovies
+                self.tvShows = tempTVShows
+                print("recalculateScoresAndUpdateCommunityRatings: Forced UI reload completed")
             }
         }
         
         print("recalculateScoresAndUpdateCommunityRatings: Completed atomic recalculation")
     }
     
-    private func calculateScoreUpdatesForList(_ list: [Movie]) -> ([Movie], [(movie: Movie, newScore: Double, oldScore: Double)]) {
+    func calculateScoreUpdatesForList(_ list: [Movie]) -> ([Movie], [(movie: Movie, newScore: Double, oldScore: Double)]) {
         var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
         var updatedList = list
+        
+        print("calculateScoreUpdatesForList: Starting calculation for \(list.count) movies")
         
         // Calculate new scores synchronously
         for sentiment in MovieSentiment.allCasesOrdered {
             let idxs = updatedList.indices.filter { updatedList[$0].sentiment == sentiment }
-            guard let band = bands[sentiment], !idxs.isEmpty else { continue }
+            guard let band = bands[sentiment], !idxs.isEmpty else { 
+                print("calculateScoreUpdatesForList: No movies found for sentiment \(sentiment)")
+                continue 
+            }
+
+            print("calculateScoreUpdatesForList: Processing sentiment \(sentiment) with \(idxs.count) movies")
+            print("calculateScoreUpdatesForList: Band for \(sentiment): min=\(band.min), max=\(band.max), mid=\(band.mid), half=\(band.half)")
 
             let n = Double(idxs.count)
             let centre = (n - 1) / 2
             let step = band.half / max(centre, 1)
+            
+            print("calculateScoreUpdatesForList: n=\(n), centre=\(centre), step=\(step)")
 
             for (rank, arrayIndex) in idxs.enumerated() {
                 let offset = centre - Double(rank)
@@ -786,18 +1002,24 @@ final class MovieStore: ObservableObject {
                 // Round to 3 decimal places to avoid floating point precision issues and prevent NaN
                 let newScore = (rawNewScore.isNaN || rawNewScore.isInfinite) ? band.mid : (rawNewScore * 1000).rounded() / 1000
                 
+                print("calculateScoreUpdatesForList: \(movie.title) - rank=\(rank), arrayIndex=\(arrayIndex), offset=\(offset), oldScore=\(oldScore), rawNewScore=\(rawNewScore), newScore=\(newScore)")
+                
                 if abs(oldScore - newScore) > 0.001 { // Use threshold for floating point comparison
                     personalUpdates.append((
                         movie: movie,
                         newScore: newScore,
                         oldScore: oldScore
                     ))
-                    
-                    updatedList[arrayIndex].score = newScore
+                    print("calculateScoreUpdatesForList: Adding update for \(movie.title): \(oldScore) -> \(newScore)")
+                } else {
+                    print("calculateScoreUpdatesForList: No update needed for \(movie.title): \(oldScore) (difference: \(abs(oldScore - newScore)))")
                 }
+                
+                updatedList[arrayIndex].score = newScore
             }
         }
         
+        print("calculateScoreUpdatesForList: Completed calculation with \(personalUpdates.count) updates")
         return (updatedList, personalUpdates)
     }
     

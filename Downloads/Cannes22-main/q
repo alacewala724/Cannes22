@@ -25,20 +25,16 @@ service cloud.firestore {
         allow read, write, delete: if request.auth != null && request.auth.uid == userId;
       }
       
-      // Nested rule for following - users can read any user's following (for follow checks)
+      // Nested rule for following - users can manage their own following list
       match /following/{followedUserId} {
-        // Users can read any user's following list (to check follow status and count)
-        allow read: if request.auth != null;
-        // Users can write their own following list
-        allow write, delete: if request.auth != null && request.auth.uid == userId;
+        // Users can read and write their own following list
+        allow read, write, delete: if request.auth != null && request.auth.uid == userId;
       }
       
-      // Nested rule for followers - users can read any user's followers (for profile display)
+      // Nested rule for followers - users can manage their own followers list
       match /followers/{followerUserId} {
-        // Users can read any user's followers list (for profile display)
-        allow read: if request.auth != null;
-        // Users can write to any user's followers list (for follow/unfollow operations)
-        allow write, delete: if request.auth != null;
+        // Users can read and write their own followers list
+        allow read, write, delete: if request.auth != null && request.auth.uid == userId;
       }
     }
 

@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showingGlobalRatingDetail: GlobalRating?
     @State private var isEditing = false
     @State private var showingFriendSearch = false
+    @State private var showingProfile = false
     
     var body: some View {
         NavigationView {
@@ -43,6 +44,9 @@ struct ContentView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
+        .sheet(isPresented: $showingProfile) {
+            ProfileView()
+        }
         .sheet(isPresented: $showingFilter) {
             FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
         }
@@ -62,6 +66,15 @@ struct ContentView: View {
         .task {
             await store.loadMovies()
             await store.loadGlobalRatings()
+            
+            // Test following collection access
+            let firestoreService = FirestoreService()
+            do {
+                let canAccess = try await firestoreService.testFollowingAccess()
+                print("ContentView: Following collection accessible: \(canAccess)")
+            } catch {
+                print("ContentView: Error testing following access: \(error)")
+            }
         }
         .onChange(of: viewMode) { _, newValue in
             if newValue == .global {
@@ -116,7 +129,15 @@ struct ContentView: View {
                             .foregroundColor(.accentColor)
                     }
                     
-                    Button(action: { showingSettings = true }) {
+                    Menu {
+                        Button(action: { showingProfile = true }) {
+                            Label("Profile", systemImage: "person.circle")
+                        }
+                        
+                        Button(action: { showingSettings = true }) {
+                            Label("Settings", systemImage: "gear")
+                        }
+                    } label: {
                         Image(systemName: "ellipsis")
                             .font(.title)
                             .foregroundColor(.accentColor)
@@ -132,10 +153,13 @@ struct ContentView: View {
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Text("@\(authService.username ?? "user")")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: { showingProfile = true }) {
+                    Text("@\(authService.username ?? "user")")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, UI.hPad)
             

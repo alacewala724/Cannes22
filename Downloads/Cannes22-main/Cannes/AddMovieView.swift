@@ -449,19 +449,93 @@ struct ComparisonView: View {
                             state: .initialSentiment
                         )
                         
-                        // Then recalculate scores (personal only, no community updates yet)
-                        try await store.recalculateScoresAndUpdateCommunityRatings(skipCommunityUpdates: true)
+                        // Get the current list that includes the newly inserted movie
+                        let currentListWithNewMovie = newMovie.mediaType == .movie ? store.movies : store.tvShows
                         
-                        // Capture scores after recalculation
-                        let afterScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
-                            result[movie.id] = movie.score
+                        print("insertMovie: Current list before recalculation:")
+                        for (index, m) in currentListWithNewMovie.enumerated() {
+                            if m.id == newMovie.id {
+                                print("  [\(index)] \(m.title) (NEW): \(m.score) - sentiment: \(m.sentiment)")
+                            } else {
+                                print("  [\(index)] \(m.title): \(m.score) - sentiment: \(m.sentiment)")
+                            }
                         }
                         
-                        // Find the newly inserted movie with its final score
-                        let updatedMovie = newMovie.mediaType == .movie ? store.movies : store.tvShows
-                        let finalMovie = updatedMovie.first { $0.id == newMovie.id } ?? newMovie
+                        // Directly recalculate scores for the list that includes the new movie
+                        let (updatedList, personalUpdates) = await store.calculateScoreUpdatesForList(currentListWithNewMovie)
+                        
+                        print("insertMovie: Updated list after recalculation:")
+                        for (index, m) in updatedList.enumerated() {
+                            if m.id == newMovie.id {
+                                print("  [\(index)] \(m.title) (NEW): \(m.score) - sentiment: \(m.sentiment)")
+                            } else {
+                                print("  [\(index)] \(m.title): \(m.score) - sentiment: \(m.sentiment)")
+                            }
+                        }
+                        
+                        print("insertMovie: Personal updates to be saved:")
+                        for update in personalUpdates {
+                            if update.movie.id == newMovie.id {
+                                print("  \(update.movie.title) (NEW): \(update.oldScore) -> \(update.newScore)")
+                            } else {
+                                print("  \(update.movie.title): \(update.oldScore) -> \(update.newScore)")
+                            }
+                        }
+                        
+                        // Update the UI with the recalculated scores
+                        await MainActor.run {
+                            if newMovie.mediaType == .movie {
+                                store.movies = updatedList
+                            } else {
+                                store.tvShows = updatedList
+                            }
+                            print("insertMovie: Updated UI with recalculated scores")
+                            
+                            // Force UI refresh to ensure the updated scores are displayed
+                            let tempMovies = store.movies
+                            let tempTVShows = store.tvShows
+                            
+                            // Temporarily clear and restore to force SwiftUI to re-render
+                            store.movies = []
+                            store.tvShows = []
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                store.movies = tempMovies
+                                store.tvShows = tempTVShows
+                                print("insertMovie: Forced UI refresh completed")
+                                
+                                // Debug: Log the final scores being displayed
+                                let finalDisplayList = newMovie.mediaType == .movie ? store.movies : store.tvShows
+                                print("insertMovie: Final scores being displayed in UI:")
+                                for (index, m) in finalDisplayList.enumerated() {
+                                    if m.id == newMovie.id {
+                                        print("  [\(index)] \(m.title) (NEW): \(m.score)")
+                                    } else {
+                                        print("  [\(index)] \(m.title): \(m.score)")
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Update personal rankings in Firebase
+                        if !personalUpdates.isEmpty {
+                            print("insertMovie: Updating \(personalUpdates.count) personal rankings")
+                            try await store.firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                        }
+                        
+                        // Small delay to ensure UI updates are processed
+                        try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds (reduced from 0.2)
+                        
+                        // Get the updated movie with its final recalculated score
+                        let finalMovie = updatedList.first { $0.id == newMovie.id } ?? newMovie
                         
                         print("insertMovie: Final movie score after recalculation: \(finalMovie.score)")
+                        print("insertMovie: Original movie score: \(newMovie.score)")
+                        
+                        // Ensure we're using the recalculated score, not the original
+                        if finalMovie.score == newMovie.score {
+                            print("insertMovie: WARNING - Final movie still has original score, this indicates recalculation didn't work properly")
+                        }
                         
                         // Update community rating for the NEW movie (add new user rating)
                         try await store.firestoreService.updateMovieRanking(
@@ -473,12 +547,12 @@ struct ComparisonView: View {
                         // Update community ratings for existing movies that had score changes
                         var existingMovieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
                         
-                        for existingMovie in updatedMovie {
+                        for existingMovie in updatedList {
                             // Skip the newly inserted movie (already handled above)
                             if existingMovie.id == newMovie.id { continue }
                             
                             let oldScore = beforeScores[existingMovie.id] ?? existingMovie.score
-                            let newScore = afterScores[existingMovie.id] ?? existingMovie.score
+                            let newScore = existingMovie.score
                             
                             // Only update if score actually changed
                             if abs(oldScore - newScore) > 0.001 {
