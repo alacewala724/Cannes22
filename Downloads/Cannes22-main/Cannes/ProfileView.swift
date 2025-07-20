@@ -17,6 +17,7 @@ struct ProfileView: View {
     @State private var username = ""
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
+    @State private var showingSettings = false
     
     var body: some View {
         NavigationView {
@@ -37,14 +38,6 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.accentColor)
-                }
-            }
         }
         .task {
             await loadProfileData()
@@ -65,6 +58,9 @@ struct ProfileView: View {
         }
         .sheet(item: $showingUserFollowing) { user in
             UserFollowingListView(user: user)
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
         }
     }
     
@@ -152,7 +148,7 @@ struct ProfileView: View {
     private var actionButtons: some View {
         VStack(spacing: 16) {
             Button(action: {
-                // Navigate to settings
+                showingSettings = true
             }) {
                 HStack {
                     Image(systemName: "gear")

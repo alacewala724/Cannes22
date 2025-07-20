@@ -12,40 +12,57 @@ struct ContentView: View {
     
     @State private var viewMode: ViewMode = .personal
     @State private var showingAddMovie = false
-    @State private var showingSettings = false
     @State private var showingFilter = false
     @State private var showingGlobalRatingDetail: GlobalRating?
     @State private var isEditing = false
     @State private var showingFriendSearch = false
-    @State private var showingProfile = false
+    @State private var selectedTab = 0
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                // Header
-                headerView
-                
-                // Content
-                Group {
-                    switch viewMode {
-                    case .personal:
-                        personalView
-                    case .global:
-                        globalView
+        TabView(selection: $selectedTab) {
+            // Main Rankings Tab
+            NavigationView {
+                VStack(spacing: 0) {
+                    // Header
+                    headerView
+                    
+                    // Content
+                    Group {
+                        switch viewMode {
+                        case .personal:
+                            personalView
+                        case .global:
+                            globalView
+                        }
                     }
+                    .animation(.easeInOut, value: viewMode)
                 }
-                .animation(.easeInOut, value: viewMode)
+                .navigationBarHidden(true)
             }
-            .navigationBarHidden(true)
+            .tabItem {
+                Image(systemName: "list.star")
+                Text("Rankings")
+            }
+            .tag(0)
+            
+            // Updates Tab
+            UpdatesView(store: store)
+                .tabItem {
+                    Image(systemName: "bell")
+                    Text("Updates")
+                }
+                .tag(1)
+            
+            // Profile Tab
+            ProfileView()
+                .tabItem {
+                    Image(systemName: "person.circle")
+                    Text("Profile")
+                }
+                .tag(2)
         }
         .sheet(isPresented: $showingAddMovie) {
             AddMovieView(store: store)
-        }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
-        }
-        .sheet(isPresented: $showingProfile) {
-            ProfileView()
         }
         .sheet(isPresented: $showingFilter) {
             FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
@@ -128,20 +145,6 @@ struct ContentView: View {
                             .font(.title)
                             .foregroundColor(.accentColor)
                     }
-                    
-                    Menu {
-                        Button(action: { showingProfile = true }) {
-                            Label("Profile", systemImage: "person.circle")
-                        }
-                        
-                        Button(action: { showingSettings = true }) {
-                            Label("Settings", systemImage: "gear")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.title)
-                            .foregroundColor(.accentColor)
-                    }
                 }
             }
             .padding(.horizontal, UI.hPad)
@@ -153,13 +156,10 @@ struct ContentView: View {
                     .fontWeight(.bold)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                Button(action: { showingProfile = true }) {
-                    Text("@\(authService.username ?? "user")")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(PlainButtonStyle())
+                Text("@\(authService.username ?? "user")")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, UI.hPad)
             

@@ -429,6 +429,17 @@ final class MovieStore: ObservableObject {
                 
                 print("✅ insertNewMovie: Completed for '\(finalMovie.title)' with final score: \(finalMovie.score)")
                 
+                // Create activity update for friends to see
+                do {
+                    try await firestoreService.createActivityUpdate(
+                        type: .movieRanked,
+                        movie: finalMovie
+                    )
+                } catch {
+                    print("Failed to create activity update: \(error)")
+                    // Don't fail the whole operation if activity update fails
+                }
+                
                 // Update cache after successful insertion
                 await MainActor.run {
                     updateCacheAfterInsertion()

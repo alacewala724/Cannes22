@@ -1534,6 +1534,70 @@ extension FirestoreService {
             .setData(takeData)
         
         print("addTake: Added take for movie \(movieId) (TMDB: \(tmdbId?.description ?? "nil"))")
+        
+        // Create activity update for the comment
+        if let tmdbId = tmdbId {
+            // Get movie title for the activity
+            let movieTitle = try await getMovieTitleFromTake(movieId: movieId, tmdbId: tmdbId)
+            
+            // Create a temporary movie object for the activity
+            let tempMovie = Movie(
+                id: UUID(uuidString: movieId) ?? UUID(),
+                title: movieTitle,
+                sentiment: .likedIt, // Default sentiment for activity
+                tmdbId: tmdbId,
+                mediaType: mediaType,
+                score: 5.0 // Default score for activity
+            )
+            
+            try await createActivityUpdate(
+                type: .movieCommented,
+                movie: tempMovie,
+                comment: text
+            )
+            
+            print("addTake: Created activity update for comment on \(movieTitle)")
+        }
+    }
+    
+    // Helper function to get movie title from a take
+    private func getMovieTitleFromTake(movieId: String, tmdbId: Int) async throws -> String {
+        // First try to get title from existing takes
+        let takeCollectionId = tmdbId.description
+        let existingTakesSnapshot = try await db.collection("takes")
+            .document(takeCollectionId)
+            .collection("userTakes")
+            .limit(to: 1)
+            .getDocuments()
+        
+        if let firstTake = existingTakesSnapshot.documents.first {
+            // Try to get title from movie data in the take or user rankings
+            if let userId = firstTake.get("userId") as? String,
+               let movieId = firstTake.get("movieId") as? String {
+                
+                let userMovieDoc = try await db.collection("users")
+                    .document(userId)
+                    .collection("rankings")
+                    .document(movieId)
+                    .getDocument()
+                
+                if let title = userMovieDoc.get("title") as? String {
+                    return title
+                }
+            }
+        }
+        
+        // Fallback: check in global ratings
+        let globalRatingDoc = try await db.collection("ratings")
+            .document(tmdbId.description)
+            .getDocument()
+        
+        if let title = globalRatingDoc.get("title") as? String {
+            return title
+        }
+        
+        // Final fallback
+        return "Unknown Movie"
     }
     
     // Get takes for a movie (from users you follow and current user)
@@ -1938,4 +2002,111 @@ extension FirestoreService {
         return (validCount, invalidCount, issues)
     }
 
+} 
+
+extension FirestoreService {
+    // MARK: - Activity Updates
+    
+    func createActivityUpdate(type: ActivityUpdate.ActivityType, movie: Movie, comment: String? = nil) async throws {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        
+        // Get current user's username
+        let userDoc = try await db.collection("users").document(currentUserId).getDocument()
+        let username = userDoc.get("username") as? String ?? "Unknown User"
+        
+        let activityId = UUID().uuidString
+        let activityData: [String: Any] = [
+            "id": activityId,
+            "userId": currentUserId,
+            "username": username,
+            "type": type.rawValue,
+            "movieTitle": movie.title,
+            "movieId": movie.id.uuidString,
+            "tmdbId": movie.tmdbId as Any,
+            "mediaType": movie.mediaType.rawValue,
+            "score": movie.score,
+            "sentiment": movie.sentiment.rawValue,
+            "comment": comment as Any,
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+        
+        try await db.collection("activities").document(activityId).setData(activityData)
+        print("Created activity update: \(type.rawValue) for \(movie.title)")
+    }
+    
+    func getFriendActivities(limit: Int = 50) async throws -> [ActivityUpdate] {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return [] }
+        
+        // Get list of users we're following
+        let followingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .getDocuments()
+        
+        let followingIds = followingSnapshot.documents.map { $0.documentID }
+        
+        guard !followingIds.isEmpty else {
+            print("No friends found to get activities from")
+            return []
+        }
+        
+        // Get recent activities from friends (Firestore 'in' query supports up to 10 items)
+        let batchSize = 10
+        var allActivities: [ActivityUpdate] = []
+        
+        for i in stride(from: 0, to: followingIds.count, by: batchSize) {
+            let endIndex = min(i + batchSize, followingIds.count)
+            let batch = Array(followingIds[i..<endIndex])
+            
+            let snapshot = try await db.collection("activities")
+                .whereField("userId", in: batch)
+                .order(by: "timestamp", descending: true)
+                .limit(to: limit)
+                .getDocuments()
+            
+            let batchActivities = snapshot.documents.compactMap { doc -> ActivityUpdate? in
+                let data = doc.data()
+                
+                guard let id = data["id"] as? String,
+                      let userId = data["userId"] as? String,
+                      let username = data["username"] as? String,
+                      let typeString = data["type"] as? String,
+                      let type = ActivityUpdate.ActivityType(rawValue: typeString),
+                      let movieTitle = data["movieTitle"] as? String,
+                      let movieId = data["movieId"] as? String,
+                      let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() else {
+                    return nil
+                }
+                
+                let tmdbId = data["tmdbId"] as? Int
+                let mediaTypeString = data["mediaType"] as? String
+                let mediaType = mediaTypeString.flatMap { AppModels.MediaType(rawValue: $0) } ?? .movie
+                let score = data["score"] as? Double
+                let sentimentString = data["sentiment"] as? String
+                let sentiment = sentimentString.flatMap { MovieSentiment(rawValue: $0) }
+                let comment = data["comment"] as? String
+                
+                return ActivityUpdate(
+                    id: id,
+                    userId: userId,
+                    username: username,
+                    type: type,
+                    movieTitle: movieTitle,
+                    movieId: movieId,
+                    tmdbId: tmdbId,
+                    mediaType: mediaType,
+                    score: score,
+                    sentiment: sentiment,
+                    comment: comment,
+                    timestamp: timestamp
+                )
+            }
+            
+            allActivities.append(contentsOf: batchActivities)
+        }
+        
+        // Sort all activities by timestamp and limit
+        allActivities.sort { $0.timestamp > $1.timestamp }
+        return Array(allActivities.prefix(limit))
+    }
 } 

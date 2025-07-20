@@ -533,6 +533,17 @@ struct ComparisonView: View {
                         
                         print("✅ insertMovie: Completed for '\(finalMovie.title)' with final score: \(finalMovie.score)")
                         
+                        // Create activity update for friends to see
+                        do {
+                            try await store.firestoreService.createActivityUpdate(
+                                type: .movieRanked,
+                                movie: finalMovie
+                            )
+                        } catch {
+                            print("Failed to create activity update: \(error)")
+                            // Don't fail the whole operation if activity update fails
+                        }
+                        
                         // Resume continuation after all operations complete
                         continuation.resume()
                     } catch {

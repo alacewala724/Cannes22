@@ -211,9 +211,7 @@ struct GlobalRatingDetailView: View {
                 takeText: $newTakeText,
                 isAdding: $isAddingTake,
                 onAdd: {
-                    Task {
-                        await addTake()
-                    }
+                    await addTake()
                 }
             )
         }
@@ -870,7 +868,10 @@ struct GlobalRatingDetailView: View {
         let trimmedText = newTakeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
         
-        isAddingTake = true
+        await MainActor.run {
+            isAddingTake = true
+        }
+        
         do {
             try await firestoreService.addTake(
                 movieId: UUID().uuidString, // Use a new UUID since we don't have a real movie ID
@@ -879,15 +880,20 @@ struct GlobalRatingDetailView: View {
                 mediaType: rating.mediaType
             )
             
-            // Clear the text field
-            newTakeText = ""
+            // Clear the text field and reload takes
+            await MainActor.run {
+                newTakeText = ""
+            }
             
             // Reload takes
             await loadTakes()
         } catch {
             print("Error adding take: \(error)")
         }
-        isAddingTake = false
+        
+        await MainActor.run {
+            isAddingTake = false
+        }
     }
     
     private func deleteTake(_ take: Take) async {

@@ -215,10 +215,7 @@ struct TMDBMovieDetailView: View {
                 takeText: $newTakeText,
                 isAdding: $isAddingTake,
                 onAdd: {
-                    Task {
-                        await addTake()
-                        showingAddTake = false // Dismiss the sheet after adding the take
-                    }
+                    await addTake()
                 }
             )
         }
@@ -811,7 +808,10 @@ struct TMDBMovieDetailView: View {
         let trimmedText = newTakeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
         
-        isAddingTake = true
+        await MainActor.run {
+            isAddingTake = true
+        }
+        
         do {
             try await firestoreService.addTake(
                 movieId: currentMovie.id.uuidString,
@@ -820,15 +820,20 @@ struct TMDBMovieDetailView: View {
                 mediaType: currentMovie.mediaType
             )
             
-            // Clear the text field
-            newTakeText = ""
+            // Clear the text field and reload takes
+            await MainActor.run {
+                newTakeText = ""
+            }
             
             // Reload takes
             await loadTakes()
         } catch {
             print("Error adding take: \(error)")
         }
-        isAddingTake = false
+        
+        await MainActor.run {
+            isAddingTake = false
+        }
     }
     
     private func deleteTake(_ take: Take) async {
@@ -937,7 +942,7 @@ struct AddTakeSheet: View {
     let movie: Movie
     @Binding var takeText: String
     @Binding var isAdding: Bool
-    let onAdd: () -> Void
+    let onAdd: () async -> Void
     @Environment(\.dismiss) private var dismiss
     
     // Max characters for a take
@@ -986,9 +991,14 @@ struct AddTakeSheet: View {
                     dismiss()
                 },
                 trailing: Button("Post") {
-                    onAdd()
+                    Task {
+                        await onAdd()
+                        await MainActor.run {
+                            dismiss()
+                        }
+                    }
                 }
-                .disabled(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters) // Disable if empty or over limit
+                .disabled(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters || isAdding)
             )
             .navigationTitle("") // Hide default navigation title
             .navigationBarTitleDisplayMode(.inline) // Ensure title is centered

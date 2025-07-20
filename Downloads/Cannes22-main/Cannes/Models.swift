@@ -223,3 +223,42 @@ struct Take: Identifiable, Codable {
         self.mediaType = mediaType
     }
 } 
+
+// MARK: - Activity Updates
+struct ActivityUpdate: Identifiable, Codable {
+    let id: String
+    let userId: String
+    let username: String
+    let type: ActivityType
+    let movieTitle: String
+    let movieId: String
+    let tmdbId: Int?
+    let mediaType: AppModels.MediaType
+    let score: Double?
+    let sentiment: MovieSentiment?
+    let comment: String?
+    let timestamp: Date
+    
+    enum ActivityType: String, Codable, CaseIterable {
+        case movieRanked = "movie_ranked"
+        case movieCommented = "movie_commented"
+        case movieUpdated = "movie_updated"
+    }
+    
+    var displayText: String {
+        switch type {
+        case .movieRanked:
+            return "\(username) ranked \"\(movieTitle)\""
+        case .movieCommented:
+            return "\(username) commented on \"\(movieTitle)\""
+        case .movieUpdated:
+            return "\(username) updated \"\(movieTitle)\""
+        }
+    }
+    
+    var timeAgoText: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: timestamp, relativeTo: Date())
+    }
+} 
