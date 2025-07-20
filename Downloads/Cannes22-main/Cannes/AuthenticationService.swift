@@ -435,14 +435,10 @@ class AuthenticationService: ObservableObject {
         
         // Check if phone authentication is enabled
         print("🔵 PHONE AUTH DEBUG: Checking if phone auth is enabled...")
-        do {
-            // Try to get current user to check auth state
-            let currentUser = Auth.auth().currentUser
-            print("🔵 PHONE AUTH DEBUG: Current user: \(currentUser?.uid ?? "nil")")
-            print("🔵 PHONE AUTH DEBUG: Current user phone: \(currentUser?.phoneNumber ?? "nil")")
-        } catch {
-            print("❌ PHONE AUTH DEBUG: Error checking auth state: \(error)")
-        }
+        // Try to get current user to check auth state
+        let currentUser = Auth.auth().currentUser
+        print("🔵 PHONE AUTH DEBUG: Current user: \(currentUser?.uid ?? "nil")")
+        print("🔵 PHONE AUTH DEBUG: Current user phone: \(currentUser?.phoneNumber ?? "nil")")
         
         // Check APNs configuration
         let center = UNUserNotificationCenter.current()

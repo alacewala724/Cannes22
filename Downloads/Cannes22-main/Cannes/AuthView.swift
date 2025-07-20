@@ -114,7 +114,7 @@ struct AuthView: View {
         } message: {
             Text(authService.errorMessage ?? "An unknown error occurred")
         }
-        .onChange(of: authService.errorMessage) { message in
+        .onChange(of: authService.errorMessage) { _, message in
             if message != nil {
                 showError = true
             }
@@ -225,7 +225,7 @@ struct AuthView: View {
                             Text(selectedCountry.placeholder)
                                 .foregroundColor(.secondary)
                         }
-                        .onChange(of: phoneNumber) { newValue in
+                        .onChange(of: phoneNumber) { _, newValue in
                             // Remove any non-numeric characters except spaces and dashes for display
                             let filtered = newValue.filter { $0.isNumber || $0 == " " || $0 == "-" || $0 == "(" || $0 == ")" }
                             if filtered != newValue {

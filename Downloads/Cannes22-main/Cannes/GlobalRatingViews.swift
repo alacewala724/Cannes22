@@ -126,6 +126,18 @@ struct GlobalRatingDetailView: View {
     @State private var showingAddMovie = false
     @State private var friendsRatings: [FriendRating] = []
     @State private var isLoadingFriendsRatings = false
+    @State private var showingTakes = false
+    
+    // Takes state variables
+    @State private var takes: [Take] = []
+    @State private var isLoadingTakes = false
+    @State private var newTakeText = ""
+    @State private var isAddingTake = false
+    @State private var showingAddTake = false
+    @State private var editingTake: Take?
+    @State private var showingDeleteAlert = false
+    @State private var takeToDelete: Take?
+    
     @EnvironmentObject var authService: AuthenticationService
     
     private let tmdbService = TMDBService()
@@ -166,6 +178,74 @@ struct GlobalRatingDetailView: View {
                 isAppearing = true
             }
             loadFriendsRatings()
+            loadTakes()
+        }
+        .sheet(isPresented: $showingAddMovie) {
+            if let movieDetails = movieDetails {
+                AddMovieFromGlobalView(
+                    tmdbMovie: movieDetails,
+                    store: store,
+                    onComplete: { 
+                        Task {
+                            await store.loadGlobalRatings()
+                        }
+                        dismiss() 
+                    }
+                )
+                .onAppear {
+                    // Set the correct media type before starting the rating process
+                    store.selectedMediaType = movieDetails.mediaType
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddTake) {
+            AddTakeSheet(
+                movie: Movie(
+                    id: UUID(),
+                    title: rating.title,
+                    sentiment: .likedIt,
+                    tmdbId: rating.tmdbId,
+                    mediaType: rating.mediaType,
+                    score: rating.averageRating
+                ),
+                takeText: $newTakeText,
+                isAdding: $isAddingTake,
+                onAdd: {
+                    Task {
+                        await addTake()
+                    }
+                }
+            )
+        }
+        .sheet(item: $editingTake) { take in
+            EditTakeSheet(
+                take: take,
+                movie: Movie(
+                    id: UUID(),
+                    title: rating.title,
+                    sentiment: .likedIt,
+                    tmdbId: rating.tmdbId,
+                    mediaType: rating.mediaType,
+                    score: rating.averageRating
+                ),
+                onSave: {
+                    Task {
+                        await loadTakes()
+                    }
+                }
+            )
+        }
+        .alert("Delete Take", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                if let take = takeToDelete {
+                    Task {
+                        await deleteTake(take)
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete this take?")
         }
     }
     
@@ -603,6 +683,65 @@ struct GlobalRatingDetailView: View {
                         .font(.body)
                         .foregroundColor(.secondary)
                 }
+                
+                // Takes Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Takes")
+                            .font(.headline)
+                            .padding(.top, 8)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            showingAddTake = true
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                    
+                    if isLoadingTakes {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Loading takes...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                    } else if takes.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                                .font(.title2)
+                                .foregroundColor(.secondary)
+                            Text("No takes yet")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("Be the first to share your take!")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        LazyVStack(spacing: 12) {
+                            ForEach(takes) { take in
+                                EmbeddedTakeRow(
+                                    take: take,
+                                    onEdit: {
+                                        editingTake = take
+                                    },
+                                    onDelete: {
+                                        takeToDelete = take
+                                        showingDeleteAlert = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
             .padding(.horizontal)
         }
@@ -702,5 +841,61 @@ struct GlobalRatingDetailView: View {
             }
         }
         return runtime // Return original string if parsing fails
+    }
+    
+    // MARK: - Takes Functions
+    
+    private func loadTakes() {
+        guard let tmdbId = rating.tmdbId else { return }
+        
+        isLoadingTakes = true
+        
+        Task {
+            do {
+                let loadedTakes = try await firestoreService.getTakesForMovie(tmdbId: tmdbId)
+                await MainActor.run {
+                    takes = loadedTakes
+                    isLoadingTakes = false
+                }
+            } catch {
+                print("Error loading takes: \(error)")
+                await MainActor.run {
+                    isLoadingTakes = false
+                }
+            }
+        }
+    }
+    
+    private func addTake() async {
+        let trimmedText = newTakeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+        
+        isAddingTake = true
+        do {
+            try await firestoreService.addTake(
+                movieId: UUID().uuidString, // Use a new UUID since we don't have a real movie ID
+                tmdbId: rating.tmdbId,
+                text: trimmedText,
+                mediaType: rating.mediaType
+            )
+            
+            // Clear the text field
+            newTakeText = ""
+            
+            // Reload takes
+            await loadTakes()
+        } catch {
+            print("Error adding take: \(error)")
+        }
+        isAddingTake = false
+    }
+    
+    private func deleteTake(_ take: Take) async {
+        do {
+            try await firestoreService.deleteTake(takeId: take.id, tmdbId: rating.tmdbId)
+            await loadTakes()
+        } catch {
+            print("Error deleting take: \(error)")
+        }
     }
 } 

@@ -47,7 +47,7 @@ struct ContentView: View {
             FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
         }
         .sheet(isPresented: $showingFriendSearch) {
-            FriendSearchView()
+            FriendSearchView(store: store)
         }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
@@ -63,7 +63,7 @@ struct ContentView: View {
             await store.loadMovies()
             await store.loadGlobalRatings()
         }
-        .onChange(of: viewMode) { newValue in
+        .onChange(of: viewMode) { _, newValue in
             if newValue == .global {
                 Task {
                     await store.loadGlobalRatings(forceRefresh: true)
@@ -391,7 +391,7 @@ struct MovieRow: View {
         }
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
-                TMDBMovieDetailView(movie: movie)
+                TMDBMovieDetailView(movie: movie, store: store)
             }
         }
     }

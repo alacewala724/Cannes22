@@ -201,3 +201,25 @@ extension Double {
         return (self * divisor).rounded() / divisor
     }
 } 
+
+struct Take: Identifiable, Codable {
+    let id: String
+    let userId: String
+    let username: String
+    let movieId: String
+    let tmdbId: Int?
+    let text: String
+    let timestamp: Date
+    let mediaType: AppModels.MediaType
+    
+    init(id: String = UUID().uuidString, userId: String, username: String, movieId: String, tmdbId: Int?, text: String, mediaType: AppModels.MediaType = .movie, timestamp: Date = Date()) {
+        self.id = id
+        self.userId = userId
+        self.username = username
+        self.movieId = movieId
+        self.tmdbId = tmdbId
+        self.text = text
+        self.timestamp = timestamp
+        self.mediaType = mediaType
+    }
+} 

@@ -26,10 +26,12 @@ final class MovieStore: ObservableObject {
     @Published var isLoadingFromCache = false
     @Published var lastSyncDate: Date?
     
+    // Recalculation state
+    @Published var isRecalculating = false
+    
     private let cacheManager = CacheManager.shared
     private let networkMonitor = NetworkMonitor.shared
     private var isDeleting = false // Flag to prevent reloading during deletion
-    private var isRecalculating = false // Flag to prevent concurrent recalculations
     private var isLoading = false // Flag to prevent concurrent loading
     
     private struct Band {
@@ -273,8 +275,14 @@ final class MovieStore: ObservableObject {
             return
         }
         
-        isRecalculating = true
-        defer { isRecalculating = false }
+        await MainActor.run {
+            isRecalculating = true
+        }
+        defer { 
+            Task { @MainActor in
+                isRecalculating = false
+            }
+        }
         
         print("recalculateScoresOnLoad: Starting score recalculation")
         
@@ -669,8 +677,14 @@ final class MovieStore: ObservableObject {
             return
         }
         
-        isRecalculating = true
-        defer { isRecalculating = false }
+        await MainActor.run {
+            isRecalculating = true
+        }
+        defer { 
+            Task { @MainActor in
+                isRecalculating = false
+            }
+        }
         
         print("recalculateScoresAndUpdateCommunityRatings: Starting atomic recalculation (skipCommunityUpdates: \(skipCommunityUpdates))")
         

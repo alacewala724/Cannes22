@@ -417,7 +417,7 @@ struct SettingsView: View {
                         TextField("New Username", text: $newUsername)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .autocapitalization(.none)
-                            .onChange(of: newUsername) { _ in
+                            .onChange(of: newUsername) { _, _ in
                                 checkUsernameAvailability()
                             }
                         

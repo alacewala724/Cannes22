@@ -1,11 +1,14 @@
 import SwiftUI
 import Foundation
 import FirebaseFirestore
+import FirebaseAuth
 
 // MARK: - TMDB Movie Detail View
 struct TMDBMovieDetailView: View {
     let movie: Movie
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: MovieStore
+    @State private var currentMovie: Movie
     @State private var movieDetails: AppModels.Movie?
     @State private var isLoading = true // Start with loading state
     @State private var errorMessage: String?
@@ -16,9 +19,26 @@ struct TMDBMovieDetailView: View {
     @State private var averageRating: Double?
     @State private var friendsRatings: [FriendRating] = []
     @State private var isLoadingFriendsRatings = false
+    @State private var showingTakes = false
+    
+    // Takes state variables
+    @State private var takes: [Take] = []
+    @State private var isLoadingTakes = false
+    @State private var newTakeText = ""
+    @State private var isAddingTake = false
+    @State private var showingAddTake = false
+    @State private var editingTake: Take?
+    @State private var showingDeleteAlert = false
+    @State private var takeToDelete: Take?
     
     private let tmdbService = TMDBService()
     private let firestoreService = FirestoreService()
+    
+    init(movie: Movie, store: MovieStore) {
+        self.movie = movie
+        self.store = store
+        self._currentMovie = State(initialValue: movie)
+    }
     
     var body: some View {
         ScrollView {
@@ -167,13 +187,63 @@ struct TMDBMovieDetailView: View {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
             }
+            updateCurrentMovieFromStore()
             fetchAverageRating(for: movie.id.uuidString)
             loadFriendsRatings()
+            loadTakes()
         }
-        .onChange(of: selectedSeason) { (oldValue: TMDBSeason?, newValue: TMDBSeason?) in
+        .onChange(of: selectedSeason) { _, newValue in
             if let season = newValue {
                 loadEpisodes(for: season)
             }
+        }
+        .onChange(of: store.movies) { _, _ in
+            updateCurrentMovieFromStore()
+        }
+        .onChange(of: store.tvShows) { _, _ in
+            updateCurrentMovieFromStore()
+        }
+        .onChange(of: store.isRecalculating) { _, isRecalculating in
+            if !isRecalculating {
+                // Scores have finished recalculating, refresh the current movie
+                refreshCurrentMovie()
+            }
+        }
+        .sheet(isPresented: $showingAddTake) {
+            AddTakeSheet(
+                movie: currentMovie,
+                takeText: $newTakeText,
+                isAdding: $isAddingTake,
+                onAdd: {
+                    Task {
+                        await addTake()
+                        showingAddTake = false // Dismiss the sheet after adding the take
+                    }
+                }
+            )
+        }
+        .sheet(item: $editingTake) { take in
+            EditTakeSheet(
+                take: take,
+                movie: currentMovie,
+                onSave: {
+                    Task {
+                        await loadTakes()
+                    }
+                }
+            )
+        }
+        .alert("Delete Take", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                if let take = takeToDelete {
+                    Task {
+                        await deleteTake(take)
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete this take?")
         }
     }
     
@@ -245,14 +315,14 @@ struct TMDBMovieDetailView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    Text(String(format: "%.1f", movie.score))
+                    Text(String(format: "%.1f", currentMovie.score))
                         .font(.title2)
                         .fontWeight(.bold)
-                        .foregroundColor(movie.sentiment.color)
+                        .foregroundColor(currentMovie.sentiment.color)
                         .frame(width: 60, height: 60)
                         .background(
                             Circle()
-                                .stroke(movie.sentiment.color, lineWidth: 2)
+                                .stroke(currentMovie.sentiment.color, lineWidth: 2)
                         )
                 }
                 
@@ -369,6 +439,65 @@ struct TMDBMovieDetailView: View {
                     .font(.body)
                     .foregroundColor(.secondary)
             }
+            
+            // Takes Section
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Takes")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        showingAddTake = true
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.accentColor)
+                    }
+                }
+                
+                if isLoadingTakes {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading takes...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
+                } else if takes.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                        Text("No takes yet")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Text("Be the first to share your take!")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(takes) { take in
+                            EmbeddedTakeRow(
+                                take: take,
+                                onEdit: {
+                                    editingTake = take
+                                },
+                                onDelete: {
+                                    takeToDelete = take
+                                    showingDeleteAlert = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         }
         .padding(.horizontal)
     }
@@ -435,12 +564,12 @@ struct TMDBMovieDetailView: View {
     }
     
     private func loadFriendsRatings() {
-        guard let tmdbId = movie.tmdbId else { 
-            print("loadFriendsRatings: No TMDB ID available for movie: \(movie.title)")
+        guard let tmdbId = currentMovie.tmdbId else { 
+            print("loadFriendsRatings: No TMDB ID available for movie: \(currentMovie.title)")
             return 
         }
         
-        print("loadFriendsRatings: Starting to load friends ratings for movie: \(movie.title) (TMDB ID: \(tmdbId))")
+        print("loadFriendsRatings: Starting to load friends ratings for movie: \(currentMovie.title) (TMDB ID: \(tmdbId))")
         isLoadingFriendsRatings = true
         
         Task {
@@ -461,20 +590,20 @@ struct TMDBMovieDetailView: View {
     }
     
     private func loadMovieDetails() {
-        guard let tmdbId = movie.tmdbId else {
+        guard let tmdbId = currentMovie.tmdbId else {
             errorMessage = "No TMDB ID available for this movie"
             isLoading = false
             return
         }
         
-        print("loadMovieDetails: Starting to load details for \(movie.title)")
+        print("loadMovieDetails: Starting to load details for \(currentMovie.title)")
         isLoading = true
         errorMessage = nil
         
         Task {
             do {
                 let tmdbMovie: TMDBMovie
-                if movie.mediaType == .tv {
+                if currentMovie.mediaType == .tv {
                     tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
                     // Load seasons for TV shows
                     let seasonsData = try await tmdbService.getTVShowSeasons(id: tmdbId)
@@ -525,7 +654,7 @@ struct TMDBMovieDetailView: View {
     }
     
     private func loadEpisodes(for season: TMDBSeason) {
-        guard let tmdbId = movie.tmdbId else { return }
+        guard let tmdbId = currentMovie.tmdbId else { return }
         
         Task {
             do {
@@ -571,11 +700,11 @@ struct TMDBMovieDetailView: View {
 
     private func fetchAverageRating(for movieId: String) {
         print("fetchAverageRating: Starting fetch for movieId: \(movieId)")
-        print("fetchAverageRating: Movie title: \(movie.title), TMDB ID: \(movie.tmdbId?.description ?? "nil")")
+        print("fetchAverageRating: Movie title: \(currentMovie.title), TMDB ID: \(currentMovie.tmdbId?.description ?? "nil")")
         
         // Use TMDB ID for community ratings, fallback to UUID if no TMDB ID
-        let communityRatingId = movie.tmdbId?.description ?? movieId
-        print("fetchAverageRating: Using community rating ID: \(communityRatingId) (TMDB ID: \(movie.tmdbId?.description ?? "nil"))")
+        let communityRatingId = currentMovie.tmdbId?.description ?? movieId
+        print("fetchAverageRating: Using community rating ID: \(communityRatingId) (TMDB ID: \(currentMovie.tmdbId?.description ?? "nil"))")
         
         let docRef = Firestore.firestore().collection("ratings").document(communityRatingId)
         docRef.getDocument { snapshot, error in
@@ -592,8 +721,8 @@ struct TMDBMovieDetailView: View {
                         
                         // Check if this document is for the right movie
                         if let docTitle = data["title"] as? String {
-                            print("fetchAverageRating: Document title: '\(docTitle)' vs movie title: '\(movie.title)'")
-                            if docTitle != movie.title {
+                            print("fetchAverageRating: Document title: '\(docTitle)' vs movie title: '\(currentMovie.title)'")
+                            if docTitle != currentMovie.title {
                                 print("fetchAverageRating: WARNING - Document title doesn't match movie title!")
                             }
                         }
@@ -621,7 +750,7 @@ struct TMDBMovieDetailView: View {
                     // Try to find any documents that might be for this movie
                     print("fetchAverageRating: Searching for any documents with this movie title...")
                     Firestore.firestore().collection("ratings")
-                        .whereField("title", isEqualTo: movie.title)
+                        .whereField("title", isEqualTo: currentMovie.title)
                         .getDocuments { searchSnapshot, searchError in
                             if let searchError = searchError {
                                 print("fetchAverageRating: Error searching for documents: \(searchError)")
@@ -629,7 +758,7 @@ struct TMDBMovieDetailView: View {
                             }
                             
                             if let searchSnapshot = searchSnapshot {
-                                print("fetchAverageRating: Found \(searchSnapshot.documents.count) documents with title '\(movie.title)'")
+                                print("fetchAverageRating: Found \(searchSnapshot.documents.count) documents with title '\(currentMovie.title)'")
                                 for doc in searchSnapshot.documents {
                                     print("fetchAverageRating: Document ID: \(doc.documentID), data: \(doc.data())")
                                 }
@@ -653,5 +782,318 @@ struct TMDBMovieDetailView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Takes Functions
+    
+    private func loadTakes() {
+        guard let tmdbId = currentMovie.tmdbId else { return }
+        
+        isLoadingTakes = true
+        
+        Task {
+            do {
+                let loadedTakes = try await firestoreService.getTakesForMovie(tmdbId: tmdbId)
+                await MainActor.run {
+                    takes = loadedTakes
+                    isLoadingTakes = false
+                }
+            } catch {
+                print("Error loading takes: \(error)")
+                await MainActor.run {
+                    isLoadingTakes = false
+                }
+            }
+        }
+    }
+    
+    private func addTake() async {
+        let trimmedText = newTakeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+        
+        isAddingTake = true
+        do {
+            try await firestoreService.addTake(
+                movieId: currentMovie.id.uuidString,
+                tmdbId: currentMovie.tmdbId,
+                text: trimmedText,
+                mediaType: currentMovie.mediaType
+            )
+            
+            // Clear the text field
+            newTakeText = ""
+            
+            // Reload takes
+            await loadTakes()
+        } catch {
+            print("Error adding take: \(error)")
+        }
+        isAddingTake = false
+    }
+    
+    private func deleteTake(_ take: Take) async {
+        do {
+            try await firestoreService.deleteTake(takeId: take.id, tmdbId: currentMovie.tmdbId)
+            await loadTakes()
+        } catch {
+            print("Error deleting take: \(error)")
+        }
+    }
+
+    private func updateCurrentMovieFromStore() {
+        // Get the current movie from the store based on the original movie's ID
+        let allMovies = store.movies + store.tvShows
+        if let updatedMovie = allMovies.first(where: { $0.id == movie.id }) {
+            currentMovie = updatedMovie
+        }
+    }
+    
+    private func refreshCurrentMovie() {
+        updateCurrentMovieFromStore()
+    }
+}
+
+// MARK: - Embedded Take Row
+struct EmbeddedTakeRow: View {
+    let take: Take
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @State private var isCurrentUser: Bool = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                // User avatar
+                Circle()
+                    .fill(Color.accentColor.opacity(0.2))
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        Text(String(take.username.prefix(1)).uppercased())
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.accentColor)
+                    )
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isCurrentUser ? "My take" : "\(take.username)'s take")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text(formatDate(take.timestamp))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Action buttons (only for current user)
+                if isCurrentUser {
+                    HStack(spacing: 12) {
+                        Button(action: onEdit) {
+                            Image(systemName: "pencil")
+                                .foregroundColor(.accentColor)
+                                .font(.title3)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        Button(action: onDelete) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                                .font(.title3)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.trailing, 4)
+                }
+            }
+            
+            Text(take.text)
+                .font(.body)
+                .multilineTextAlignment(.leading)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+        .onAppear {
+            checkIfCurrentUser()
+        }
+    }
+    
+    private func checkIfCurrentUser() {
+        if let currentUser = Auth.auth().currentUser {
+            isCurrentUser = take.userId == currentUser.uid
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Add Take Sheet
+struct AddTakeSheet: View {
+    let movie: Movie
+    @Binding var takeText: String
+    @Binding var isAdding: Bool
+    let onAdd: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    // Max characters for a take
+    let maxTakeCharacters = 500
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add Your Take")
+                        .font(.headline)
+                    
+                    Text(movie.title)
+                        .font(.title2) // Make movie title slightly larger
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary) // Ensure good contrast
+                }
+                .padding(.top)
+                
+                TextEditor(text: $takeText) // Changed to TextEditor
+                    .frame(minHeight: 100, maxHeight: 200) // Set a min and max height
+                    .padding(8)
+                    .background(Color(.systemGray6)) // A subtle background for the editor
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                    )
+                    .foregroundColor(.primary)
+                    .autocapitalization(.sentences)
+                    .disableAutocorrection(false)
+                
+                HStack {
+                    Spacer()
+                    Text("\(takeText.count)/\(maxTakeCharacters)")
+                        .font(.caption)
+                        .foregroundColor(takeText.count > maxTakeCharacters ? .red : .secondary)
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+            .padding()
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                },
+                trailing: Button("Post") {
+                    onAdd()
+                }
+                .disabled(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters) // Disable if empty or over limit
+            )
+            .navigationTitle("") // Hide default navigation title
+            .navigationBarTitleDisplayMode(.inline) // Ensure title is centered
+        }
+    }
+}
+
+// MARK: - Edit Take Sheet
+struct EditTakeSheet: View {
+    let take: Take
+    let movie: Movie
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var editedText: String
+    @State private var isSaving = false
+    @StateObject private var firestoreService = FirestoreService()
+    
+    // Max characters for a take
+    let maxTakeCharacters = 500
+    
+    init(take: Take, movie: Movie, onSave: @escaping () -> Void) {
+        self.take = take
+        self.movie = movie
+        self.onSave = onSave
+        self._editedText = State(initialValue: take.text)
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Edit Your Take")
+                        .font(.headline)
+                    
+                    Text(movie.title)
+                        .font(.title2) // Make movie title slightly larger
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary) // Ensure good contrast
+                }
+                .padding(.top)
+                
+                TextEditor(text: $editedText) // Changed to TextEditor
+                    .frame(minHeight: 100, maxHeight: 200) // Set a min and max height
+                    .padding(8)
+                    .background(Color(.systemGray6)) // A subtle background for the editor
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                    )
+                    .foregroundColor(.primary)
+                    .autocapitalization(.sentences)
+                    .disableAutocorrection(false)
+                
+                HStack {
+                    Spacer()
+                    Text("\(editedText.count)/\(maxTakeCharacters)")
+                        .font(.caption)
+                        .foregroundColor(editedText.count > maxTakeCharacters ? .red : .secondary)
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+            .padding()
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                },
+                trailing: Button("Save") {
+                    Task {
+                        await saveTake()
+                    }
+                }
+                .disabled(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving) // Disable if empty, over limit, or saving
+            )
+            .navigationTitle("") // Hide default navigation title
+            .navigationBarTitleDisplayMode(.inline) // Ensure title is centered
+        }
+    }
+    
+    private func saveTake() async {
+        let trimmedText = editedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+        
+        isSaving = true
+        do {
+            // Delete the old take
+            try await firestoreService.deleteTake(takeId: take.id, tmdbId: movie.tmdbId)
+            
+            // Add the new take
+            try await firestoreService.addTake(
+                movieId: movie.id.uuidString,
+                tmdbId: movie.tmdbId,
+                text: trimmedText,
+                mediaType: movie.mediaType
+            )
+            
+            await MainActor.run {
+                onSave()
+                dismiss()
+            }
+        } catch {
+            print("Error updating take: \(error)")
+        }
+        isSaving = false
     }
 } 

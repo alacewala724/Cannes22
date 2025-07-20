@@ -1257,3 +1257,166 @@ extension FirestoreService {
         return moviesInCommon.count
     }
 } 
+
+extension FirestoreService {
+    // MARK: - Takes System
+    
+    // Add a take to a movie
+    func addTake(movieId: String, tmdbId: Int?, text: String, mediaType: AppModels.MediaType) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        // Get current user's username
+        let userProfile = try await getUserProfile(userId: currentUser.uid)
+        let username = userProfile?.username ?? "Unknown User"
+        
+        let take = Take(
+            userId: currentUser.uid,
+            username: username,
+            movieId: movieId,
+            tmdbId: tmdbId,
+            text: text,
+            mediaType: mediaType
+        )
+        
+        // Use TMDB ID for community takes if available, otherwise use movie UUID
+        let takeCollectionId = tmdbId?.description ?? movieId
+        
+        let takeData: [String: Any] = [
+            "id": take.id,
+            "userId": take.userId,
+            "username": take.username,
+            "movieId": take.movieId,
+            "tmdbId": take.tmdbId as Any,
+            "text": take.text,
+            "timestamp": FieldValue.serverTimestamp(),
+            "mediaType": take.mediaType.rawValue
+        ]
+        
+        try await db.collection("takes")
+            .document(takeCollectionId)
+            .collection("userTakes")
+            .document(take.id)
+            .setData(takeData)
+        
+        print("addTake: Added take for movie \(movieId) (TMDB: \(tmdbId?.description ?? "nil"))")
+    }
+    
+    // Get takes for a movie (from friends and current user)
+    func getTakesForMovie(tmdbId: Int?) async throws -> [Take] {
+        guard let currentUser = Auth.auth().currentUser else {
+            return []
+        }
+        
+        // Use TMDB ID for community takes if available
+        guard let takeCollectionId = tmdbId?.description else {
+            print("getTakesForMovie: No TMDB ID available, cannot fetch takes")
+            return []
+        }
+        
+        // Get current user's friends
+        let friendsSnapshot = try await db.collection("users")
+            .document(currentUser.uid)
+            .collection("friends")
+            .getDocuments()
+        
+        var allTakes: [Take] = []
+        
+        // Get current user's takes for this movie
+        let currentUserTakes = try await getTakesForUser(userId: currentUser.uid, tmdbId: tmdbId)
+        allTakes.append(contentsOf: currentUserTakes)
+        
+        // Get friends' takes for this movie
+        for friendDoc in friendsSnapshot.documents {
+            let friendUserId = friendDoc.documentID
+            let friendTakes = try await getTakesForUser(userId: friendUserId, tmdbId: tmdbId)
+            allTakes.append(contentsOf: friendTakes)
+        }
+        
+        // Sort by timestamp (newest first)
+        allTakes.sort { $0.timestamp > $1.timestamp }
+        
+        return allTakes
+    }
+    
+    // Get takes for a specific user and movie
+    private func getTakesForUser(userId: String, tmdbId: Int?) async throws -> [Take] {
+        guard let takeCollectionId = tmdbId?.description else {
+            return []
+        }
+        
+        let snapshot = try await db.collection("takes")
+            .document(takeCollectionId)
+            .collection("userTakes")
+            .whereField("userId", isEqualTo: userId)
+            .order(by: "timestamp", descending: true)
+            .getDocuments()
+        
+        return snapshot.documents.compactMap { document in
+            let data = document.data()
+            
+            guard let id = data["id"] as? String,
+                  let userId = data["userId"] as? String,
+                  let username = data["username"] as? String,
+                  let movieId = data["movieId"] as? String,
+                  let text = data["text"] as? String,
+                  let timestamp = data["timestamp"] as? Timestamp,
+                  let mediaTypeString = data["mediaType"] as? String,
+                  let mediaType = AppModels.MediaType(rawValue: mediaTypeString) else {
+                return nil
+            }
+            
+            let tmdbId = data["tmdbId"] as? Int
+            
+            return Take(
+                id: id,
+                userId: userId,
+                username: username,
+                movieId: movieId,
+                tmdbId: tmdbId,
+                text: text,
+                mediaType: mediaType,
+                timestamp: timestamp.dateValue()
+            )
+        }
+    }
+    
+    // Delete a take (only the take author can delete)
+    func deleteTake(takeId: String, tmdbId: Int?) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        guard let takeCollectionId = tmdbId?.description else {
+            throw NSError(domain: "FirestoreService", code: 400, userInfo: [NSLocalizedDescriptionKey: "No TMDB ID available"])
+        }
+        
+        // Get the take to verify ownership
+        let takeDoc = try await db.collection("takes")
+            .document(takeCollectionId)
+            .collection("userTakes")
+            .document(takeId)
+            .getDocument()
+        
+        guard takeDoc.exists else {
+            throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Take not found"])
+        }
+        
+        let takeData = takeDoc.data() ?? [:]
+        let takeUserId = takeData["userId"] as? String ?? ""
+        
+        // Only allow the take author to delete
+        guard takeUserId == currentUser.uid else {
+            throw NSError(domain: "FirestoreService", code: 403, userInfo: [NSLocalizedDescriptionKey: "You can only delete your own takes"])
+        }
+        
+        try await db.collection("takes")
+            .document(takeCollectionId)
+            .collection("userTakes")
+            .document(takeId)
+            .delete()
+        
+        print("deleteTake: Deleted take \(takeId) for movie (TMDB: \(tmdbId?.description ?? "nil"))")
+    }
+} 

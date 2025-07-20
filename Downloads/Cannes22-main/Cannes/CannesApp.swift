@@ -134,24 +134,18 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         print("✅ APNs device token received: \(tokenString)")
         
         // Enhanced APNs token handling
-        do {
-            #if DEBUG
-            Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
-            print("🔧 DEBUG: Successfully set sandbox APNs token with Firebase Auth")
-            #else
-            Auth.auth().setAPNSToken(deviceToken, type: .prod)
-            print("🚀 PRODUCTION: Successfully set production APNs token with Firebase Auth")
-            #endif
-            
-            // Set the flag to indicate APNs token is ready
-            AppDelegate.isAPNsTokenSet = true
-            print("🔵 APNs token verification: Firebase Auth should now be ready for phone authentication")
-            print("✅ APNs token flag set: Phone verification can now proceed")
-            
-        } catch {
-            print("❌ CRITICAL: Failed to set APNs token with Firebase Auth: \(error)")
-            print("❌ Phone authentication will not work without APNs token!")
-        }
+        #if DEBUG
+        Auth.auth().setAPNSToken(deviceToken, type: .sandbox)
+        print("🔧 DEBUG: Successfully set sandbox APNs token with Firebase Auth")
+        #else
+        Auth.auth().setAPNSToken(deviceToken, type: .prod)
+        print("🚀 PRODUCTION: Successfully set production APNs token with Firebase Auth")
+        #endif
+        
+        // Set the flag to indicate APNs token is ready
+        AppDelegate.isAPNsTokenSet = true
+        print("🔵 APNs token verification: Firebase Auth should now be ready for phone authentication")
+        print("✅ APNs token flag set: Phone verification can now proceed")
     }
     
     func application(_ application: UIApplication,

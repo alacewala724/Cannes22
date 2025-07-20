@@ -4,6 +4,7 @@ import FirebaseAuth
 
 struct FriendProfileView: View {
     let userProfile: UserProfile
+    @ObservedObject var store: MovieStore
     @StateObject private var firestoreService = FirestoreService()
     @State private var friendMovies: [Movie] = []
     @State private var isLoading = true
@@ -45,7 +46,7 @@ struct FriendProfileView: View {
             print("FriendProfileView: Opening profile for user: \(userProfile.username)")
             await loadFriendMovies()
         }
-        .onChange(of: selectedMediaType) { _ in
+        .onChange(of: selectedMediaType) { _, _ in
             Task {
                 await loadFriendMovies()
             }
@@ -145,7 +146,7 @@ struct FriendProfileView: View {
         ScrollView {
             LazyVStack(spacing: UI.vGap) {
                 ForEach(Array(friendMovies.enumerated()), id: \.element.id) { index, movie in
-                    FriendMovieRow(movie: movie, position: index + 1)
+                    FriendMovieRow(movie: movie, position: index + 1, store: store)
                 }
             }
             .padding(.horizontal, 4)
@@ -203,6 +204,7 @@ struct FriendProfileView: View {
 struct FriendMovieRow: View {
     let movie: Movie
     let position: Int
+    @ObservedObject var store: MovieStore
     @State private var showingDetail = false
     
     var body: some View {
@@ -269,7 +271,7 @@ struct FriendMovieRow: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
-                TMDBMovieDetailView(movie: movie)
+                TMDBMovieDetailView(movie: movie, store: store)
             }
         }
     }
@@ -282,7 +284,7 @@ struct FriendProfileView_Previews: PreviewProvider {
             uid: "test123",
             username: "testuser",
             movieCount: 25
-        ))
+        ), store: MovieStore())
     }
 }
 #endif 

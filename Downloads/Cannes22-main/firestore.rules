@@ -30,5 +30,17 @@ service cloud.firestore {
     match /ratings/{movieId} {
       allow read, write: if request.auth != null;
     }
+    
+    // �� Add this block for takes
+    match /takes/{movieId} {
+      allow read, write: if request.auth != null;
+      
+      // Allow users to manage their own takes
+      match /userTakes/{takeId} {
+        allow read: if request.auth != null;
+        allow write, delete: if request.auth != null && 
+          (resource == null || resource.data.userId == request.auth.uid);
+      }
+    }
   }
 } 

@@ -5,6 +5,7 @@ import FirebaseAuth
 struct FriendSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
+    @ObservedObject var store: MovieStore
     @State private var searchText = ""
     @State private var searchResults: [UserProfile] = []
     @State private var isSearching = false
@@ -27,7 +28,7 @@ struct FriendSearchView: View {
                 if selectedTab == 0 {
                     searchView
                 } else {
-                    FriendsListView()
+                    FriendsListView(store: store)
                 }
             }
             .navigationTitle("Find Friends")
@@ -35,7 +36,7 @@ struct FriendSearchView: View {
             .navigationBarBackButtonHidden(true)
         }
         .sheet(item: $showingFriendProfile) { profile in
-            FriendProfileView(userProfile: profile)
+            FriendProfileView(userProfile: profile, store: store)
         }
     }
     
@@ -66,7 +67,7 @@ struct FriendSearchView: View {
                 .textFieldStyle(PlainTextFieldStyle())
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
-                .onChange(of: searchText) { newValue in
+                .onChange(of: searchText) { _, newValue in
                     searchUsers(query: newValue)
                 }
             
@@ -306,6 +307,7 @@ struct FriendsListView: View {
     @State private var isLoading = true
     @State private var showingFriendProfile: UserProfile?
     @State private var moviesInCommon: [String: Int] = [:] // friend UID -> count
+    @ObservedObject var store: MovieStore
     
     var body: some View {
         VStack {
@@ -321,7 +323,7 @@ struct FriendsListView: View {
             await loadFriends()
         }
         .sheet(item: $showingFriendProfile) { profile in
-            FriendProfileView(userProfile: profile)
+            FriendProfileView(userProfile: profile, store: store)
         }
     }
     
@@ -492,7 +494,7 @@ struct FriendRating: Identifiable {
 #if DEBUG
 struct FriendSearchView_Previews: PreviewProvider {
     static var previews: some View {
-        FriendSearchView()
+        FriendSearchView(store: MovieStore())
     }
 }
 #endif 
