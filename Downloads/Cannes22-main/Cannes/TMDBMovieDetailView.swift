@@ -255,7 +255,11 @@ struct TMDBMovieDetailView: View {
             }
         }
         .sheet(isPresented: $showingReRankSheet) {
-            AddMovieView(store: store, existingMovie: currentMovie)
+            if let personalRating = getCurrentUserRating() {
+                AddMovieView(store: store, existingMovie: personalRating)
+            } else {
+                AddMovieView(store: store, existingMovie: nil)
+            }
         }
     }
     
@@ -321,21 +325,38 @@ struct TMDBMovieDetailView: View {
             
             // Display ratings side by side
             HStack(spacing: 20) {
-                // Personal Rating
+                // Personal Rating or Rank Button
                 VStack(spacing: 4) {
                     Text("Your Rating")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    Text(String(format: "%.1f", currentMovie.score))
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(currentMovie.sentiment.color)
-                        .frame(width: 60, height: 60)
-                        .background(
-                            Circle()
-                                .stroke(currentMovie.sentiment.color, lineWidth: 2)
-                        )
+                    if let personalRating = getCurrentUserRating() {
+                        Text(String(format: "%.1f", personalRating.score))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(personalRating.sentiment.color)
+                            .frame(width: 60, height: 60)
+                            .background(
+                                Circle()
+                                    .stroke(personalRating.sentiment.color, lineWidth: 2)
+                            )
+                    } else {
+                        Button(action: {
+                            showingReRankSheet = true
+                        }) {
+                            Text("Rank")
+                                .font(.headline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .frame(width: 60, height: 60)
+                                .background(
+                                    Circle()
+                                        .fill(Color.accentColor)
+                                )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
                 
                 // Community Rating
@@ -368,25 +389,27 @@ struct TMDBMovieDetailView: View {
             }
             .padding(.top, 8)
             
-            // Re-rank button - more prominent placement
-            Button(action: {
-                showingReRankSheet = true
-            }) {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.headline)
-                    Text("Re-rank Movie")
-                        .font(.headline)
-                        .fontWeight(.medium)
+            // Re-rank button - more prominent placement (only show if user has ranked)
+            if getCurrentUserRating() != nil {
+                Button(action: {
+                    showingReRankSheet = true
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.headline)
+                        Text("Re-rank Movie")
+                            .font(.headline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor)
+                    .cornerRadius(12)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(Color.accentColor)
-                .cornerRadius(12)
+                .buttonStyle(PlainButtonStyle())
+                .padding(.top, 16)
             }
-            .buttonStyle(PlainButtonStyle())
-            .padding(.top, 16)
             
             // Friends' Ratings
             if !friendsRatings.isEmpty {
@@ -902,6 +925,13 @@ struct TMDBMovieDetailView: View {
     
     private func refreshCurrentMovie() {
         updateCurrentMovieFromStore()
+    }
+
+    private func getCurrentUserRating() -> Movie? {
+        guard let tmdbId = currentMovie.tmdbId else { return nil }
+        
+        let allMovies = store.movies + store.tvShows
+        return allMovies.first { $0.tmdbId == tmdbId }
     }
 }
 
