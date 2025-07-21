@@ -62,7 +62,7 @@ struct ContentView: View {
                 .tag(2)
         }
         .sheet(isPresented: $showingAddMovie) {
-            AddMovieView(store: store)
+            AddMovieView(store: store, existingMovie: nil)
         }
         .sheet(isPresented: $showingFilter) {
             FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)

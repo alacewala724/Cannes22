@@ -6,6 +6,9 @@ struct AddMovieView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: MovieStore
     
+    // Optional existing movie for re-ranking
+    let existingMovie: Movie?
+    
     @State private var searchText = ""
     @State private var searchResults: [AppModels.Movie] = []
     @State private var isSearching = false
@@ -25,13 +28,30 @@ struct AddMovieView: View {
         case tvShow
     }
     
+    // Initialize with optional existing movie
+    init(store: MovieStore, existingMovie: Movie? = nil) {
+        self.store = store
+        self.existingMovie = existingMovie
+        
+        // If we have an existing movie, pre-populate the search
+        if let existing = existingMovie {
+            self._searchText = State(initialValue: existing.title)
+            self._sentiment = State(initialValue: existing.sentiment)
+            self._searchType = State(initialValue: existing.mediaType == .movie ? .movie : .tvShow)
+        }
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 40) {
                 Group {
                     switch currentStep {
                     case 1:
-                        searchStep
+                        if existingMovie != nil {
+                            sentimentStep
+                        } else {
+                            searchStep
+                        }
                     case 2:
                         sentimentStep
                     case 3:
@@ -45,7 +65,7 @@ struct AddMovieView: View {
                 
                 Spacer()
             }
-            .navigationTitle("Add Movie")
+            .navigationTitle(existingMovie != nil ? "Re-rank Movie" : "Add Movie")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -63,6 +83,28 @@ struct AddMovieView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(searchErrorMessage ?? "Failed to search for movies")
+            }
+            .onAppear {
+                // If we have an existing movie, start at sentiment step
+                if existingMovie != nil {
+                    currentStep = 1
+                    // Pre-populate the selected movie with existing movie data
+                    selectedMovie = AppModels.Movie(
+                        id: existingMovie!.tmdbId ?? 0,
+                        title: existingMovie!.title,
+                        name: existingMovie!.title,
+                        overview: nil,
+                        poster_path: nil,
+                        release_date: nil,
+                        first_air_date: nil,
+                        vote_average: nil,
+                        vote_count: nil,
+                        genres: existingMovie!.genres,
+                        media_type: existingMovie!.mediaType == .movie ? "movie" : "tv",
+                        runtime: nil,
+                        episode_run_time: nil
+                    )
+                }
             }
         }
     }
@@ -189,6 +231,20 @@ struct AddMovieView: View {
     
     private var sentimentStep: some View {
         VStack(spacing: 30) {
+            // Show movie title when re-ranking
+            if let existing = existingMovie {
+                VStack(spacing: 16) {
+                    Text(existing.title)
+                        .font(.title2)
+                        .fontWeight(.medium)
+                        .multilineTextAlignment(.center)
+                    
+                    Text("Current rating: \(existing.sentiment.rawValue)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
             Text("How did you feel about it?")
                 .font(.headline)
                 .fontWeight(.medium)
@@ -268,7 +324,7 @@ struct AddMovieView: View {
     private var comparisonStep: some View {
         VStack {
             if let movie = newMovie {
-                ComparisonView(store: store, newMovie: movie) {
+                ComparisonView(store: store, newMovie: movie, existingMovie: existingMovie) {
                     dismiss()
                 }
             } else {
@@ -328,6 +384,7 @@ struct ComparisonView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: MovieStore
     let newMovie: Movie
+    let existingMovie: Movie? // Add existing movie parameter
     var onComplete: () -> Void
 
     @State private var left = 0
@@ -388,8 +445,32 @@ struct ComparisonView: View {
     
     private func insertMovie(at rank: Int) async {
         return await withCheckedContinuation { continuation in
-            // Check if movie already exists to prevent duplicates
-            if let tmdbId = newMovie.tmdbId {
+            // If we're re-ranking, delete the existing movie first
+            if let existing = existingMovie {
+                print("insertMovie: Re-ranking movie '\(existing.title)', deleting old rating first")
+                
+                // Remove the existing movie from the list
+                if existing.mediaType == .movie {
+                    store.movies.removeAll { $0.id == existing.id }
+                } else {
+                    store.tvShows.removeAll { $0.id == existing.id }
+                }
+                
+                // Delete from Firebase
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    Task {
+                        do {
+                            try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
+                            print("insertMovie: Successfully deleted old rating for '\(existing.title)'")
+                        } catch {
+                            print("insertMovie: Error deleting old rating: \(error)")
+                        }
+                    }
+                }
+            }
+            
+            // Check if movie already exists to prevent duplicates (skip this check for re-ranking)
+            if existingMovie == nil, let tmdbId = newMovie.tmdbId {
                 let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
                 if existingMovie != nil {
                     print("insertMovie: Movie already exists with TMDB ID \(tmdbId), skipping completely")

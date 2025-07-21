@@ -31,6 +31,13 @@ struct TMDBMovieDetailView: View {
     @State private var showingDeleteAlert = false
     @State private var takeToDelete: Take?
     
+    // Friends' Ratings state variables
+    @State private var selectedFriendUserId: String?
+    @State private var showingFriendProfile = false
+    
+    // Re-ranking state variables
+    @State private var showingReRankSheet = false
+    
     private let tmdbService = TMDBService()
     private let firestoreService = FirestoreService()
     
@@ -242,6 +249,14 @@ struct TMDBMovieDetailView: View {
         } message: {
             Text("Are you sure you want to delete this take?")
         }
+        .sheet(isPresented: $showingFriendProfile) {
+            if let userId = selectedFriendUserId {
+                UserProfileFromIdView(userId: userId, store: store)
+            }
+        }
+        .sheet(isPresented: $showingReRankSheet) {
+            AddMovieView(store: store, existingMovie: currentMovie)
+        }
     }
     
     private func errorView(message: String) -> some View {
@@ -321,6 +336,22 @@ struct TMDBMovieDetailView: View {
                             Circle()
                                 .stroke(currentMovie.sentiment.color, lineWidth: 2)
                         )
+                    
+                    // Re-rank button
+                    Button(action: {
+                        showingReRankSheet = true
+                    }) {
+                        Text("Re-rank")
+                            .font(.caption)
+                            .foregroundColor(.accentColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.accentColor, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 
                 // Community Rating
@@ -363,22 +394,34 @@ struct TMDBMovieDetailView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(friendsRatings) { friendRating in
-                                VStack(spacing: 4) {
-                                    Text("@\(friendRating.friend.username)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                    
-                                    Text(String(format: "%.1f", friendRating.score))
-                                        .font(.subheadline)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.accentColor)
-                                        .frame(width: 50, height: 50)
-                                        .background(
-                                            Circle()
-                                                .stroke(Color.accentColor, lineWidth: 2)
-                                        )
+                                Button(action: {
+                                    selectedFriendUserId = friendRating.friend.uid
+                                    showingFriendProfile = true
+                                }) {
+                                    VStack(spacing: 4) {
+                                        Text("@\(friendRating.friend.username)")
+                                            .font(.caption)
+                                            .foregroundColor(.accentColor)
+                                            .lineLimit(1)
+                                        
+                                        Text(String(format: "%.1f", friendRating.score))
+                                            .font(.subheadline)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.accentColor)
+                                            .frame(width: 50, height: 50)
+                                            .background(
+                                                Circle()
+                                                    .stroke(Color.accentColor, lineWidth: 2)
+                                            )
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.accentColor.opacity(0.1))
+                                    )
                                 }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                         .padding(.horizontal, 4)
