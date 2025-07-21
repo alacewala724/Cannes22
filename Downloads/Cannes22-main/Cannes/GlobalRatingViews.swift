@@ -127,6 +127,7 @@ struct GlobalRatingDetailView: View {
     @State private var friendsRatings: [FriendRating] = []
     @State private var isLoadingFriendsRatings = false
     @State private var showingTakes = false
+    @State private var showingReRankSheet = false
     
     // Takes state variables
     @State private var takes: [Take] = []
@@ -244,6 +245,21 @@ struct GlobalRatingDetailView: View {
             }
         } message: {
             Text("Are you sure you want to delete this take?")
+        }
+        .sheet(isPresented: $showingReRankSheet) {
+            if let tmdbId = rating.tmdbId,
+               let userScore = store.getUserPersonalScore(for: tmdbId) {
+                // Create a Movie object from the user's existing rating for re-ranking
+                let existingMovie = Movie(
+                    id: UUID(), // This will be replaced during the re-ranking process
+                    title: rating.title,
+                    sentiment: sentimentFromScore(userScore),
+                    tmdbId: tmdbId,
+                    mediaType: rating.mediaType,
+                    score: userScore
+                )
+                AddMovieView(store: store, existingMovie: existingMovie)
+            }
         }
     }
     
@@ -740,6 +756,29 @@ struct GlobalRatingDetailView: View {
                         }
                     }
                 }
+                
+                // Re-rank button at the very bottom (only for movies that have been ranked)
+                if let tmdbId = rating.tmdbId,
+                   let userScore = store.getUserPersonalScore(for: tmdbId) {
+                    Button(action: {
+                        // Set the correct media type before starting the rating process
+                        store.selectedMediaType = rating.mediaType
+                        showingReRankSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Re-rank This \(rating.mediaType.rawValue)")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.orange)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                }
             }
             .padding(.horizontal)
         }
@@ -902,6 +941,20 @@ struct GlobalRatingDetailView: View {
             await loadTakes()
         } catch {
             print("Error deleting take: \(error)")
+        }
+    }
+    
+    // Helper function to convert score to sentiment
+    private func sentimentFromScore(_ score: Double) -> MovieSentiment {
+        switch score {
+        case 6.9...10.0:
+            return .likedIt
+        case 4.0..<6.9:
+            return .itWasFine
+        case 0.0..<4.0:
+            return .didntLikeIt
+        default:
+            return .itWasFine
         }
     }
 } 
