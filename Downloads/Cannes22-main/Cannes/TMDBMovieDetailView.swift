@@ -323,7 +323,10 @@ struct TMDBMovieDetailView: View {
                 }
             }
             
-            // Friends' Ratings (show first, like in global rating view)
+            // User Rating Section (like in global rating view)
+            userRatingSection
+            
+            // Friends' Ratings (show after user rating section)
             if !friendsRatings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Friends' Ratings")
@@ -368,9 +371,6 @@ struct TMDBMovieDetailView: View {
                     .padding(.horizontal, 4)
                 }
             }
-            
-            // User Rating Section (like in global rating view)
-            userRatingSection
             
             // Genres
             if let genres = details.genres, !genres.isEmpty {
