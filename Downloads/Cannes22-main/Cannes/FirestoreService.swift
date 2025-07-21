@@ -2110,4 +2110,22 @@ extension FirestoreService {
         allActivities.sort { $0.timestamp > $1.timestamp }
         return Array(allActivities.prefix(limit))
     }
+    
+    // Get community rating for a specific movie
+    func getCommunityRating(tmdbId: Int) async throws -> (averageRating: Double, numberOfRatings: Int)? {
+        let docRef = db.collection("ratings").document(tmdbId.description)
+        let document = try await docRef.getDocument()
+        
+        if document.exists, let data = document.data() {
+            let averageRating = data["averageRating"] as? Double ?? 0.0
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            
+            // Only return if there are actual ratings
+            if numberOfRatings > 0 {
+                return (averageRating: averageRating, numberOfRatings: numberOfRatings)
+            }
+        }
+        
+        return nil
+    }
 } 

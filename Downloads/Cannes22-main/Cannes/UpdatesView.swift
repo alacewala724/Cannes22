@@ -211,33 +211,118 @@ struct ActivityRowView: View {
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .sheet(isPresented: $showingMovieDetail) {
             if let tmdbId = activity.tmdbId {
-                // Create a GlobalRating object from the activity data
-                let globalRating = GlobalRating(
-                    id: tmdbId.description,
-                    title: activity.movieTitle,
+                // Create a view that fetches the actual community rating
+                NotificationMovieDetailView(
+                    tmdbId: tmdbId,
+                    movieTitle: activity.movieTitle,
                     mediaType: activity.mediaType,
-                    averageRating: activity.score ?? 0.0,
-                    numberOfRatings: 1, // We don't have this info from activity, default to 1
-                    tmdbId: tmdbId
-                )
-                
-                // Create a FriendRating object from the activity data for the notification sender
-                let notificationSenderRating = FriendRating(
-                    friend: UserProfile(
-                        uid: activity.userId,
-                        username: activity.username
+                    notificationSenderRating: FriendRating(
+                        friend: UserProfile(
+                            uid: activity.userId,
+                            username: activity.username
+                        ),
+                        score: activity.score ?? 0.0,
+                        title: activity.movieTitle
                     ),
-                    score: activity.score ?? 0.0,
-                    title: activity.movieTitle
+                    store: store
                 )
-                
-                NavigationView {
-                    GlobalRatingDetailView(rating: globalRating, store: store, notificationSenderRating: notificationSenderRating)
-                }
             }
         }
         .sheet(isPresented: $showingUserProfile) {
             UserProfileFromIdView(userId: activity.userId, store: store)
+        }
+    }
+}
+
+// Helper view to fetch community rating and show GlobalRatingDetailView
+struct NotificationMovieDetailView: View {
+    let tmdbId: Int
+    let movieTitle: String
+    let mediaType: AppModels.MediaType
+    let notificationSenderRating: FriendRating
+    @ObservedObject var store: MovieStore
+    @StateObject private var firestoreService = FirestoreService()
+    @State private var communityRating: GlobalRating?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        Group {
+            if isLoading {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Loading community rating...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let rating = communityRating {
+                NavigationView {
+                    GlobalRatingDetailView(rating: rating, store: store, notificationSenderRating: notificationSenderRating)
+                }
+            } else {
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 60))
+                        .foregroundColor(.secondary)
+                    
+                    Text("Couldn't Load Community Rating")
+                        .font(.title2)
+                        .fontWeight(.medium)
+                    
+                    Text(errorMessage ?? "The community rating for this movie could not be loaded.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task {
+            await loadCommunityRating()
+        }
+    }
+    
+    private func loadCommunityRating() async {
+        isLoading = true
+        do {
+            // Fetch the actual community rating from Firestore
+            let rating = try await firestoreService.getCommunityRating(tmdbId: tmdbId)
+            
+            await MainActor.run {
+                if let rating = rating {
+                    self.communityRating = GlobalRating(
+                        id: tmdbId.description,
+                        title: movieTitle,
+                        mediaType: mediaType,
+                        averageRating: rating.averageRating,
+                        numberOfRatings: rating.numberOfRatings,
+                        tmdbId: tmdbId
+                    )
+                } else {
+                    // If no community rating exists, create a default one
+                    self.communityRating = GlobalRating(
+                        id: tmdbId.description,
+                        title: movieTitle,
+                        mediaType: mediaType,
+                        averageRating: 0.0,
+                        numberOfRatings: 0,
+                        tmdbId: tmdbId
+                    )
+                }
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
         }
     }
 }
