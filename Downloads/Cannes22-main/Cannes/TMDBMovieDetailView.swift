@@ -334,7 +334,7 @@ struct TMDBMovieDetailView: View {
                         .padding(.top, 8)
                     
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
-                        ForEach(friendsRatings) { friendRating in
+                        ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
                             Button(action: {
                                 selectedFriendUserId = friendRating.friend.uid
                                 showingFriendProfile = true
@@ -350,11 +350,11 @@ struct TMDBMovieDetailView: View {
                                     Text(String(format: "%.1f", friendRating.score))
                                         .font(.subheadline)
                                         .fontWeight(.bold)
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(sentimentColor(for: friendRating.score))
                                         .frame(width: 50, height: 50)
                                         .background(
                                             Circle()
-                                                .stroke(Color.accentColor, lineWidth: 2)
+                                                .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
                                         )
                                 }
                                 .frame(maxWidth: .infinity)
@@ -880,6 +880,19 @@ struct TMDBMovieDetailView: View {
         
         let allMovies = store.movies + store.tvShows
         return allMovies.first { $0.tmdbId == tmdbId }
+    }
+    
+    private func sentimentColor(for score: Double) -> Color {
+        switch score {
+        case 6.9...10.0:
+            return .green
+        case 4.0..<6.9:
+            return .yellow
+        case 0.0..<4.0:
+            return .red
+        default:
+            return .gray
+        }
     }
 
     private var userRatingSection: some View {
