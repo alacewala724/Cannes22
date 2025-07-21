@@ -225,10 +225,7 @@ struct ActivityRowView: View {
                 let notificationSenderRating = FriendRating(
                     friend: UserProfile(
                         uid: activity.userId,
-                        username: activity.username,
-                        email: "", // We don't have email from activity
-                        bio: "", // We don't have bio from activity
-                        profileImageUrl: nil // We don't have profile image from activity
+                        username: activity.username
                     ),
                     score: activity.score ?? 0.0,
                     title: activity.movieTitle
