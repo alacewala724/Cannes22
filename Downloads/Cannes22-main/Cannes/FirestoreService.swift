@@ -1436,10 +1436,19 @@ extension FirestoreService {
             .collection("friends")
             .getDocuments()
         
-        var friendRatings: [FriendRating] = []
+        // Get users that the current user follows
+        let followingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("following")
+            .getDocuments()
         
+        var allRatings: [FriendRating] = []
+        var processedUserIds = Set<String>()
+        
+        // Process friends' ratings
         for friendDoc in friendsSnapshot.documents {
             let friendUserId = friendDoc.documentID
+            processedUserIds.insert(friendUserId)
             
             // Get friend's rating for this movie
             let movieSnapshot = try await db.collection("users")
@@ -1460,12 +1469,45 @@ extension FirestoreService {
                         score: score,
                         title: title
                     )
-                    friendRatings.append(friendRating)
+                    allRatings.append(friendRating)
                 }
             }
         }
         
-        return friendRatings
+        // Process following ratings (excluding those already processed as friends)
+        for followingDoc in followingSnapshot.documents {
+            let followedUserId = followingDoc.documentID
+            
+            // Skip if already processed as a friend
+            if processedUserIds.contains(followedUserId) {
+                continue
+            }
+            
+            // Get followed user's rating for this movie
+            let movieSnapshot = try await db.collection("users")
+                .document(followedUserId)
+                .collection("rankings")
+                .whereField("tmdbId", isEqualTo: tmdbId)
+                .getDocuments()
+            
+            if let movieDoc = movieSnapshot.documents.first {
+                let data = movieDoc.data()
+                let score = data["score"] as? Double ?? 0.0
+                let title = data["title"] as? String ?? ""
+                
+                // Get followed user's profile
+                if let userProfile = try await getUserProfile(userId: followedUserId) {
+                    let followingRating = FriendRating(
+                        friend: userProfile,
+                        score: score,
+                        title: title
+                    )
+                    allRatings.append(followingRating)
+                }
+            }
+        }
+        
+        return allRatings
     }
     
     // Get number of movies in common with a friend
