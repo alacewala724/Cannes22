@@ -1422,7 +1422,7 @@ extension FirestoreService {
         return document.exists
     }
     
-    // Get friends' ratings for a specific movie
+    // Get followings' ratings for a specific movie
     func getFriendsRatingsForMovie(tmdbId: Int) async throws -> [FriendRating] {
         guard let currentUser = Auth.auth().currentUser else {
             return []

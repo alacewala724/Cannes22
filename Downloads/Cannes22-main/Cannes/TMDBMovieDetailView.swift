@@ -326,58 +326,49 @@ struct TMDBMovieDetailView: View {
             // User Rating Section (like in global rating view)
             userRatingSection
             
-            // Friends' Ratings (show after user rating section)
+            // Followings' Ratings (show after user rating section)
             if !friendsRatings.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Friends' Ratings")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Followings' Ratings")
                         .font(.headline)
-                        .padding(.top, 8)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
                     
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
-                        ForEach(friendsRatings) { friendRating in
-                            Button(action: {
-                                selectedFriendUserId = friendRating.friend.uid
-                                showingFriendProfile = true
-                            }) {
-                                VStack(spacing: 4) {
-                                    Text("@\(friendRating.friend.username)")
-                                        .font(.caption)
-                                        .foregroundColor(.accentColor)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity)
-                                    
-                                    Text(String(format: "%.1f", friendRating.score))
-                                        .font(.subheadline)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.accentColor)
-                                        .frame(width: 50, height: 50)
-                                        .background(
-                                            Circle()
-                                                .stroke(Color.accentColor, lineWidth: 2)
-                                        )
-                                }
-                                .frame(maxWidth: .infinity)
-                                .onAppear {
-                                    print("TMDBMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
-                                }
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                        ForEach(friendsRatings, id: \.friend.uid) { friendRating in
+                            VStack(spacing: 4) {
+                                Text(friendRating.friend.username)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .foregroundColor(.primary)
+                                
+                                Text(String(format: "%.1f", friendRating.score))
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(friendRating.score >= 7.0 ? .green : 
+                                                   friendRating.score >= 5.0 ? .orange : .red)
                             }
-                            .buttonStyle(PlainButtonStyle())
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 6)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
                         }
                     }
-                    .padding(.horizontal, 4)
-                    .onAppear {
-                        print("TMDBMovieDetailView: Friends' ratings section is visible with \(friendsRatings.count) ratings")
-                    }
                 }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                    
+                print("TMDBMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
             } else {
-                // Debug: Show when friends' ratings section is not shown
-                Text("Debug: No friends' ratings to show")
+                // Debug: Show when followings' ratings section is not shown
+                Text("Debug: No followings' ratings to show")
                     .font(.caption)
-                    .foregroundColor(.red)
-                    .onAppear {
-                        print("TMDBMovieDetailView: Friends' ratings section is empty")
-                    }
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                    
+                print("TMDBMovieDetailView: Followings' ratings section is empty")
             }
             
             // Genres

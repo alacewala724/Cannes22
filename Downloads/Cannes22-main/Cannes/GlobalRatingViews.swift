@@ -644,52 +644,49 @@ struct GlobalRatingDetailView: View {
                 userRatingSection
                 .padding(.horizontal, -16) // Compensate for the outer padding
                 
-                // Friends' Ratings
+                // Followings' Ratings
                 if !friendsRatings.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Friends' Ratings")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Followings' Ratings")
                             .font(.headline)
-                            .padding(.top, 8)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
                         
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
-                            ForEach(friendsRatings) { friendRating in
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                            ForEach(friendsRatings, id: \.friend.uid) { friendRating in
                                 VStack(spacing: 4) {
-                                    Text("@\(friendRating.friend.username)")
+                                    Text(friendRating.friend.username)
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .fontWeight(.medium)
                                         .lineLimit(1)
                                         .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity)
+                                        .foregroundColor(.primary)
                                     
                                     Text(String(format: "%.1f", friendRating.score))
-                                        .font(.subheadline)
+                                        .font(.caption)
                                         .fontWeight(.bold)
-                                        .foregroundColor(.accentColor)
-                                        .frame(width: 50, height: 50)
-                                        .background(
-                                            Circle()
-                                                .stroke(Color.accentColor, lineWidth: 2)
-                                        )
+                                        .foregroundColor(friendRating.score >= 7.0 ? .green : 
+                                                       friendRating.score >= 5.0 ? .orange : .red)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .onAppear {
-                                    print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
-                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 6)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
                             }
                         }
-                        .padding(.horizontal, 4)
                     }
-                    .onAppear {
-                        print("GlobalRatingDetailView: Friends' ratings section is visible with \(friendsRatings.count) ratings")
-                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    
+                    print("GlobalRatingDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
                 } else {
-                    // Debug: Show when friends' ratings section is not shown
-                    Text("Debug: No friends' ratings to show")
+                    // Debug: Show when followings' ratings section is not shown
+                    Text("Debug: No followings' ratings to show")
                         .font(.caption)
-                        .foregroundColor(.red)
-                        .onAppear {
-                            print("GlobalRatingDetailView: Friends' ratings section is empty")
-                        }
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                    
+                    print("GlobalRatingDetailView: Followings' ratings section is empty")
                 }
                 
                 // Runtime
