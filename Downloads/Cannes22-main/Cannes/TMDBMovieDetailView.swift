@@ -492,26 +492,30 @@ struct TMDBMovieDetailView: View {
             }
         }
         .padding(.horizontal)
-        
-        // Re-rank button at the very bottom (only for movies that have been ranked)
-        if let personalRating = getCurrentUserRating() {
-            Button(action: {
-                showingReRankSheet = true
-            }) {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Re-rank This \(currentMovie.mediaType.rawValue)")
+        .overlay(
+            // Re-rank button at the very bottom (only for movies that have been ranked)
+            VStack {
+                Spacer()
+                if let personalRating = getCurrentUserRating() {
+                    Button(action: {
+                        showingReRankSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Re-rank This \(currentMovie.mediaType.rawValue)")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.orange)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
                 }
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.orange)
-                .cornerRadius(12)
             }
-            .padding(.horizontal)
-            .padding(.top, 20)
-        }
+        )
     }
     
     private var tvShowContent: some View {
@@ -887,7 +891,7 @@ struct TMDBMovieDetailView: View {
         case 6.9...10.0:
             return .green
         case 4.0..<6.9:
-            return .yellow
+            return .orange
         case 0.0..<4.0:
             return .red
         default:
