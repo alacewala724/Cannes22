@@ -284,7 +284,7 @@ struct TMDBMovieDetailView: View {
     }
     
     private func actualContentView(details: AppModels.Movie) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 20) {
             // Title and Release Date
             VStack(alignment: .leading, spacing: 8) {
                 Text(details.displayTitle)
@@ -296,6 +296,31 @@ struct TMDBMovieDetailView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+            }
+            
+            // Personal Rating Display (prominent placement like community rating in global view)
+            if let personalRating = getCurrentUserRating() {
+                VStack(spacing: 4) {
+                    Text("Your Rating")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Text(String(format: "%.1f", personalRating.score))
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(personalRating.sentiment.color)
+                        .frame(width: 80, height: 80)
+                        .background(
+                            Circle()
+                                .stroke(personalRating.sentiment.color, lineWidth: 3)
+                        )
+                    
+                    Text("Personal Score")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
             }
             
             // Runtime
@@ -323,8 +348,86 @@ struct TMDBMovieDetailView: View {
                 }
             }
             
-            // User Rating Section (like in global rating view)
-            userRatingSection
+            // Community vs Personal Rating Section (only show if user has rated)
+            if let personalRating = getCurrentUserRating() {
+                VStack(spacing: 8) {
+                    Text("Community vs Your Rating")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("Community")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if let avg = averageRating {
+                                Text(String(format: "%.1f", avg))
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.accentColor)
+                            } else {
+                                Text("—")
+                                    .font(.title3)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        VStack(spacing: 4) {
+                            if let avg = averageRating {
+                                let difference = personalRating.score - avg
+                                let isHigher = difference > 0
+                                let color: Color = isHigher ? .green : .red
+                                let arrow = isHigher ? "arrow.up" : "arrow.down"
+                                
+                                let roundedDifference = (difference * 10).rounded() / 10
+                                
+                                if abs(roundedDifference) < 0.1 {
+                                    Text("—")
+                                        .font(.title2)
+                                        .foregroundColor(.gray)
+                                    Text("Same")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        Spacer()
+                                        HStack(spacing: 4) {
+                                            Text(String(format: "%.1f", abs(roundedDifference)))
+                                                .font(.headline)
+                                                .foregroundColor(color)
+                                            Image(systemName: arrow)
+                                                .foregroundColor(color)
+                                                .font(.headline)
+                                        }
+                                    }
+                                    .frame(height: 44)
+                                }
+                            } else {
+                                Text("—")
+                                    .font(.title2)
+                                    .foregroundColor(.gray)
+                                Text("No community rating")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                        
+                        VStack(spacing: 4) {
+                            Text("Personal")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            Text(String(format: "%.1f", personalRating.score))
+                                .font(.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(personalRating.sentiment.color)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
             
             // Followings' Ratings (show after user rating section)
             if !friendsRatings.isEmpty {
@@ -483,32 +586,28 @@ struct TMDBMovieDetailView: View {
                     }
                 }
             }
+            
+            // Re-rank button at the bottom (only for movies that have been ranked)
+            if let personalRating = getCurrentUserRating() {
+                Button(action: {
+                    showingReRankSheet = true
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Re-rank This \(currentMovie.mediaType.rawValue)")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.orange)
+                    .cornerRadius(12)
+                }
+                .padding(.horizontal)
+                .padding(.top, 20)
+            }
         }
         .padding(.horizontal)
-        .overlay(
-            // Re-rank button at the very bottom (only for movies that have been ranked)
-            VStack {
-                Spacer()
-                if let personalRating = getCurrentUserRating() {
-                    Button(action: {
-                        showingReRankSheet = true
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.clockwise")
-                            Text("Re-rank This \(currentMovie.mediaType.rawValue)")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.orange)
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
-                }
-            }
-        )
     }
     
     private var tvShowContent: some View {
@@ -889,108 +988,6 @@ struct TMDBMovieDetailView: View {
             return .red
         default:
             return .gray
-        }
-    }
-
-    private var userRatingSection: some View {
-        Group {
-            if let personalRating = getCurrentUserRating() {
-                // User has rated this movie - show comparison with community
-                VStack(spacing: 8) {
-                    Text("Community vs Your Rating")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    
-                    HStack(spacing: 20) {
-                        VStack(spacing: 4) {
-                            Text("Community")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            if let avg = averageRating {
-                                Text(String(format: "%.1f", avg))
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.accentColor)
-                            } else {
-                                Text("—")
-                                    .font(.title3)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        VStack(spacing: 4) {
-                            if let avg = averageRating {
-                                let difference = personalRating.score - avg
-                                let isHigher = difference > 0
-                                let color: Color = isHigher ? .green : .red
-                                let arrow = isHigher ? "arrow.up" : "arrow.down"
-                                
-                                let roundedDifference = (difference * 10).rounded() / 10
-                                
-                                if abs(roundedDifference) < 0.1 {
-                                    Text("—")
-                                        .font(.title2)
-                                        .foregroundColor(.gray)
-                                    Text("Same")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                } else {
-                                    VStack(spacing: 0) {
-                                        Spacer()
-                                        HStack(spacing: 4) {
-                                            Text(String(format: "%.1f", abs(roundedDifference)))
-                                                .font(.headline)
-                                                .foregroundColor(color)
-                                            Image(systemName: arrow)
-                                                .foregroundColor(color)
-                                                .font(.headline)
-                                        }
-                                    }
-                                    .frame(height: 44)
-                                }
-                            } else {
-                                Text("—")
-                                    .font(.title2)
-                                    .foregroundColor(.gray)
-                                Text("No community rating")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        
-                        VStack(spacing: 4) {
-                            Text("Personal")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(String(format: "%.1f", personalRating.score))
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(personalRating.sentiment.color)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                .padding(.horizontal)
-            } else {
-                // User hasn't rated this movie - show "Rank This" button
-                Button(action: {
-                    showingReRankSheet = true
-                }) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Rank This \(currentMovie.mediaType.rawValue)")
-                    }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentColor)
-                    .cornerRadius(12)
-                }
-                .padding(.horizontal)
-            }
         }
     }
 }
