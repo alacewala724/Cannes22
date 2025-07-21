@@ -711,24 +711,6 @@ struct GlobalRatingDetailView: View {
                     .foregroundColor(.secondary)
                 }
                 
-                // TMDB Rating
-                if let tmdbRating = details.vote_average, tmdbRating > 0 {
-                    HStack {
-                        Image(systemName: "star.fill")
-                            .foregroundColor(.yellow)
-                        Text(String(format: "%.1f", tmdbRating))
-                            .font(.headline)
-                        Text("TMDB")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        if let votes = details.vote_count {
-                            Text("(\(votes) votes)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
                 // Overview
                 if let overview = details.overview, !overview.isEmpty {
                     Text("Overview")

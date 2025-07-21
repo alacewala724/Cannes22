@@ -333,21 +333,6 @@ struct TMDBMovieDetailView: View {
                 .foregroundColor(.secondary)
             }
             
-            // Rating
-            if let rating = details.vote_average, rating > 0 {
-                HStack {
-                    Image(systemName: "star.fill")
-                        .foregroundColor(.yellow)
-                    Text(String(format: "%.1f", rating))
-                        .font(.headline)
-                    if let votes = details.vote_count {
-                        Text("(\(votes) votes)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
             // Community vs Personal Rating Section (only show if user has rated)
             if let personalRating = getCurrentUserRating() {
                 VStack(spacing: 8) {
