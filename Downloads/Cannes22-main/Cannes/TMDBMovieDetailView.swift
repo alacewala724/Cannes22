@@ -328,37 +328,45 @@ struct TMDBMovieDetailView: View {
             
             // Followings' Ratings (show after user rating section)
             if !friendsRatings.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Followings' Ratings")
                         .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .padding(.top, 8)
                     
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                        ForEach(friendsRatings, id: \.friend.uid) { friendRating in
-                            VStack(spacing: 4) {
-                                Text(friendRating.friend.username)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundColor(.primary)
-                                
-                                Text(String(format: "%.1f", friendRating.score))
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(friendRating.score >= 7.0 ? .green : 
-                                                   friendRating.score >= 5.0 ? .orange : .red)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
+                        ForEach(friendsRatings) { friendRating in
+                            Button(action: {
+                                selectedFriendUserId = friendRating.friend.uid
+                                showingFriendProfile = true
+                            }) {
+                                VStack(spacing: 4) {
+                                    Text("@\(friendRating.friend.username)")
+                                        .font(.caption)
+                                        .foregroundColor(.accentColor)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(maxWidth: .infinity)
+                                    
+                                    Text(String(format: "%.1f", friendRating.score))
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.accentColor)
+                                        .frame(width: 50, height: 50)
+                                        .background(
+                                            Circle()
+                                                .stroke(Color.accentColor, lineWidth: 2)
+                                        )
+                                }
+                                .frame(maxWidth: .infinity)
+                                .onAppear {
+                                    print("TMDBMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                }
                             }
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 6)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(8)
+                            .buttonStyle(PlainButtonStyle())
                         }
                     }
+                    .padding(.horizontal, 4)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
                 .onAppear {
                     print("TMDBMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
                 }
@@ -484,6 +492,26 @@ struct TMDBMovieDetailView: View {
             }
         }
         .padding(.horizontal)
+        
+        // Re-rank button at the very bottom (only for movies that have been ranked)
+        if let personalRating = getCurrentUserRating() {
+            Button(action: {
+                showingReRankSheet = true
+            }) {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Re-rank This \(currentMovie.mediaType.rawValue)")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.orange)
+                .cornerRadius(12)
+            }
+            .padding(.horizontal)
+            .padding(.top, 20)
+        }
     }
     
     private var tvShowContent: some View {
