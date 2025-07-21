@@ -652,7 +652,7 @@ struct GlobalRatingDetailView: View {
                             .font(.headline)
                             .padding(.top, 8)
                         
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                             ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
                                 VStack(spacing: 4) {
                                     Text("@\(friendRating.friend.username)")
@@ -660,7 +660,6 @@ struct GlobalRatingDetailView: View {
                                         .foregroundColor(.primary)
                                         .lineLimit(1)
                                         .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity)
                                     
                                     Text(String(format: "%.1f", friendRating.score))
                                         .font(.subheadline)
@@ -672,7 +671,6 @@ struct GlobalRatingDetailView: View {
                                                 .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
                                         )
                                 }
-                                .frame(maxWidth: .infinity)
                                 .onAppear {
                                     print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
                                 }

@@ -437,7 +437,7 @@ struct TMDBMovieDetailView: View {
                         .font(.headline)
                         .padding(.top, 8)
                     
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                         ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
                             Button(action: {
                                 selectedFriendUserId = friendRating.friend.uid
@@ -449,7 +449,6 @@ struct TMDBMovieDetailView: View {
                                         .foregroundColor(.primary)
                                         .lineLimit(1)
                                         .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity)
                                     
                                     Text(String(format: "%.1f", friendRating.score))
                                         .font(.subheadline)
@@ -461,7 +460,6 @@ struct TMDBMovieDetailView: View {
                                                 .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
                                         )
                                 }
-                                .frame(maxWidth: .infinity)
                                 .onAppear {
                                     print("TMDBMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
                                 }
