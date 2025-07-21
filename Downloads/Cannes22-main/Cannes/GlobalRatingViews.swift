@@ -996,7 +996,7 @@ struct GlobalRatingDetailView: View {
         case 6.9...10.0:
             return .green
         case 4.0..<6.9:
-            return .yellow
+            return .gray
         case 0.0..<4.0:
             return .red
         default:
