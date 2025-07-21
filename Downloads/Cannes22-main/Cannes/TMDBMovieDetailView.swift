@@ -330,41 +330,42 @@ struct TMDBMovieDetailView: View {
                         .font(.headline)
                         .padding(.top, 8)
                     
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(friendsRatings) { friendRating in
-                                Button(action: {
-                                    selectedFriendUserId = friendRating.friend.uid
-                                    showingFriendProfile = true
-                                }) {
-                                    VStack(spacing: 4) {
-                                        Text("@\(friendRating.friend.username)")
-                                            .font(.caption)
-                                            .foregroundColor(.accentColor)
-                                            .lineLimit(1)
-                                        
-                                        Text(String(format: "%.1f", friendRating.score))
-                                            .font(.subheadline)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.accentColor)
-                                            .frame(width: 50, height: 50)
-                                            .background(
-                                                Circle()
-                                                    .stroke(Color.accentColor, lineWidth: 2)
-                                            )
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.accentColor.opacity(0.1))
-                                    )
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(friendsRatings.count, 4)), spacing: 12) {
+                        ForEach(friendsRatings) { friendRating in
+                            Button(action: {
+                                selectedFriendUserId = friendRating.friend.uid
+                                showingFriendProfile = true
+                            }) {
+                                VStack(spacing: 4) {
+                                    Text("@\(friendRating.friend.username)")
+                                        .font(.caption)
+                                        .foregroundColor(.accentColor)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(maxWidth: .infinity)
+                                    
+                                    Text(String(format: "%.1f", friendRating.score))
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.accentColor)
+                                        .frame(width: 50, height: 50)
+                                        .background(
+                                            Circle()
+                                                .stroke(Color.accentColor, lineWidth: 2)
+                                        )
                                 }
-                                .buttonStyle(PlainButtonStyle())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.accentColor.opacity(0.1))
+                                )
+                                .frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .padding(.horizontal, 4)
                     }
+                    .padding(.horizontal, 4)
                 }
             }
             
