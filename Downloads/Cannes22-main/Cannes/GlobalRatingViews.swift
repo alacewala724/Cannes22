@@ -656,7 +656,7 @@ struct GlobalRatingDetailView: View {
                                 VStack(spacing: 4) {
                                     Text("@\(friendRating.friend.username)")
                                         .font(.caption)
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(.primary)
                                         .lineLimit(1)
                                         .truncationMode(.tail)
                                         .frame(maxWidth: .infinity)
