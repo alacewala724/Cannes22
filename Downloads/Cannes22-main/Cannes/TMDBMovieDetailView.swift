@@ -357,12 +357,6 @@ struct TMDBMovieDetailView: View {
                                                 .stroke(Color.accentColor, lineWidth: 2)
                                         )
                                 }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.accentColor.opacity(0.1))
-                                )
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(PlainButtonStyle())
