@@ -358,12 +358,26 @@ struct TMDBMovieDetailView: View {
                                         )
                                 }
                                 .frame(maxWidth: .infinity)
+                                .onAppear {
+                                    print("TMDBMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                }
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding(.horizontal, 4)
+                    .onAppear {
+                        print("TMDBMovieDetailView: Friends' ratings section is visible with \(friendsRatings.count) ratings")
+                    }
                 }
+            } else {
+                // Debug: Show when friends' ratings section is not shown
+                Text("Debug: No friends' ratings to show")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .onAppear {
+                        print("TMDBMovieDetailView: Friends' ratings section is empty")
+                    }
             }
             
             // Genres
@@ -553,6 +567,9 @@ struct TMDBMovieDetailView: View {
             do {
                 let ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
                 print("loadFriendsRatings: Successfully loaded \(ratings.count) friend ratings")
+                for rating in ratings {
+                    print("loadFriendsRatings: Friend rating - \(rating.friend.username): \(rating.score)")
+                }
                 await MainActor.run {
                     friendsRatings = ratings
                     isLoadingFriendsRatings = false
