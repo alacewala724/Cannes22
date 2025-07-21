@@ -271,21 +271,28 @@ struct GlobalRatingDetailView: View {
         }
         
         print("GlobalRatingDetailView: Starting to load friends ratings for movie: \(rating.title) (TMDB ID: \(tmdbId))")
+        print("GlobalRatingDetailView: Notification sender rating: \(notificationSenderRating?.friend.username ?? "none")")
         isLoadingFriendsRatings = true
         
         Task {
             do {
                 var ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+                print("GlobalRatingDetailView: Loaded \(ratings.count) friend ratings from Firestore")
+                for rating in ratings {
+                    print("GlobalRatingDetailView: Friend rating - \(rating.friend.username): \(rating.score)")
+                }
                 
                 // Add notification sender's rating if provided and not already included
                 if let notificationRating = notificationSenderRating {
                     let isAlreadyIncluded = ratings.contains { $0.friend.uid == notificationRating.friend.uid }
+                    print("GlobalRatingDetailView: Notification sender \(notificationRating.friend.username) already included: \(isAlreadyIncluded)")
                     if !isAlreadyIncluded {
                         ratings.append(notificationRating)
+                        print("GlobalRatingDetailView: Added notification sender rating")
                     }
                 }
                 
-                print("GlobalRatingDetailView: Successfully loaded \(ratings.count) friend ratings")
+                print("GlobalRatingDetailView: Final count: \(ratings.count) friend ratings")
                 await MainActor.run {
                     friendsRatings = ratings
                     isLoadingFriendsRatings = false
@@ -663,11 +670,25 @@ struct GlobalRatingDetailView: View {
                                                     .stroke(Color.accentColor, lineWidth: 2)
                                             )
                                     }
+                                    .onAppear {
+                                        print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                    }
                                 }
                             }
                             .padding(.horizontal, 4)
                         }
                     }
+                    .onAppear {
+                        print("GlobalRatingDetailView: Friends' ratings section is visible with \(friendsRatings.count) ratings")
+                    }
+                } else {
+                    // Debug: Show when friends' ratings section is not shown
+                    Text("Debug: No friends' ratings to show")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .onAppear {
+                            print("GlobalRatingDetailView: Friends' ratings section is empty")
+                        }
                 }
                 
                 // Runtime
