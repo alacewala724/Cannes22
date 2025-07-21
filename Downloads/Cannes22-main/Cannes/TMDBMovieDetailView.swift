@@ -145,6 +145,7 @@ struct TMDBMovieDetailView: View {
                     if isLoading || isLoadingFriendsRatings || isLoadingTakes {
                         // Content skeleton
                         VStack(alignment: .leading, spacing: 16) {
+                            // Title skeleton
                             Rectangle()
                                 .fill(Color(.systemGray5))
                                 .frame(height: 32)
@@ -152,27 +153,124 @@ struct TMDBMovieDetailView: View {
                                 .opacity(0.3)
                                 .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                             
-                            HStack(spacing: 20) {
+                            // Personal rating circle skeleton
+                            VStack(spacing: 8) {
                                 Rectangle()
                                     .fill(Color(.systemGray5))
-                                    .frame(width: 60, height: 60)
+                                    .frame(width: 80, height: 80)
                                     .clipShape(Circle())
                                     .opacity(0.3)
                                     .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                
                                 Rectangle()
                                     .fill(Color(.systemGray5))
-                                    .frame(width: 60, height: 60)
-                                    .clipShape(Circle())
+                                    .frame(width: 100, height: 16)
+                                    .cornerRadius(4)
                                     .opacity(0.3)
                                     .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                             }
+                            .frame(maxWidth: .infinity)
                             
+                            // Runtime skeleton
                             Rectangle()
                                 .fill(Color(.systemGray5))
-                                .frame(height: 24)
-                                .cornerRadius(8)
+                                .frame(width: 120, height: 16)
+                                .cornerRadius(4)
                                 .opacity(0.3)
                                 .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                            
+                            // Community vs Personal comparison skeleton
+                            VStack(spacing: 12) {
+                                Rectangle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(height: 20)
+                                    .cornerRadius(4)
+                                    .opacity(0.3)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                
+                                HStack(spacing: 20) {
+                                    VStack(spacing: 8) {
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 60, height: 12)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                        
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 40, height: 16)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                    }
+                                    
+                                    VStack(spacing: 8) {
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 60, height: 12)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                        
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 40, height: 16)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                    }
+                                    
+                                    VStack(spacing: 8) {
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 60, height: 12)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                        
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(width: 40, height: 16)
+                                            .cornerRadius(4)
+                                            .opacity(0.3)
+                                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                    }
+                                }
+                            }
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                            
+                            // Followings' ratings skeleton
+                            VStack(alignment: .leading, spacing: 8) {
+                                Rectangle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 140, height: 20)
+                                    .cornerRadius(4)
+                                    .opacity(0.3)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                                    ForEach(0..<4, id: \.self) { _ in
+                                        VStack(spacing: 4) {
+                                            Rectangle()
+                                                .fill(Color(.systemGray5))
+                                                .frame(height: 12)
+                                                .cornerRadius(4)
+                                                .opacity(0.3)
+                                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                            
+                                            Rectangle()
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 50, height: 50)
+                                                .clipShape(Circle())
+                                                .opacity(0.3)
+                                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
+                                        }
+                                    }
+                                }
+                            }
                         }
                         .padding(.horizontal)
                     } else if let error = errorMessage {
