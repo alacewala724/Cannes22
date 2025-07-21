@@ -7,7 +7,7 @@ struct AddMovieView: View {
     @ObservedObject var store: MovieStore
     
     // Optional existing movie for re-ranking
-    let existingMovie: Movie?
+    @State private var existingMovie: Movie?
     
     @State private var searchText = ""
     @State private var searchResults: [AppModels.Movie] = []
@@ -31,13 +31,15 @@ struct AddMovieView: View {
     // Initialize with optional existing movie
     init(store: MovieStore, existingMovie: Movie? = nil) {
         self.store = store
-        self.existingMovie = existingMovie
         
         // If we have an existing movie, pre-populate the search
         if let existing = existingMovie {
             self._searchText = State(initialValue: existing.title)
             self._sentiment = State(initialValue: existing.sentiment)
             self._searchType = State(initialValue: existing.mediaType == .movie ? .movie : .tvShow)
+            self._existingMovie = State(initialValue: existing)
+        } else {
+            self._existingMovie = State(initialValue: nil)
         }
     }
     
@@ -62,6 +64,7 @@ struct AddMovieView: View {
                 }
                 .transition(.opacity)
                 .animation(.easeInOut, value: currentStep)
+                .animation(.easeInOut, value: existingMovie)
                 
                 Spacer()
             }
@@ -166,9 +169,22 @@ struct AddMovieView: View {
                 }
                 
                 if !searchResults.isEmpty {
-                    ResultsList(movies: searchResults) { movie in
+                    ResultsList(movies: searchResults, store: store) { movie in
                         selectedMovie = movie
                         searchText = movie.displayTitle
+                        
+                        // Check if this movie is already ranked
+                        let allMovies = store.movies + store.tvShows
+                        if let existingMovie = allMovies.first(where: { $0.tmdbId == movie.id }) {
+                            // Movie is already ranked - set up for re-ranking
+                            self.existingMovie = existingMovie
+                            self.sentiment = existingMovie.sentiment
+                            self.searchType = existingMovie.mediaType == .movie ? .movie : .tvShow
+                        } else {
+                            // New movie - clear any existing movie data
+                            self.existingMovie = nil
+                        }
+                        
                         withAnimation { currentStep = 2 }
                     }
                 }
@@ -336,6 +352,7 @@ struct AddMovieView: View {
 
 struct ResultsList: View {
     let movies: [AppModels.Movie]
+    let store: MovieStore
     let select: (AppModels.Movie) -> Void
     
     var body: some View {
@@ -363,6 +380,18 @@ struct ResultsList: View {
                                         .font(.caption)
                                         .foregroundColor(.gray)
                                 }
+                                
+                                // Show if already ranked
+                                if let existingMovie = getExistingMovie(for: movie) {
+                                    HStack {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                            .font(.caption)
+                                        Text("Already ranked: \(existingMovie.sentiment.rawValue)")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                    }
+                                }
                             }
                             
                             Spacer()
@@ -376,6 +405,11 @@ struct ResultsList: View {
             }
             .padding(.horizontal, UI.hPad)
         }
+    }
+    
+    private func getExistingMovie(for movie: AppModels.Movie) -> Movie? {
+        let allMovies = store.movies + store.tvShows
+        return allMovies.first { $0.tmdbId == movie.id }
     }
 }
 

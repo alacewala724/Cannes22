@@ -336,22 +336,6 @@ struct TMDBMovieDetailView: View {
                             Circle()
                                 .stroke(currentMovie.sentiment.color, lineWidth: 2)
                         )
-                    
-                    // Re-rank button
-                    Button(action: {
-                        showingReRankSheet = true
-                    }) {
-                        Text("Re-rank")
-                            .font(.caption)
-                            .foregroundColor(.accentColor)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.accentColor, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(PlainButtonStyle())
                 }
                 
                 // Community Rating
@@ -383,6 +367,26 @@ struct TMDBMovieDetailView: View {
                 }
             }
             .padding(.top, 8)
+            
+            // Re-rank button - more prominent placement
+            Button(action: {
+                showingReRankSheet = true
+            }) {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.headline)
+                    Text("Re-rank Movie")
+                        .font(.headline)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.accentColor)
+                .cornerRadius(12)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.top, 16)
             
             // Friends' Ratings
             if !friendsRatings.isEmpty {
