@@ -118,6 +118,7 @@ struct GlobalRatingRow: View {
 struct GlobalRatingDetailView: View {
     let rating: GlobalRating
     @ObservedObject var store: MovieStore
+    let notificationSenderRating: FriendRating? // Optional notification sender's rating
     @Environment(\.dismiss) private var dismiss
     @State private var movieDetails: AppModels.Movie?
     @State private var isLoading = true
@@ -274,7 +275,16 @@ struct GlobalRatingDetailView: View {
         
         Task {
             do {
-                let ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+                var ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+                
+                // Add notification sender's rating if provided and not already included
+                if let notificationRating = notificationSenderRating {
+                    let isAlreadyIncluded = ratings.contains { $0.friend.uid == notificationRating.friend.uid }
+                    if !isAlreadyIncluded {
+                        ratings.append(notificationRating)
+                    }
+                }
+                
                 print("GlobalRatingDetailView: Successfully loaded \(ratings.count) friend ratings")
                 await MainActor.run {
                     friendsRatings = ratings

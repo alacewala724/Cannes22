@@ -220,8 +220,22 @@ struct ActivityRowView: View {
                     numberOfRatings: 1, // We don't have this info from activity, default to 1
                     tmdbId: tmdbId
                 )
+                
+                // Create a FriendRating object from the activity data for the notification sender
+                let notificationSenderRating = FriendRating(
+                    friend: UserProfile(
+                        uid: activity.userId,
+                        username: activity.username,
+                        email: "", // We don't have email from activity
+                        bio: "", // We don't have bio from activity
+                        profileImageUrl: nil // We don't have profile image from activity
+                    ),
+                    score: activity.score ?? 0.0,
+                    title: activity.movieTitle
+                )
+                
                 NavigationView {
-                    GlobalRatingDetailView(rating: globalRating, store: store)
+                    GlobalRatingDetailView(rating: globalRating, store: store, notificationSenderRating: notificationSenderRating)
                 }
             }
         }

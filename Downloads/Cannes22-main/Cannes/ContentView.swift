@@ -72,7 +72,7 @@ struct ContentView: View {
         }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
-                GlobalRatingDetailView(rating: rating, store: store)
+                GlobalRatingDetailView(rating: rating, store: store, notificationSenderRating: nil)
             }
         }
         .alert("Error", isPresented: $store.showError) {
