@@ -677,16 +677,18 @@ struct GlobalRatingDetailView: View {
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
-                    
-                    print("GlobalRatingDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                    .onAppear {
+                        print("GlobalRatingDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                    }
                 } else {
                     // Debug: Show when followings' ratings section is not shown
                     Text("Debug: No followings' ratings to show")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.horizontal)
-                    
-                    print("GlobalRatingDetailView: Followings' ratings section is empty")
+                        .onAppear {
+                            print("GlobalRatingDetailView: Followings' ratings section is empty")
+                        }
                 }
                 
                 // Runtime

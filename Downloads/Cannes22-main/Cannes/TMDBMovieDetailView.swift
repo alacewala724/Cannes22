@@ -359,16 +359,18 @@ struct TMDBMovieDetailView: View {
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
-                    
-                print("TMDBMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                .onAppear {
+                    print("TMDBMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                }
             } else {
                 // Debug: Show when followings' ratings section is not shown
                 Text("Debug: No followings' ratings to show")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.horizontal)
-                    
-                print("TMDBMovieDetailView: Followings' ratings section is empty")
+                    .onAppear {
+                        print("TMDBMovieDetailView: Followings' ratings section is empty")
+                    }
             }
             
             // Genres
