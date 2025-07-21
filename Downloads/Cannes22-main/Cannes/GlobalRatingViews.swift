@@ -159,7 +159,7 @@ struct GlobalRatingDetailView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
                 
-                if isLoading {
+                if isLoading || isLoadingFriendsRatings || isLoadingTakes {
                     loadingView
                 } else if let error = errorMessage {
                     errorView(message: error)
@@ -516,6 +516,7 @@ struct GlobalRatingDetailView: View {
                     .padding()
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal)
                 } else {
                     // User hasn't rated this movie - show "Rank This" button
@@ -681,6 +682,22 @@ struct GlobalRatingDetailView: View {
                     }
                     .onAppear {
                         print("GlobalRatingDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                    }
+                } else if isLoadingFriendsRatings {
+                    // Show loading state for friends ratings
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Followings' Ratings")
+                            .font(.headline)
+                            .padding(.top, 8)
+                        
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Loading followings' ratings...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
                     }
                 } else {
                     // No followings' ratings to show

@@ -65,14 +65,14 @@ struct TMDBMovieDetailView: View {
                 VStack(spacing: 20) {
                         // Poster area - always reserve this space
                     Group {
-                        if isLoading {
+                        if isLoading || isLoadingFriendsRatings || isLoadingTakes {
                             // Loading skeleton
                             Rectangle()
                                 .fill(Color(.systemGray5))
                                 .frame(height: 400)
                                 .cornerRadius(12)
                                 .opacity(0.3)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                         } else if let details = movieDetails {
                             // Show poster or placeholder
                             if let posterPath = details.poster_path {
@@ -137,12 +137,12 @@ struct TMDBMovieDetailView: View {
                                 .frame(height: 400)
                                 .cornerRadius(12)
                                 .opacity(0.3)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                         }
                     }
                     
                     // Content area
-                    if isLoading {
+                    if isLoading || isLoadingFriendsRatings || isLoadingTakes {
                         // Content skeleton
                         VStack(alignment: .leading, spacing: 16) {
                             Rectangle()
@@ -150,7 +150,7 @@ struct TMDBMovieDetailView: View {
                                 .frame(height: 32)
                                 .cornerRadius(8)
                                 .opacity(0.3)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                             
                             HStack(spacing: 20) {
                                 Rectangle()
@@ -158,13 +158,13 @@ struct TMDBMovieDetailView: View {
                                     .frame(width: 60, height: 60)
                                     .clipShape(Circle())
                                     .opacity(0.3)
-                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                                 Rectangle()
                                     .fill(Color(.systemGray5))
                                     .frame(width: 60, height: 60)
                                     .clipShape(Circle())
                                     .opacity(0.3)
-                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                             }
                             
                             Rectangle()
@@ -172,14 +172,14 @@ struct TMDBMovieDetailView: View {
                                 .frame(height: 24)
                                 .cornerRadius(8)
                                 .opacity(0.3)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading || isLoadingFriendsRatings || isLoadingTakes)
                         }
                         .padding(.horizontal)
                     } else if let error = errorMessage {
                         // Error state
                         errorView(message: error)
                     } else if let details = movieDetails {
-                        // Actual content
+                        // Actual content - only show when everything is loaded
                         actualContentView(details: details)
                     }
                 }
@@ -426,6 +426,7 @@ struct TMDBMovieDetailView: View {
                 .padding()
                 .background(Color(.systemGray6))
                 .cornerRadius(12)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal)
             }
             
@@ -472,6 +473,22 @@ struct TMDBMovieDetailView: View {
                 }
                 .onAppear {
                     print("TMDBMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                }
+            } else if isLoadingFriendsRatings {
+                // Show loading state for friends ratings
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Followings' Ratings")
+                        .font(.headline)
+                        .padding(.top, 8)
+                    
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading followings' ratings...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 }
             } else {
                 // No followings' ratings to show
