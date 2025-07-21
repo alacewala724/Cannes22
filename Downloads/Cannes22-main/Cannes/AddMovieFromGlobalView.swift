@@ -124,7 +124,7 @@ struct AddMovieFromGlobalView: View {
     private var comparisonStep: some View {
         VStack {
             if let movie = newMovie {
-                ComparisonView(store: store, newMovie: movie) {
+                ComparisonView(store: store, newMovie: movie, existingMovie: nil) {
                     onComplete()
                 }
             } else {
