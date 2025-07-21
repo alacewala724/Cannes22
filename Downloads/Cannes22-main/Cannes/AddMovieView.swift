@@ -429,7 +429,14 @@ struct ComparisonView: View {
 
     private var sortedMovies: [Movie] { 
         let targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
-        return targetList.filter { $0.sentiment == newMovie.sentiment }
+        let sameSentimentMovies = targetList.filter { $0.sentiment == newMovie.sentiment }
+        
+        // If we're re-ranking, exclude the existing movie from comparisons
+        if let existing = existingMovie {
+            return sameSentimentMovies.filter { $0.id != existing.id }
+        } else {
+            return sameSentimentMovies
+        }
     }
 
     var body: some View {
@@ -520,7 +527,7 @@ struct ComparisonView: View {
                 return 
             }
             
-            // Get the appropriate list based on media type
+            // Get the appropriate list based on media type (after deletion if re-ranking)
             var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
             
             // Find the start and end indices for this sentiment section
@@ -535,6 +542,8 @@ struct ComparisonView: View {
             // Calculate the actual insertion index within the section
             let sectionLength = sectionEnd - sectionStart
             let insertionIndex = sectionStart + min(rank - 1, sectionLength)
+            
+            print("insertMovie: Inserting '\(newMovie.title)' at rank \(rank), section \(sectionStart)-\(sectionEnd), index \(insertionIndex)")
             
             // Insert the movie with its original score first
             targetList.insert(newMovie, at: insertionIndex)
