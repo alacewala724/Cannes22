@@ -1430,12 +1430,6 @@ extension FirestoreService {
         
         let currentUserId = currentUser.uid
         
-        // Get current user's friends
-        let friendsSnapshot = try await db.collection("users")
-            .document(currentUserId)
-            .collection("friends")
-            .getDocuments()
-        
         // Get users that the current user follows
         let followingSnapshot = try await db.collection("users")
             .document(currentUserId)
@@ -1443,45 +1437,10 @@ extension FirestoreService {
             .getDocuments()
         
         var allRatings: [FriendRating] = []
-        var processedUserIds = Set<String>()
         
-        // Process friends' ratings
-        for friendDoc in friendsSnapshot.documents {
-            let friendUserId = friendDoc.documentID
-            processedUserIds.insert(friendUserId)
-            
-            // Get friend's rating for this movie
-            let movieSnapshot = try await db.collection("users")
-                .document(friendUserId)
-                .collection("rankings")
-                .whereField("tmdbId", isEqualTo: tmdbId)
-                .getDocuments()
-            
-            if let movieDoc = movieSnapshot.documents.first {
-                let data = movieDoc.data()
-                let score = data["score"] as? Double ?? 0.0
-                let title = data["title"] as? String ?? ""
-                
-                // Get friend's profile
-                if let friendProfile = try await getUserProfile(userId: friendUserId) {
-                    let friendRating = FriendRating(
-                        friend: friendProfile,
-                        score: score,
-                        title: title
-                    )
-                    allRatings.append(friendRating)
-                }
-            }
-        }
-        
-        // Process following ratings (excluding those already processed as friends)
+        // Process following ratings
         for followingDoc in followingSnapshot.documents {
             let followedUserId = followingDoc.documentID
-            
-            // Skip if already processed as a friend
-            if processedUserIds.contains(followedUserId) {
-                continue
-            }
             
             // Get followed user's rating for this movie
             let movieSnapshot = try await db.collection("users")
