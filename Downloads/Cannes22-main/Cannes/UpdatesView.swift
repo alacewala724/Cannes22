@@ -211,15 +211,18 @@ struct ActivityRowView: View {
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .sheet(isPresented: $showingMovieDetail) {
             if let tmdbId = activity.tmdbId {
-                // Create a temporary movie object for the detail view
-                let tempMovie = Movie(
+                // Create a GlobalRating object from the activity data
+                let globalRating = GlobalRating(
+                    id: tmdbId.description,
                     title: activity.movieTitle,
-                    sentiment: activity.sentiment ?? .likedIt,
-                    tmdbId: tmdbId,
                     mediaType: activity.mediaType,
-                    score: activity.score ?? 5.0
+                    averageRating: activity.score ?? 0.0,
+                    numberOfRatings: 1, // We don't have this info from activity, default to 1
+                    tmdbId: tmdbId
                 )
-                TMDBMovieDetailView(movie: tempMovie, store: store)
+                NavigationView {
+                    GlobalRatingDetailView(rating: globalRating, store: store)
+                }
             }
         }
         .sheet(isPresented: $showingUserProfile) {
