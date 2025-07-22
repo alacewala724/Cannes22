@@ -1182,46 +1182,63 @@ struct AddTakeSheet: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 20) {
+                // Header Section
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Add Your Take")
-                        .font(.headline)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     
                     Text(movie.title)
-                        .font(.title2) // Make movie title slightly larger
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary) // Ensure good contrast
+                        .font(.title3)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
-                .padding(.top)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
                 
-                TextEditor(text: $takeText) // Changed to TextEditor
-                    .frame(minHeight: 100, maxHeight: 200) // Set a min and max height
-                    .padding(8)
-                    .background(Color(.systemGray6)) // A subtle background for the editor
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
-                    )
-                    .foregroundColor(.primary)
-                    .autocapitalization(.sentences)
-                    .disableAutocorrection(false)
+                // Text Editor Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Your Take")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    TextEditor(text: $takeText)
+                        .frame(minHeight: 120, maxHeight: 200)
+                        .padding(12)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                        .foregroundColor(.primary)
+                        .autocapitalization(.sentences)
+                        .disableAutocorrection(false)
+                }
                 
+                // Character Counter
                 HStack {
                     Spacer()
                     Text("\(takeText.count)/\(maxTakeCharacters)")
-                        .font(.caption)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                         .foregroundColor(takeText.count > maxTakeCharacters ? .red : .secondary)
                 }
-                .padding(.horizontal)
                 
                 Spacer()
             }
-            .padding()
+            .padding(.horizontal, 20)
             .navigationBarItems(
                 leading: Button("Cancel") {
                     dismiss()
-                },
+                }
+                .font(.headline)
+                .foregroundColor(.secondary),
                 trailing: Button("Post") {
                     Task {
                         await onAdd()
@@ -1230,10 +1247,13 @@ struct AddTakeSheet: View {
                         }
                     }
                 }
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters || isAdding ? .secondary : .accentColor)
                 .disabled(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters || isAdding)
             )
-            .navigationTitle("") // Hide default navigation title
-            .navigationBarTitleDisplayMode(.inline) // Ensure title is centered
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -1260,55 +1280,75 @@ struct EditTakeSheet: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 20) {
+                // Header Section
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Edit Your Take")
-                        .font(.headline)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     
                     Text(movie.title)
-                        .font(.title2) // Make movie title slightly larger
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary) // Ensure good contrast
+                        .font(.title3)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
-                .padding(.top)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
                 
-                TextEditor(text: $editedText) // Changed to TextEditor
-                    .frame(minHeight: 100, maxHeight: 200) // Set a min and max height
-                    .padding(8)
-                    .background(Color(.systemGray6)) // A subtle background for the editor
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
-                    )
-                    .foregroundColor(.primary)
-                    .autocapitalization(.sentences)
-                    .disableAutocorrection(false)
+                // Text Editor Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Your Take")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    TextEditor(text: $editedText)
+                        .frame(minHeight: 120, maxHeight: 200)
+                        .padding(12)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                        .foregroundColor(.primary)
+                        .autocapitalization(.sentences)
+                        .disableAutocorrection(false)
+                }
                 
+                // Character Counter
                 HStack {
                     Spacer()
                     Text("\(editedText.count)/\(maxTakeCharacters)")
-                        .font(.caption)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                         .foregroundColor(editedText.count > maxTakeCharacters ? .red : .secondary)
                 }
-                .padding(.horizontal)
                 
                 Spacer()
             }
-            .padding()
+            .padding(.horizontal, 20)
             .navigationBarItems(
                 leading: Button("Cancel") {
                     dismiss()
-                },
+                }
+                .font(.headline)
+                .foregroundColor(.secondary),
                 trailing: Button("Save") {
                     Task {
                         await saveTake()
                     }
                 }
-                .disabled(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving) // Disable if empty, over limit, or saving
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving ? .secondary : .accentColor)
+                .disabled(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving)
             )
-            .navigationTitle("") // Hide default navigation title
-            .navigationBarTitleDisplayMode(.inline) // Ensure title is centered
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
     
