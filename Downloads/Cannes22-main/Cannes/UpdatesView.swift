@@ -57,8 +57,7 @@ struct UpdatesView: View {
                 .foregroundColor(.secondary)
             
             Text("No Updates Yet")
-                .font(.title2)
-                .fontWeight(.medium)
+                .font(DS.playfairDisplay(.title2, weight: .medium))
             
             Text("Follow friends to see their movie rankings and comments here")
                 .font(.subheadline)

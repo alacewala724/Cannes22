@@ -395,8 +395,7 @@ struct GlobalRatingDetailView: View {
             // Community Rating Display
             VStack(spacing: 4) {
                 Text("Community Rating")
-                    .font(.title2)
-                    .fontWeight(.medium)
+                    .font(DS.playfairDisplay(.title2, weight: .medium))
                 
                 Text(String(format: "%.1f", rating.averageRating))
                     .font(.largeTitle)
@@ -419,8 +418,7 @@ struct GlobalRatingDetailView: View {
             
             VStack(alignment: .leading, spacing: 16) {
                 Text(rating.title)
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(DS.playfairDisplay(.title, weight: .bold))
                     .multilineTextAlignment(.center)
                 
                 Text(rating.mediaType.rawValue)
@@ -463,7 +461,7 @@ struct GlobalRatingDetailView: View {
                     // User has rated this movie - show comparison
                     VStack(spacing: 8) {
                         Text("Community vs Your Rating")
-                            .font(.headline)
+                            .font(DS.playfairDisplay(.headline, weight: .medium))
                             .foregroundColor(.secondary)
                         
                         HStack(spacing: 20) {
@@ -617,8 +615,7 @@ struct GlobalRatingDetailView: View {
                 // Title and Release Date
                 VStack(alignment: .leading, spacing: 8) {
                     Text(details.displayTitle)
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(DS.playfairDisplay(.title, weight: .bold))
                     
                     if let releaseDate = details.displayDate {
                         Text("Released: \(formatDate(releaseDate))")
@@ -630,7 +627,7 @@ struct GlobalRatingDetailView: View {
                 // Community Rating Display (prominent placement)
                 VStack(spacing: 4) {
                     Text("Community Rating")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .foregroundColor(.secondary)
                     
                     Text(String(format: "%.1f", rating.averageRating))
@@ -729,7 +726,7 @@ struct GlobalRatingDetailView: View {
                 // Overview
                 if let overview = details.overview, !overview.isEmpty {
                     Text("Overview")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                     Text(overview)
                         .font(.body)
@@ -740,7 +737,7 @@ struct GlobalRatingDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Takes")
-                            .font(.headline)
+                            .font(DS.playfairDisplay(.headline, weight: .medium))
                             .padding(.top, 8)
                         
                         Spacer()

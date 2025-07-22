@@ -201,8 +201,7 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                     
                     Text("No community ratings yet")
-                        .font(.title2)
-                        .fontWeight(.medium)
+                        .font(DS.playfairDisplay(.title2, weight: .medium))
                     
                     Text("Community ratings will appear here once people start ranking movies")
                         .font(.subheadline)
@@ -252,8 +251,7 @@ struct ContentView: View {
                 .foregroundColor(.secondary)
             
             Text("No \(store.selectedMediaType.rawValue)s yet")
-                .font(.title2)
-                .fontWeight(.medium)
+                .font(DS.playfairDisplay(.title2, weight: .medium))
             
             Text("Tap the + button to add your first \(store.selectedMediaType.rawValue.lowercased())")
                 .font(.subheadline)

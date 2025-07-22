@@ -18,8 +18,7 @@ struct TakesView: View {
                 // Header
                 VStack(spacing: 8) {
                     Text("Takes")
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                        .font(DS.playfairDisplay(.title2, weight: .semibold))
                     
                     Text(movie.title)
                         .font(.subheadline)
@@ -69,8 +68,7 @@ struct TakesView: View {
                 .foregroundColor(.secondary)
             
             Text("No takes yet")
-                .font(.title2)
-                .fontWeight(.medium)
+                .font(DS.playfairDisplay(.title2, weight: .medium))
             
             Text("Be the first to share your take on this movie!")
                 .font(.subheadline)

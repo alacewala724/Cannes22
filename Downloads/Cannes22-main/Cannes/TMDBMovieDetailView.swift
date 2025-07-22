@@ -386,8 +386,7 @@ struct TMDBMovieDetailView: View {
             // Title and Release Date
             VStack(alignment: .leading, spacing: 8) {
                 Text(details.displayTitle)
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(DS.playfairDisplay(.title, weight: .bold))
                 
                 if let releaseDate = details.displayDate {
                     Text("Released: \(formatDate(releaseDate))")
@@ -400,7 +399,7 @@ struct TMDBMovieDetailView: View {
             if let personalRating = getCurrentUserRating() {
                 VStack(spacing: 4) {
                     Text("Your Rating")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .foregroundColor(.secondary)
                     
                     Text(String(format: "%.1f", personalRating.score))
@@ -435,7 +434,7 @@ struct TMDBMovieDetailView: View {
             if let personalRating = getCurrentUserRating() {
                 VStack(spacing: 8) {
                     Text("Community vs Your Rating")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .foregroundColor(.secondary)
                     
                     HStack(spacing: 20) {
@@ -517,7 +516,7 @@ struct TMDBMovieDetailView: View {
             if !friendsRatings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Followings' Ratings")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                     
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
@@ -579,7 +578,7 @@ struct TMDBMovieDetailView: View {
             if let genres = details.genres, !genres.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Genres")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -619,7 +618,7 @@ struct TMDBMovieDetailView: View {
             // Overview
             if let overview = details.overview, !overview.isEmpty {
                 Text("Overview")
-                    .font(.headline)
+                    .font(DS.playfairDisplay(.headline, weight: .medium))
                     .padding(.top, 8)
                 Text(overview)
                     .font(.body)
@@ -630,7 +629,7 @@ struct TMDBMovieDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Takes")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                     
                     Spacer()
@@ -713,7 +712,7 @@ struct TMDBMovieDetailView: View {
             if !seasons.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Seasons")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                     
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -747,7 +746,7 @@ struct TMDBMovieDetailView: View {
             if let _ = selectedSeason, !episodes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Episodes")
-                        .font(.headline)
+                        .font(DS.playfairDisplay(.headline, weight: .medium))
                         .padding(.top, 8)
                     
                     ForEach(episodes) { episode in
@@ -1186,13 +1185,11 @@ struct AddTakeSheet: View {
                 // Header Section
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Add Your Take")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                        .font(DS.playfairDisplay(.title2, weight: .bold))
                         .foregroundColor(.primary)
                     
                     Text(movie.title)
-                        .font(.title3)
-                        .fontWeight(.medium)
+                        .font(DS.playfairDisplay(.title3, weight: .medium))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -1203,8 +1200,7 @@ struct AddTakeSheet: View {
                 // Text Editor Section
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Your Take")
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(DS.playfairDisplay(.headline, weight: .semibold))
                         .foregroundColor(.primary)
                     
                     TextEditor(text: $takeText)
@@ -1284,13 +1280,11 @@ struct EditTakeSheet: View {
                 // Header Section
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Edit Your Take")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                        .font(DS.playfairDisplay(.title2, weight: .bold))
                         .foregroundColor(.primary)
                     
                     Text(movie.title)
-                        .font(.title3)
-                        .fontWeight(.medium)
+                        .font(DS.playfairDisplay(.title3, weight: .medium))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -1301,8 +1295,7 @@ struct EditTakeSheet: View {
                 // Text Editor Section
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Your Take")
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(DS.playfairDisplay(.headline, weight: .semibold))
                         .foregroundColor(.primary)
                     
                     TextEditor(text: $editedText)

@@ -14,6 +14,49 @@ enum DS {
                      weight: Font.Weight = .regular) -> Font {
         .system(style, design: .rounded).weight(weight)
     }
+    
+    // Playfair Display for headers and titles
+    static func playfairDisplay(_ style: Font.TextStyle,
+                               weight: Font.Weight = .regular) -> Font {
+        switch weight {
+        case .bold:
+            return .custom("PlayfairDisplay-Bold", size: fontSize(for: style))
+        case .medium:
+            return .custom("PlayfairDisplay-Medium", size: fontSize(for: style))
+        default:
+            return .custom("PlayfairDisplay-Regular", size: fontSize(for: style))
+        }
+    }
+    
+    // Helper function to get font size for different text styles
+    private static func fontSize(for style: Font.TextStyle) -> CGFloat {
+        switch style {
+        case .largeTitle:
+            return 34
+        case .title:
+            return 28
+        case .title2:
+            return 22
+        case .title3:
+            return 20
+        case .headline:
+            return 17
+        case .body:
+            return 17
+        case .callout:
+            return 16
+        case .subheadline:
+            return 15
+        case .footnote:
+            return 13
+        case .caption:
+            return 12
+        case .caption2:
+            return 11
+        @unknown default:
+            return 17
+        }
+    }
 
     // Colours (add Asset-catalog "light + dark" variants for these)
     static let tintGood     = Color("SentimentGood")     // green variants
