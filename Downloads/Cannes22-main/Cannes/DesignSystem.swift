@@ -15,11 +15,17 @@ enum DS {
         .system(style, design: .rounded).weight(weight)
     }
     
-    // Elegant serif fonts for headers and titles
+    // Playfair Display for headers and titles
     static func playfairDisplay(_ style: Font.TextStyle,
                                weight: Font.Weight = .regular) -> Font {
-        // Use Apple's built-in serif fonts for elegant appearance
-        return .system(style, design: .serif).weight(weight)
+        switch weight {
+        case .bold:
+            return .custom("PlayfairDisplay-Bold", size: fontSize(for: style))
+        case .medium:
+            return .custom("PlayfairDisplay-Medium", size: fontSize(for: style))
+        default:
+            return .custom("PlayfairDisplay-Regular", size: fontSize(for: style))
+        }
     }
     
     // Helper function to get font size for different text styles
