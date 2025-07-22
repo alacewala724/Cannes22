@@ -140,6 +140,10 @@ struct GlobalRatingDetailView: View {
     @State private var showingDeleteAlert = false
     @State private var takeToDelete: Take?
     
+    // Friends' Ratings state variables
+    @State private var selectedFriendUserId: String?
+    @State private var showingFriendProfile = false
+    
     @EnvironmentObject var authService: AuthenticationService
     
     private let tmdbService = TMDBService()
@@ -246,6 +250,11 @@ struct GlobalRatingDetailView: View {
             }
         } message: {
             Text("Are you sure you want to delete this take?")
+        }
+        .sheet(isPresented: $showingFriendProfile) {
+            if let userId = selectedFriendUserId {
+                UserProfileFromIdView(userId: userId, store: store)
+            }
         }
         .sheet(isPresented: $showingReRankSheet) {
             if let tmdbId = rating.tmdbId,
@@ -654,26 +663,32 @@ struct GlobalRatingDetailView: View {
                         
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                             ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
-                                VStack(spacing: 4) {
-                                    Text("@\(friendRating.friend.username)")
-                                        .font(.caption)
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                    
-                                    Text(String(format: "%.1f", friendRating.score))
-                                        .font(.subheadline)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(sentimentColor(for: friendRating.score))
-                                        .frame(width: 50, height: 50)
-                                        .background(
-                                            Circle()
-                                                .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
-                                        )
+                                Button(action: {
+                                    selectedFriendUserId = friendRating.friend.uid
+                                    showingFriendProfile = true
+                                }) {
+                                    VStack(spacing: 4) {
+                                        Text("@\(friendRating.friend.username)")
+                                            .font(.caption)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                        
+                                        Text(String(format: "%.1f", friendRating.score))
+                                            .font(.subheadline)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(sentimentColor(for: friendRating.score))
+                                            .frame(width: 50, height: 50)
+                                            .background(
+                                                Circle()
+                                                    .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
+                                            )
+                                    }
+                                    .onAppear {
+                                        print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                    }
                                 }
-                                .onAppear {
-                                    print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
-                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                         .padding(.horizontal, 4)
