@@ -474,7 +474,7 @@ struct FriendMovieRow: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
-                TMDBMovieDetailView(movie: movie, store: store)
+                UnifiedMovieDetailView(movie: movie, store: store)
             }
         }
     }

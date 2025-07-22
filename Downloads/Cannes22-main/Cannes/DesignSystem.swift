@@ -18,32 +18,17 @@ enum DS {
     // Playfair Display for headers and titles
     static func playfairDisplay(_ style: Font.TextStyle,
                                weight: Font.Weight = .regular) -> Font {
-        // Debug: Check if fonts are available
-        let availableFonts = UIFont.familyNames
-        let hasPlayfairDisplay = availableFonts.contains("Playfair Display")
-        
-        #if DEBUG
-        print("Available font families: \(availableFonts)")
-        print("Has Playfair Display: \(hasPlayfairDisplay)")
-        if hasPlayfairDisplay {
-            print("Playfair Display fonts: \(UIFont.fontNames(forFamilyName: "Playfair Display"))")
+        let fontName: String
+        switch weight {
+        case .bold:
+            fontName = "PlayfairDisplay-Bold"
+        case .medium, .semibold:
+            fontName = "PlayfairDisplay-Medium"
+        default:
+            fontName = "PlayfairDisplay-Regular"
         }
-        #endif
         
-        if hasPlayfairDisplay {
-            switch weight {
-            case .bold:
-                return .custom("PlayfairDisplay-Bold", size: fontSize(for: style))
-            case .medium:
-                return .custom("PlayfairDisplay-Medium", size: fontSize(for: style))
-            default:
-                return .custom("PlayfairDisplay-Regular", size: fontSize(for: style))
-            }
-        } else {
-            // Fallback to system serif font
-            print("Playfair Display not available, using system serif font")
-            return .system(style, design: .serif).weight(weight)
-        }
+        return .custom(fontName, size: fontSize(for: style))
     }
     
     // Helper function to get font size for different text styles

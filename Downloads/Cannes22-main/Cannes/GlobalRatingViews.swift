@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import FirebaseAuth
 
 // MARK: - Debug Helper
 private func debugDifference(userScore: Double, averageRating: Double, difference: Double) {
@@ -114,9 +115,15 @@ struct GlobalRatingRow: View {
     }
 }
 
-// MARK: - Global Rating Detail View
-struct GlobalRatingDetailView: View {
-    let rating: GlobalRating
+// MARK: - Unified Movie Detail View
+struct UnifiedMovieDetailView: View {
+    // Input data - can be any combination
+    let tmdbId: Int?
+    let movieTitle: String?
+    let mediaType: AppModels.MediaType?
+    let initialRating: GlobalRating?
+    let initialMovie: Movie?
+    
     @ObservedObject var store: MovieStore
     let notificationSenderRating: FriendRating? // Optional notification sender's rating
     @Environment(\.dismiss) private var dismiss
@@ -129,6 +136,10 @@ struct GlobalRatingDetailView: View {
     @State private var isLoadingFriendsRatings = false
     @State private var showingTakes = false
     @State private var showingReRankSheet = false
+    
+    // Community rating data
+    @State private var communityRating: Double?
+    @State private var numberOfRatings: Int = 0
     
     // Takes state variables
     @State private var takes: [Take] = []
@@ -149,6 +160,118 @@ struct GlobalRatingDetailView: View {
     private let tmdbService = TMDBService()
     private let firestoreService = FirestoreService()
     
+    // Computed property to check if all data is loaded
+    private var isAllDataLoaded: Bool {
+        !isLoading && 
+        !isLoadingFriendsRatings && 
+        !isLoadingTakes &&
+        (movieDetails != nil || errorMessage != nil)
+    }
+    
+    // Computed properties to get unified data
+    private var displayTitle: String {
+        if let title = movieTitle {
+            return title
+        } else if let rating = initialRating {
+            return rating.title
+        } else if let movie = initialMovie {
+            return movie.title
+        } else if let details = movieDetails {
+            return details.displayTitle
+        }
+        return "Unknown Title"
+    }
+    
+    private var displayTmdbId: Int? {
+        if let id = tmdbId {
+            return id
+        } else if let rating = initialRating {
+            return rating.tmdbId
+        } else if let movie = initialMovie {
+            return movie.tmdbId
+        }
+        return nil
+    }
+    
+    private var displayMediaType: AppModels.MediaType {
+        if let type = mediaType {
+            return type
+        } else if let rating = initialRating {
+            return rating.mediaType
+        } else if let movie = initialMovie {
+            return movie.mediaType
+        }
+        return .movie
+    }
+    
+    private var displayAverageRating: Double? {
+        if let rating = initialRating {
+            return rating.averageRating
+        } else if let communityRating = communityRating {
+            return communityRating
+        }
+        return nil
+    }
+    
+    private var displayNumberOfRatings: Int {
+        if let rating = initialRating {
+            return rating.numberOfRatings
+        } else {
+            return numberOfRatings
+        }
+    }
+    
+    private var displaySentimentColor: Color {
+        if let rating = initialRating {
+            return rating.sentimentColor
+        } else if let averageRating = displayAverageRating {
+            switch averageRating {
+            case 6.9...10.0:
+                return .green
+            case 4.0..<6.9:
+                return .gray
+            case 0.0..<4.0:
+                return .red
+            default:
+                return .gray
+            }
+        }
+        return .gray
+    }
+    
+    // Initialize with TMDB ID (most flexible)
+    init(tmdbId: Int, store: MovieStore, notificationSenderRating: FriendRating? = nil) {
+        self.tmdbId = tmdbId
+        self.movieTitle = nil
+        self.mediaType = nil
+        self.initialRating = nil
+        self.initialMovie = nil
+        self.store = store
+        self.notificationSenderRating = notificationSenderRating
+    }
+    
+    // Initialize with GlobalRating (for global view)
+    init(rating: GlobalRating, store: MovieStore, notificationSenderRating: FriendRating? = nil) {
+        self.tmdbId = rating.tmdbId
+        self.movieTitle = rating.title
+        self.mediaType = rating.mediaType
+        self.initialRating = rating
+        self.initialMovie = nil
+        self.store = store
+        self.notificationSenderRating = notificationSenderRating
+    }
+    
+    // Initialize with Movie (for personal view)
+    init(movie: Movie, store: MovieStore) {
+        self.tmdbId = movie.tmdbId
+        self.movieTitle = movie.title
+        self.mediaType = movie.mediaType
+        self.initialRating = nil
+        self.initialMovie = movie
+        self.store = store
+        self.notificationSenderRating = nil
+    }
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -156,12 +279,12 @@ struct GlobalRatingDetailView: View {
                 HStack {
                     Spacer()
                     RoundedRectangle(cornerRadius: 2.5)
-                        .fill(Color.secondary)
+                        .fill(Color.secondary.opacity(0.3))
                         .frame(width: 36, height: 5)
                     Spacer()
                 }
-                .padding(.top, 8)
-                .padding(.bottom, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
                 
                 if isLoading || isLoadingFriendsRatings || isLoadingTakes {
                     loadingView
@@ -174,17 +297,15 @@ struct GlobalRatingDetailView: View {
                     fallbackView
                 }
             }
+            .padding(.horizontal, 18)
         }
         .navigationBarHidden(true)
-        .task {
-            loadMovieDetails()
-        }
+        .background(Color(.systemGroupedBackground))
         .onAppear {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
             }
-            loadFriendsRatings()
-            loadTakes()
+            loadAllData()
         }
         .sheet(isPresented: $showingAddMovie) {
             if let movieDetails = movieDetails {
@@ -208,16 +329,18 @@ struct GlobalRatingDetailView: View {
             AddTakeSheet(
                 movie: Movie(
                     id: UUID(),
-                    title: rating.title,
+                    title: displayTitle,
                     sentiment: .likedIt,
-                    tmdbId: rating.tmdbId,
-                    mediaType: rating.mediaType,
-                    score: rating.averageRating
+                    tmdbId: displayTmdbId,
+                    mediaType: displayMediaType,
+                    score: displayAverageRating ?? 0.0
                 ),
                 takeText: $newTakeText,
                 isAdding: $isAddingTake,
                 onAdd: {
-                    await addTake()
+                    Task {
+                        await addTake()
+                    }
                 }
             )
         }
@@ -226,11 +349,11 @@ struct GlobalRatingDetailView: View {
                 take: take,
                 movie: Movie(
                     id: UUID(),
-                    title: rating.title,
+                    title: displayTitle,
                     sentiment: .likedIt,
-                    tmdbId: rating.tmdbId,
-                    mediaType: rating.mediaType,
-                    score: rating.averageRating
+                    tmdbId: displayTmdbId,
+                    mediaType: displayMediaType,
+                    score: displayAverageRating ?? 0.0
                 ),
                 onSave: {
                     Task {
@@ -257,15 +380,15 @@ struct GlobalRatingDetailView: View {
             }
         }
         .sheet(isPresented: $showingReRankSheet) {
-            if let tmdbId = rating.tmdbId,
+            if let tmdbId = displayTmdbId,
                let userScore = store.getUserPersonalScore(for: tmdbId) {
                 // Create a Movie object from the user's existing rating for re-ranking
                 let existingMovie = Movie(
                     id: UUID(), // This will be replaced during the re-ranking process
-                    title: rating.title,
+                    title: displayTitle,
                     sentiment: sentimentFromScore(userScore),
-                    tmdbId: tmdbId,
-                    mediaType: rating.mediaType,
+                    tmdbId: displayTmdbId,
+                    mediaType: displayMediaType,
                     score: userScore
                 )
                 AddMovieView(store: store, existingMovie: existingMovie)
@@ -273,509 +396,773 @@ struct GlobalRatingDetailView: View {
         }
     }
     
-    private func loadFriendsRatings() {
-        guard let tmdbId = rating.tmdbId else { 
-            print("GlobalRatingDetailView: No TMDB ID available for rating: \(rating.title)")
-            return 
-        }
-        
-        print("GlobalRatingDetailView: Starting to load friends ratings for movie: \(rating.title) (TMDB ID: \(tmdbId))")
-        print("GlobalRatingDetailView: Notification sender rating: \(notificationSenderRating?.friend.username ?? "none")")
+    private func loadAllData() {
+        // Set all loading states to true
+        isLoading = true
         isLoadingFriendsRatings = true
+        isLoadingTakes = true
         
         Task {
-            do {
-                var ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
-                print("GlobalRatingDetailView: Loaded \(ratings.count) friend ratings from Firestore")
-                for rating in ratings {
-                    print("GlobalRatingDetailView: Friend rating - \(rating.friend.username): \(rating.score)")
+            // Load all data concurrently
+            async let movieDetailsTask = loadMovieDetailsAsync()
+            async let friendsRatingsTask = loadFriendsRatingsAsync()
+            async let takesTask = loadTakesAsync()
+            async let communityRatingTask = loadCommunityRatingAsync()
+            
+            // Wait for all tasks to complete
+            let (movieDetailsResult, friendsRatingsResult, takesResult, communityRatingResult) = await (
+                movieDetailsTask,
+                friendsRatingsTask,
+                takesTask,
+                communityRatingTask
+            )
+            
+            await MainActor.run {
+                // Update movie details
+                if let details = movieDetailsResult {
+                    movieDetails = details
                 }
                 
-                // Add notification sender's rating if provided and not already included
-                if let notificationRating = notificationSenderRating {
-                    let isAlreadyIncluded = ratings.contains { $0.friend.uid == notificationRating.friend.uid }
-                    print("GlobalRatingDetailView: Notification sender \(notificationRating.friend.username) already included: \(isAlreadyIncluded)")
-                    if !isAlreadyIncluded {
-                        ratings.append(notificationRating)
-                        print("GlobalRatingDetailView: Added notification sender rating")
-                    }
+                // Update friends ratings
+                friendsRatings = friendsRatingsResult
+                
+                // Update takes
+                takes = takesResult
+                
+                // Update community rating
+                if let rating = communityRatingResult {
+                    communityRating = rating.averageRating
+                    numberOfRatings = rating.numberOfRatings
                 }
                 
-                print("GlobalRatingDetailView: Final count: \(ratings.count) friend ratings")
-                await MainActor.run {
-                    friendsRatings = ratings
-                    isLoadingFriendsRatings = false
-                }
-            } catch {
-                print("GlobalRatingDetailView: Error loading friends ratings: \(error)")
-                await MainActor.run {
-                    isLoadingFriendsRatings = false
-                }
+                // Set all loading states to false
+                isLoading = false
+                isLoadingFriendsRatings = false
+                isLoadingTakes = false
             }
         }
     }
     
-    private var loadingView: some View {
-        VStack(spacing: 20) {
-            // Poster placeholder
-            Rectangle()
-                .fill(Color(.systemGray5))
-                .frame(maxHeight: 400)
-                .cornerRadius(12)
-                .opacity(0.3)
-                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
-            
-            // Content placeholder
-            VStack(alignment: .leading, spacing: 16) {
-                // Title placeholder
-                Rectangle()
-                    .fill(Color(.systemGray5))
-                    .frame(height: 32)
-                    .cornerRadius(8)
-                    .opacity(0.3)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
-                
-                // Community rating placeholder
-                VStack(spacing: 4) {
-                    Rectangle()
-                        .fill(Color(.systemGray5))
-                        .frame(width: 80, height: 80)
-                        .clipShape(Circle())
-                        .opacity(0.3)
-                        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                
-                // User rating section placeholder
-                Rectangle()
-                    .fill(Color(.systemGray5))
-                    .frame(height: 60)
-                    .cornerRadius(12)
-                    .opacity(0.3)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
-                
-                // Additional content placeholders
-                Rectangle()
-                    .fill(Color(.systemGray5))
-                    .frame(height: 24)
-                    .cornerRadius(8)
-                    .opacity(0.3)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLoading)
-            }
-            .padding(.horizontal)
+    private func loadMovieDetailsAsync() async -> AppModels.Movie? {
+        // Get TMDB ID from either rating or movie
+        let tmdbId: Int?
+        let mediaType: AppModels.MediaType
+        
+        if let rating = initialRating {
+            tmdbId = rating.tmdbId
+            mediaType = rating.mediaType
+        } else if let movie = initialMovie {
+            tmdbId = movie.tmdbId
+            mediaType = movie.mediaType
+        } else {
+            // No TMDB ID available
+            return nil
         }
-        .padding(.vertical)
+        
+        guard let tmdbId = tmdbId else {
+            return nil
+        }
+        
+        do {
+            let tmdbMovie: TMDBMovie
+            if mediaType == .tv {
+                tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+            } else {
+                tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+            }
+            
+            return AppModels.Movie(
+                id: tmdbMovie.id,
+                title: tmdbMovie.title,
+                name: tmdbMovie.name,
+                overview: tmdbMovie.overview,
+                poster_path: tmdbMovie.posterPath,
+                release_date: tmdbMovie.releaseDate,
+                first_air_date: tmdbMovie.firstAirDate,
+                vote_average: tmdbMovie.voteAverage,
+                vote_count: tmdbMovie.voteCount,
+                genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
+                media_type: mediaType.rawValue,
+                runtime: tmdbMovie.runtime,
+                episode_run_time: tmdbMovie.episodeRunTime
+            )
+        } catch {
+            if (error as NSError).code != NSURLErrorCancelled {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+            return nil
+        }
+    }
+    
+    private func loadFriendsRatingsAsync() async -> [FriendRating] {
+        guard let tmdbId = displayTmdbId else { 
+            print("UnifiedMovieDetailView: No TMDB ID available for rating: \(displayTitle)")
+            return []
+        }
+        
+        print("UnifiedMovieDetailView: Starting to load friends ratings for movie: \(displayTitle) (TMDB ID: \(tmdbId))")
+        print("UnifiedMovieDetailView: Notification sender rating: \(notificationSenderRating?.friend.username ?? "none")")
+        
+        do {
+            var ratings = try await firestoreService.getFriendsRatingsForMovie(tmdbId: tmdbId)
+            print("UnifiedMovieDetailView: Loaded \(ratings.count) friend ratings from Firestore")
+            for rating in ratings {
+                print("UnifiedMovieDetailView: Friend rating - \(rating.friend.username): \(rating.score)")
+            }
+            
+            // Add notification sender's rating if provided and not already included
+            if let notificationRating = notificationSenderRating {
+                let isAlreadyIncluded = ratings.contains { $0.friend.uid == notificationRating.friend.uid }
+                print("UnifiedMovieDetailView: Notification sender \(notificationRating.friend.username) already included: \(isAlreadyIncluded)")
+                if !isAlreadyIncluded {
+                    ratings.append(notificationRating)
+                    print("UnifiedMovieDetailView: Added notification sender rating")
+                }
+            }
+            
+            print("UnifiedMovieDetailView: Final count: \(ratings.count) friend ratings")
+            return ratings
+        } catch {
+            print("UnifiedMovieDetailView: Error loading friends ratings: \(error)")
+            return []
+        }
+    }
+    
+    private func loadTakesAsync() async -> [Take] {
+        guard let tmdbId = displayTmdbId else { return [] }
+        
+        do {
+            let loadedTakes = try await firestoreService.getTakesForMovie(tmdbId: tmdbId)
+            return loadedTakes
+        } catch {
+            print("Error loading takes: \(error)")
+            return []
+        }
+    }
+    
+    private func loadCommunityRatingAsync() async -> (averageRating: Double, numberOfRatings: Int)? {
+        guard let tmdbId = displayTmdbId else { return nil }
+        
+        do {
+            return try await firestoreService.getCommunityRating(tmdbId: tmdbId)
+        } catch {
+            print("Error loading community rating: \(error)")
+            return nil
+        }
+    }
+    
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            // Poster skeleton - matches actual poster ZStack structure
+            ZStack {
+                // Poster placeholder skeleton - matches posterPlaceholder
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 450)
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                    .opacity(0.8)
+                    .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: isLoading)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Content skeleton - matches actual layout with shadows
+            VStack(alignment: .leading, spacing: 12) {
+                // Title and release date skeleton
+                VStack(alignment: .leading, spacing: 12) {
+                    // Title skeleton - matches PlayfairDisplay-Bold, size 32
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 40)
+                        .frame(maxWidth: 320)
+                    
+                    // Release date skeleton
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color(.systemGray5))
+                            .frame(width: 12, height: 12)
+                        
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(.systemGray5))
+                            .frame(height: 16)
+                            .frame(maxWidth: 180)
+                    }
+                }
+                
+                // Rating section skeleton - matches actual rating circles layout with shadows
+                VStack(spacing: 8) {
+                    // Labels row skeleton
+                    GeometryReader { geometry in
+                        let side = (geometry.size.width - 2*18) / 3
+                        HStack(spacing: 18) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray5))
+                                .frame(width: side, height: 20)
+                            
+                            Spacer()
+                                .frame(width: side)
+                            
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray5))
+                                .frame(width: side, height: 20)
+                        }
+                    }
+                    .frame(height: 20)
+                    
+                    // Numbers row skeleton - matches actual circle layout
+                    GeometryReader { geometry in
+                        let side = (geometry.size.width - 2*18) / 3
+                        HStack(spacing: 18) {
+                            // Community rating circle skeleton
+                            ZStack {
+                                Circle()
+                                    .stroke(Color(.systemGray5), lineWidth: 2)
+                                    .frame(width: side, height: side)
+                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 32, height: 12)
+                            }
+                            
+                            // Difference indicator skeleton
+                            ZStack {
+                                Circle()
+                                    .fill(Color.clear)
+                                    .frame(width: side, height: side)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 40, height: 12)
+                            }
+                            
+                            // Your rating circle skeleton
+                            ZStack {
+                                Circle()
+                                    .stroke(Color(.systemGray5), lineWidth: 2)
+                                    .frame(width: side, height: side)
+                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 32, height: 12)
+                            }
+                        }
+                    }
+                    .frame(height: 120)
+                }
+                .padding(.vertical, 24)
+                .padding(.horizontal, 10)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                
+                // Followings' ratings skeleton with shadows
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(.systemGray5))
+                            .frame(height: 20)
+                            .frame(maxWidth: 150)
+                        
+                        Spacer()
+                        
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(.systemGray5))
+                            .frame(height: 16)
+                            .frame(maxWidth: 80)
+                    }
+                    
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            VStack(spacing: 8) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray5))
+                                    .frame(height: 12)
+                                    .frame(maxWidth: 40)
+                                
+                                ZStack {
+                                    Circle()
+                                        .fill(Color(.systemGray5))
+                                        .frame(width: 56, height: 56)
+                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                                    
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color(.systemGray4))
+                                        .frame(width: 20, height: 6)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(24)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+            }
+            .padding(.horizontal, 4)
+        }
+        .padding(.vertical, 20)
         .opacity(isAppearing ? 1 : 0)
         .animation(.easeOut(duration: 0.3), value: isAppearing)
     }
     
     private func errorView(message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.largeTitle)
+        VStack(spacing: 20) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 50))
                 .foregroundColor(.orange)
-            Text("Couldn't load details")
-                .font(.headline)
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-            Button("Try Again") {
-                loadMovieDetails()
+            
+            VStack(spacing: 8) {
+                Text("Couldn't load details")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
             }
-            .buttonStyle(.bordered)
+            
+            Button("Try Again") {
+                loadAllData()
+            }
+            .buttonStyle(.borderedProminent)
         }
-        .padding()
+        .padding(24)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
         .transition(.opacity)
     }
     
     private var fallbackView: some View {
-        VStack(spacing: 20) {
-            // Community Rating Display
-            VStack(spacing: 4) {
-                Text("Community Rating")
-                    .font(DS.playfairDisplay(.title2, weight: .medium))
-                
-                Text(String(format: "%.1f", rating.averageRating))
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .foregroundColor(rating.sentimentColor)
-                    .frame(width: 80, height: 80)
-                    .background(
-                        Circle()
-                            .stroke(rating.sentimentColor, lineWidth: 3)
-                    )
-                
-                Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.top, 40)
-            
+        VStack(spacing: 24) {
             // User rating comparison or "Rank This" button
             userRatingSection
             
             VStack(alignment: .leading, spacing: 16) {
-                Text(rating.title)
-                    .font(DS.playfairDisplay(.title, weight: .bold))
-                    .multilineTextAlignment(.center)
-                
-                Text(rating.mediaType.rawValue)
-                    .font(.subheadline)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.accentColor.opacity(0.1))
-                    .cornerRadius(8)
-            }
-            .padding(.horizontal)
-            
-            Spacer()
-        }
-        .opacity(isAppearing ? 1 : 0)
-        .animation(.easeOut(duration: 0.3), value: isAppearing)
-        .sheet(isPresented: $showingAddMovie) {
-            if let movieDetails = movieDetails {
-                AddMovieFromGlobalView(
-                    tmdbMovie: movieDetails,
-                    store: store,
-                    onComplete: { 
-                        Task {
-                            await store.loadGlobalRatings()
-                        }
-                        dismiss() 
+                // Title and media type rating
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(displayTitle)
+                        .font(.custom("PlayfairDisplay-Bold", size: 32))
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .lineLimit(3)
+                    
+                    HStack(spacing: 8) {
+                        Image(systemName: "tag")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(displayMediaType.rawValue)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
                     }
-                )
-                .onAppear {
-                    // Set the correct media type before starting the rating process
-                    store.selectedMediaType = movieDetails.mediaType
                 }
             }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 22)
+            .frame(maxWidth: .infinity)
         }
+        .padding(.vertical, 20)
+        .opacity(isAppearing ? 1 : 0)
+        .animation(.easeOut(duration: 0.3), value: isAppearing)
+    }
+    
+    private var posterPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(Color(.systemGray5))
+            .frame(maxHeight: 450)
+            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+            .opacity(0.8)
+            .animation(.easeInOut(duration: 0.3), value: isLoading)
     }
     
     private var userRatingSection: some View {
         Group {
-            if let tmdbId = rating.tmdbId {
-                if let userScore = store.getUserPersonalScore(for: tmdbId) {
-                    // User has rated this movie - show comparison
-                    VStack(spacing: 8) {
-                        Text("Community vs Your Rating")
-                            .font(DS.playfairDisplay(.headline, weight: .medium))
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 20) {
-                            VStack(spacing: 4) {
-                                Text("Global")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Text(String(format: "%.1f", rating.averageRating))
-                                    .font(.title3)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(rating.sentimentColor)
-                            }
+            if let tmdbId = displayTmdbId,
+               let userScore = store.getUserPersonalScore(for: tmdbId) {
+                
+                let difference = userScore - (displayAverageRating ?? 0.0)
+                let isHigher = difference > 0
+                let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? .green : .red)
+                let arrow = isHigher ? "arrow.up" : "arrow.down"
+                let roundedDifference = (difference * 10).rounded() / 10
+                
+                VStack(spacing: 8) {
+                    // ✅ Labels row (separate from numbers)
+                    GeometryReader { geometry in
+                        let side = (geometry.size.width - 2*18) / 3  // 18-pt gaps → 3 columns
+                        HStack(spacing: 18) {
+                            Text("Community")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .frame(width: side, alignment: .center)
                             
-                            VStack(spacing: 4) {
-                                let difference = userScore - rating.averageRating
-                                let isHigher = difference > 0
-                                let color: Color = isHigher ? .green : .red
-                                let arrow = isHigher ? "arrow.up" : "arrow.down"
-                                
-                                // Round the difference to 1 decimal place to avoid floating-point precision issues
-                                let roundedDifference = (difference * 10).rounded() / 10
-                                let _ = debugDifference(userScore: userScore, averageRating: rating.averageRating, difference: difference)
-                                
-                                if abs(roundedDifference) < 0.1 {
-                                    // Show dash for very small differences (essentially zero)
+                            // Empty space for net difference (no label)
+                            Spacer()
+                                .frame(width: side)
+                            
+                            Text("My Rating")
+                                .font(.subheadline).fontWeight(.medium)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .frame(width: side, alignment: .center)
+                        }
+                    }
+                    .frame(height: 20)  // Fixed height for labels
+
+                    // ✅ Numbers row (baseline aligned)
+                    GeometryReader { geometry in
+                        let side = (geometry.size.width - 2*18) / 3  // 18-pt gaps → 3 columns
+                        HStack(spacing: 18) {
+                            // ── Community ───────────────────────────────────────────────
+                            if let averageRating = displayAverageRating {
+                                ZStack {
+                                    Circle()
+                                        .stroke(displaySentimentColor, lineWidth: 2)
+                                        .frame(width: side, height: side)
+                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+
+                                    Text(String(format: "%.1f", averageRating))
+                                        .font(.largeTitle).bold()
+                                        .foregroundColor(displaySentimentColor)
+                                }
+                            } else {
+                                ZStack {
+                                    Circle()
+                                        .stroke(Color.gray, lineWidth: 2)
+                                        .frame(width: side, height: side)
+                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+
                                     Text("—")
-                                        .font(.title2)
-                                        .foregroundColor(.gray)
-                                    Text("Same")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                } else {
-                                    VStack(spacing: 0) {
-                                        Spacer()
-                                        HStack(spacing: 4) {
-                                            Text(String(format: "%.1f", abs(roundedDifference)))
-                                                .font(.headline)
-                                                .foregroundColor(color)
-                                            Image(systemName: arrow)
-                                                .foregroundColor(color)
-                                                .font(.headline)
-                                        }
-                                    }
-                                    .frame(height: 44)
+                                        .font(.largeTitle).bold()
+                                        .foregroundColor(.secondary)
                                 }
                             }
-                            
-                            VStack(spacing: 4) {
-                                Text("Personal")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+
+                            // ── Net Difference column ───────────────────────────────────
+                            ZStack {
+                                // Invisible circle to match the circle dimensions
+                                Circle()
+                                    .fill(Color.clear)
+                                    .frame(width: side, height: side)
+                                
+                                if abs(roundedDifference) < 0.1 {
+                                    Text("—")
+                                        .font(.largeTitle).bold()
+                                        .foregroundColor(color)
+                                } else {
+                                    HStack(spacing: 2) { // 2 pt arrow gap
+                                        Image(systemName: arrow)
+                                            .font(.title).bold()
+                                            .foregroundColor(color)
+
+                                        Text(String(format: "%.1f", abs(roundedDifference)))
+                                            .font(.largeTitle).bold()
+                                            .foregroundColor(color)
+                                    }
+                                }
+                            }
+
+                            // ── Your Rating ─────────────────────────────────────────────
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.accentColor, lineWidth: 2)
+                                    .frame(width: side, height: side)
+                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+
                                 Text(String(format: "%.1f", userScore))
-                                    .font(.title3)
-                                    .fontWeight(.bold)
+                                    .font(.largeTitle).bold()
                                     .foregroundColor(.accentColor)
                             }
                         }
                     }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal)
-                } else {
-                    // User hasn't rated this movie - show "Rank This" button
-                    Button(action: {
-                        // Set the correct media type before starting the rating process
-                        store.selectedMediaType = rating.mediaType
-                        showingAddMovie = true
-                    }) {
-                        HStack {
-                            Image(systemName: store.isOffline ? "wifi.slash" : "plus.circle.fill")
-                            Text(store.isOffline ? "Offline - Cannot Rate" : "Rank This \(rating.mediaType.rawValue)")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(store.isOffline ? Color.gray : Color.accentColor)
-                        .cornerRadius(12)
-                    }
-                    .disabled(store.isOffline)
-                    .padding(.horizontal)
+                    .frame(height: 120)  // Fixed height for numbers
                 }
+                .padding(.vertical, 24)
+                .padding(.horizontal, 10)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+
+            } else {
+                // Fallback if not rated
+                Button(action: {
+                    store.selectedMediaType = displayMediaType
+                    showingAddMovie = true
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: store.isOffline ? "wifi.slash" : "plus.circle.fill")
+                            .font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.isOffline ? "Offline - Cannot Rate" : "Rank This \(displayMediaType.rawValue)")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            if !store.isOffline {
+                                Text("Share your rating with the community")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                        }
+                        Spacer()
+                    }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity)
+                    .background(store.isOffline ? Color.gray : Color.accentColor)
+                    .cornerRadius(16)
+                    .shadow(color: store.isOffline ? .gray.opacity(0.3) : .accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                .disabled(store.isOffline)
             }
         }
     }
     
     private func detailView(details: AppModels.Movie) -> some View {
-        VStack(spacing: 20) {
-            // Poster area - always reserve this space
-            Group {
+        VStack(spacing: 12) {
+            // Poster area with improved design
+            ZStack {
+                // Always show skeleton first (matches loading skeleton)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 450)
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                    .opacity(0.8)
+                
+                // Overlay AsyncImage on top
                 if let posterPath = details.poster_path {
                     AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { phase in
                         switch phase {
                         case .empty:
-                            Rectangle()
-                                .fill(Color(.systemGray5))
-                                .frame(height: 400)
-                                .cornerRadius(12)
-                                .opacity(0.3)
-                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: true)
+                            // Keep skeleton visible while loading
+                            Color.clear
                         case .success(let image):
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 400)
-                                .cornerRadius(12)
+                                .frame(height: 450)
+                                .frame(maxWidth: .infinity)
+                                .cornerRadius(16)
+                                .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                                .transition(.opacity.combined(with: .scale))
                         case .failure:
-                            Rectangle()
-                                .fill(Color(.systemGray5))
-                                .frame(height: 400)
-                                .cornerRadius(12)
-                                .overlay(
-                                    VStack {
-                                        Image(systemName: "photo")
-                                            .font(.largeTitle)
-                                            .foregroundColor(.secondary)
-                                        Text("Image unavailable")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                )
+                            // Keep skeleton visible on failure
+                            Color.clear
                         @unknown default:
-                            Rectangle()
-                                .fill(Color(.systemGray5))
-                                .frame(height: 400)
-                                .cornerRadius(12)
+                            // Keep skeleton visible
+                            Color.clear
                         }
                     }
-                } else {
-                    // No poster path available
-                    Rectangle()
-                        .fill(Color(.systemGray5))
-                        .frame(height: 400)
-                        .cornerRadius(12)
-                        .overlay(
-                            VStack {
-                                Image(systemName: "photo")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.secondary)
-                                Text("No poster available")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        )
+                    .animation(.easeInOut(duration: 0.4))
                 }
             }
+            .frame(maxWidth: .infinity)
             
-            VStack(alignment: .leading, spacing: 16) {
-                // Title and Release Date
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Title and Release Date with improved typography
+                VStack(alignment: .leading, spacing: 12) {
                     Text(details.displayTitle)
-                        .font(DS.playfairDisplay(.title, weight: .bold))
+                        .font(.custom("PlayfairDisplay-Bold", size: 32))
+                        .multilineTextAlignment(.leading)
+                        .foregroundColor(.primary)
+                        .lineLimit(3)
                     
                     if let releaseDate = details.displayDate {
-                        Text("Released: \(formatDate(releaseDate))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Image(systemName: "calendar")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("Released: \(formatDate(releaseDate))")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
-                // Community Rating Display (prominent placement)
-                VStack(spacing: 4) {
-                    Text("Community Rating")
-                        .font(DS.playfairDisplay(.headline, weight: .medium))
-                        .foregroundColor(.secondary)
-                    
-                    Text(String(format: "%.1f", rating.averageRating))
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(rating.sentimentColor)
-                        .frame(width: 80, height: 80)
-                        .background(
-                            Circle()
-                                .stroke(rating.sentimentColor, lineWidth: 3)
-                        )
-                    
-                    Text("\(rating.numberOfRatings) rating\(rating.numberOfRatings == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                
-                // User rating comparison or "Rank This" button
+                // User rating comparison or "Rank This" button (enhanced design)
                 userRatingSection
-                .padding(.horizontal, -16) // Compensate for the outer padding
                 
-                // Followings' Ratings
+                // Followings' Ratings with improved grid
                 if !friendsRatings.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Followings' Ratings")
-                            .font(.headline)
-                            .padding(.top, 8)
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Followings' Ratings")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                            
+                            Spacer()
+                            
+                            Text("\(friendsRatings.count) ratings")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                        }
                         
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
                             ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
                                 Button(action: {
                                     selectedFriendUserId = friendRating.friend.uid
                                     showingFriendProfile = true
                                 }) {
-                                    VStack(spacing: 4) {
+                                    VStack(spacing: 8) {
                                         Text("@\(friendRating.friend.username)")
                                             .font(.caption)
+                                            .fontWeight(.medium)
                                             .foregroundColor(.primary)
                                             .lineLimit(1)
                                             .truncationMode(.tail)
                                         
-                                        Text(String(format: "%.1f", friendRating.score))
-                                            .font(.subheadline)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(sentimentColor(for: friendRating.score))
-                                            .frame(width: 50, height: 50)
-                                            .background(
-                                                Circle()
-                                                    .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
-                                            )
+                                        ZStack {
+                                            Circle()
+                                                .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
+                                                .frame(width: 56, height: 56)
+                                                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                                            
+                                            Text(String(format: "%.1f", friendRating.score))
+                                                .font(.title3)
+                                                .fontWeight(.bold)
+                                                .foregroundColor(sentimentColor(for: friendRating.score))
+                                        }
                                     }
                                     .onAppear {
-                                        print("GlobalRatingDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                        print("UnifiedMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
                                     }
                                 }
                                 .buttonStyle(PlainButtonStyle())
                             }
                         }
-                        .padding(.horizontal, 4)
+                        .padding(.horizontal, 6)
                     }
                     .onAppear {
-                        print("GlobalRatingDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                        print("UnifiedMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
                     }
                 } else if isLoadingFriendsRatings {
-                    // Show loading state for friends ratings
-                    VStack(alignment: .leading, spacing: 8) {
+                    // Enhanced loading state for friends ratings
+                    VStack(alignment: .leading, spacing: 12) {
                         Text("Followings' Ratings")
-                            .font(.headline)
-                            .padding(.top, 8)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
                         
-                        HStack {
+                        HStack(spacing: 12) {
                             ProgressView()
                                 .scaleEffect(0.8)
                             Text("Loading followings' ratings...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 18)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
-                } else {
-                    // No followings' ratings to show
                 }
                 
-                // Runtime
+                // Runtime with improved styling
                 if let runtime = details.displayRuntime {
-                    HStack {
+                    HStack(spacing: 8) {
                         Image(systemName: "clock")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                         Text(formatRuntime(runtime))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
                 }
                 
-                // Overview
+                // Overview with better typography
                 if let overview = details.overview, !overview.isEmpty {
-                    Text("Overview")
-                        .font(DS.playfairDisplay(.headline, weight: .medium))
-                        .padding(.top, 8)
-                    Text(overview)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Overview")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Text(overview)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .lineSpacing(4)
+                    }
                 }
                 
-                // Takes Section
-                VStack(alignment: .leading, spacing: 12) {
+                // Takes Section with enhanced design
+                VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         Text("Takes")
-                            .font(DS.playfairDisplay(.headline, weight: .medium))
-                            .padding(.top, 8)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
                         
                         Spacer()
                         
                         Button(action: {
                             showingAddTake = true
                         }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.accentColor)
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                                Text("Add Take")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.accentColor)
                         }
                     }
                     
                     if isLoadingTakes {
-                        HStack {
+                        HStack(spacing: 12) {
                             ProgressView()
                                 .scaleEffect(0.8)
                             Text("Loading takes...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     } else if takes.isEmpty {
-                        VStack(spacing: 8) {
+                        VStack(spacing: 12) {
                             Image(systemName: "bubble.left.and.bubble.right")
                                 .font(.title2)
                                 .foregroundColor(.secondary)
                             Text("No takes yet")
                                 .font(.subheadline)
+                                .fontWeight(.medium)
                                 .foregroundColor(.secondary)
                             Text("Be the first to share your take!")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.vertical, 16)
+                        .padding(.vertical, 24)
                         .frame(maxWidth: .infinity)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     } else {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 16) {
                             ForEach(takes) { take in
                                 EmbeddedTakeRow(
                                     take: take,
@@ -791,101 +1178,40 @@ struct GlobalRatingDetailView: View {
                         }
                     }
                 }
+                .padding(24)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                 
-                // Re-rank button at the very bottom (only for movies that have been ranked)
-                if let tmdbId = rating.tmdbId,
+                // Re-rank button with improved styling
+                if let tmdbId = displayTmdbId,
                    let userScore = store.getUserPersonalScore(for: tmdbId) {
                     Button(action: {
                         // Set the correct media type before starting the rating process
-                        store.selectedMediaType = rating.mediaType
+                        store.selectedMediaType = displayMediaType
                         showingReRankSheet = true
                     }) {
-                        HStack {
+                        HStack(spacing: 8) {
                             Image(systemName: "arrow.clockwise")
-                            Text("Re-rank This \(rating.mediaType.rawValue)")
+                                .font(.title3)
+                            Text("Re-rank This \(displayMediaType.rawValue)")
+                                .font(.headline)
+                                .fontWeight(.semibold)
                         }
-                        .font(.headline)
                         .foregroundColor(.white)
-                        .padding()
+                        .padding(.vertical, 16)
                         .frame(maxWidth: .infinity)
                         .background(Color.orange)
-                        .cornerRadius(12)
+                        .cornerRadius(16)
+                        .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 20)
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 4)
         }
-        .padding(.vertical)
+        .padding(.vertical, 20)
         .opacity(isAppearing ? 1 : 0)
         .animation(.easeOut(duration: 0.3), value: isAppearing)
-        .sheet(isPresented: $showingAddMovie) {
-            if let movieDetails = movieDetails {
-                AddMovieFromGlobalView(
-                    tmdbMovie: movieDetails,
-                    store: store,
-                    onComplete: { 
-                        Task {
-                            await store.loadGlobalRatings()
-                        }
-                        dismiss() 
-                    }
-                )
-                .onAppear {
-                    // Set the correct media type before starting the rating process
-                    store.selectedMediaType = movieDetails.mediaType
-                }
-            }
-        }
-    }
-    
-    private func loadMovieDetails() {
-        guard let tmdbId = rating.tmdbId else {
-            // No TMDB ID available, show fallback view
-            isLoading = false
-            return
-        }
-        
-        isLoading = true
-        errorMessage = nil
-        
-        Task {
-            do {
-                let tmdbMovie: TMDBMovie
-                if rating.mediaType == .tv {
-                    tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
-                } else {
-                    tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
-                }
-                
-                await MainActor.run {
-                    movieDetails = AppModels.Movie(
-                        id: tmdbMovie.id,
-                        title: tmdbMovie.title,
-                        name: tmdbMovie.name,
-                        overview: tmdbMovie.overview,
-                        poster_path: tmdbMovie.posterPath,
-                        release_date: tmdbMovie.releaseDate,
-                        first_air_date: tmdbMovie.firstAirDate,
-                        vote_average: tmdbMovie.voteAverage,
-                        vote_count: tmdbMovie.voteCount,
-                        genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
-                        media_type: rating.mediaType.rawValue, // Use the media type from our GlobalRating, not TMDB
-                        runtime: tmdbMovie.runtime,
-                        episode_run_time: tmdbMovie.episodeRunTime
-                    )
-                    isLoading = false
-                }
-            } catch {
-                if (error as NSError).code != NSURLErrorCancelled {
-                    await MainActor.run {
-                        errorMessage = error.localizedDescription
-                        isLoading = false
-                    }
-                }
-            }
-        }
     }
     
     private func formatDate(_ dateString: String) -> String {
@@ -917,27 +1243,6 @@ struct GlobalRatingDetailView: View {
     
     // MARK: - Takes Functions
     
-    private func loadTakes() {
-        guard let tmdbId = rating.tmdbId else { return }
-        
-        isLoadingTakes = true
-        
-        Task {
-            do {
-                let loadedTakes = try await firestoreService.getTakesForMovie(tmdbId: tmdbId)
-                await MainActor.run {
-                    takes = loadedTakes
-                    isLoadingTakes = false
-                }
-            } catch {
-                print("Error loading takes: \(error)")
-                await MainActor.run {
-                    isLoadingTakes = false
-                }
-            }
-        }
-    }
-    
     private func addTake() async {
         let trimmedText = newTakeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
@@ -949,17 +1254,17 @@ struct GlobalRatingDetailView: View {
         do {
             try await firestoreService.addTake(
                 movieId: UUID().uuidString, // Use a new UUID since we don't have a real movie ID
-                tmdbId: rating.tmdbId,
+                tmdbId: displayTmdbId,
                 text: trimmedText,
-                mediaType: rating.mediaType
+                mediaType: displayMediaType
             )
             
-            // Clear the text field and reload takes
+            // Clear the text field
             await MainActor.run {
                 newTakeText = ""
             }
             
-            // Reload takes
+            // Reload takes smoothly
             await loadTakes()
         } catch {
             print("Error adding take: \(error)")
@@ -972,10 +1277,34 @@ struct GlobalRatingDetailView: View {
     
     private func deleteTake(_ take: Take) async {
         do {
-            try await firestoreService.deleteTake(takeId: take.id, tmdbId: rating.tmdbId)
+            try await firestoreService.deleteTake(takeId: take.id, tmdbId: displayTmdbId)
+            // Reload takes smoothly
             await loadTakes()
         } catch {
             print("Error deleting take: \(error)")
+        }
+    }
+    
+    private func loadTakes() async {
+        guard let tmdbId = displayTmdbId else { return }
+        
+        await MainActor.run {
+            isLoadingTakes = true
+        }
+        
+        do {
+            let loadedTakes = try await firestoreService.getTakesForMovie(tmdbId: tmdbId)
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    takes = loadedTakes
+                }
+                isLoadingTakes = false
+            }
+        } catch {
+            print("Error loading takes: \(error)")
+            await MainActor.run {
+                isLoadingTakes = false
+            }
         }
     }
     
@@ -1004,5 +1333,305 @@ struct GlobalRatingDetailView: View {
         default:
             return .gray
         }
+    }
+}
+
+// MARK: - Embedded Take Row
+struct EmbeddedTakeRow: View {
+    let take: Take
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    @State private var isCurrentUser: Bool = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                // User avatar with improved design
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    
+                    Text(String(take.username.prefix(1)).uppercased())
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.accentColor)
+                }
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(isCurrentUser ? "My take" : "\(take.username)'s take")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        // Action buttons (only for current user)
+                        if isCurrentUser {
+                            HStack(spacing: 16) {
+                                Button(action: onEdit) {
+                                    Image(systemName: "pencil")
+                                        .font(.subheadline)
+                                        .foregroundColor(.accentColor)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: onDelete) {
+                                    Image(systemName: "trash")
+                                        .font(.subheadline)
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                    }
+                    
+                    Text(formatDate(take.timestamp))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text(take.text)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.leading)
+                        .lineSpacing(2)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.03), radius: 4, x: 0, y: 2)
+        .onAppear {
+            checkIfCurrentUser()
+        }
+    }
+    
+    private func checkIfCurrentUser() {
+        if let currentUser = Auth.auth().currentUser {
+            isCurrentUser = take.userId == currentUser.uid
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Add Take Sheet
+struct AddTakeSheet: View {
+    let movie: Movie
+    @Binding var takeText: String
+    @Binding var isAdding: Bool
+    let onAdd: () async -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    // Max characters for a take
+    let maxTakeCharacters = 500
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Header Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Add Your Take")
+                        .font(.custom("PlayfairDisplay-Bold", size: 28))
+                        .foregroundColor(.primary)
+                    
+                    Text(movie.title)
+                        .font(.custom("PlayfairDisplay-Medium", size: 20))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                
+                // Text Editor Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Your Take")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    TextEditor(text: $takeText)
+                        .frame(minHeight: 140, maxHeight: 240)
+                        .padding(16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                        .foregroundColor(.primary)
+                        .autocapitalization(.sentences)
+                        .disableAutocorrection(false)
+                }
+                
+                // Character Counter
+                HStack {
+                    Spacer()
+                    Text("\(takeText.count)/\(maxTakeCharacters)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(takeText.count > maxTakeCharacters ? .red : .secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                }
+                .font(.headline)
+                .foregroundColor(.secondary),
+                trailing: Button("Post") {
+                    Task {
+                        await onAdd()
+                        await MainActor.run {
+                            dismiss()
+                        }
+                    }
+                }
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters || isAdding ? .secondary : .accentColor)
+                .disabled(takeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || takeText.count > maxTakeCharacters || isAdding)
+            )
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+// MARK: - Edit Take Sheet
+struct EditTakeSheet: View {
+    let take: Take
+    let movie: Movie
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var editedText: String
+    @State private var isSaving = false
+    @StateObject private var firestoreService = FirestoreService()
+    
+    // Max characters for a take
+    let maxTakeCharacters = 500
+    
+    init(take: Take, movie: Movie, onSave: @escaping () -> Void) {
+        self.take = take
+        self.movie = movie
+        self.onSave = onSave
+        self._editedText = State(initialValue: take.text)
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Header Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Edit Your Take")
+                        .font(.custom("PlayfairDisplay-Bold", size: 28))
+                        .foregroundColor(.primary)
+                    
+                    Text(movie.title)
+                        .font(.custom("PlayfairDisplay-Medium", size: 20))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                
+                // Text Editor Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Your Take")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    TextEditor(text: $editedText)
+                        .frame(minHeight: 140, maxHeight: 240)
+                        .padding(16)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                        .foregroundColor(.primary)
+                        .autocapitalization(.sentences)
+                        .disableAutocorrection(false)
+                }
+                
+                // Character Counter
+                HStack {
+                    Spacer()
+                    Text("\(editedText.count)/\(maxTakeCharacters)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(editedText.count > maxTakeCharacters ? .red : .secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                }
+                .font(.headline)
+                .foregroundColor(.secondary),
+                trailing: Button("Save") {
+                    Task {
+                        await saveTake()
+                    }
+                }
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving ? .secondary : .accentColor)
+                .disabled(editedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedText.count > maxTakeCharacters || isSaving)
+            )
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    private func saveTake() async {
+        let trimmedText = editedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+        
+        isSaving = true
+        do {
+            // Delete the old take
+            try await firestoreService.deleteTake(takeId: take.id, tmdbId: movie.tmdbId)
+            
+            // Add the new take
+            try await firestoreService.addTake(
+                movieId: movie.id.uuidString,
+                tmdbId: movie.tmdbId,
+                text: trimmedText,
+                mediaType: movie.mediaType
+            )
+            
+            await MainActor.run {
+                onSave()
+                dismiss()
+            }
+        } catch {
+            print("Error updating take: \(error)")
+        }
+        isSaving = false
     }
 } 

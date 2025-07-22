@@ -72,7 +72,7 @@ struct ContentView: View {
         }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
-                GlobalRatingDetailView(rating: rating, store: store, notificationSenderRating: nil)
+                UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: nil)
             }
         }
         .alert("Error", isPresented: $store.showError) {
@@ -152,8 +152,7 @@ struct ContentView: View {
             // Title and username
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewMode.rawValue)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+                    .font(.custom("PlayfairDisplay-Bold", size: 34))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 Text("@\(authService.username ?? "user")")
@@ -201,7 +200,8 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                     
                     Text("No community ratings yet")
-                        .font(DS.playfairDisplay(.title2, weight: .medium))
+                        .font(.title2)
+                        .fontWeight(.medium)
                     
                     Text("Community ratings will appear here once people start ranking movies")
                         .font(.subheadline)
@@ -250,22 +250,9 @@ struct ContentView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            // Font test section
-            VStack(spacing: 12) {
-                Text("System Font (Before)")
-                    .font(.title2)
-                    .fontWeight(.medium)
-                
-                Text("Playfair Display (After)")
-                    .font(DS.playfairDisplay(.title2, weight: .medium))
-                    .foregroundColor(.accentColor)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(8)
-            
             Text("No \(store.selectedMediaType.rawValue)s yet")
-                .font(DS.playfairDisplay(.title2, weight: .medium))
+                .font(.title2)
+                .fontWeight(.medium)
             
             Text("Tap the + button to add your first \(store.selectedMediaType.rawValue.lowercased())")
                 .font(.subheadline)
@@ -427,7 +414,7 @@ struct MovieRow: View {
         }
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
-                TMDBMovieDetailView(movie: movie, store: store)
+                UnifiedMovieDetailView(movie: movie, store: store)
             }
         }
     }

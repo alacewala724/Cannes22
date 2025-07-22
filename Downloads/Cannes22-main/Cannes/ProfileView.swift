@@ -21,23 +21,34 @@ struct ProfileView: View {
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 32) {
-                    // Profile Header
-                    profileHeader
+            VStack(spacing: 0) {
+                // Custom header with Profile title
+                HStack {
+                    Text("Profile")
+                        .font(.custom("PlayfairDisplay-Bold", size: 34))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    // Stats Section
-                    statsSection
-                    
-                    // Action Buttons
-                    actionButtons
+                    Spacer()
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                
+                ScrollView {
+                    VStack(spacing: 32) {
+                        // Profile Header
+                        profileHeader
+                        
+                        // Stats Section
+                        statsSection
+                        
+                        // Action Buttons
+                        actionButtons
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                }
             }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
+            .navigationBarHidden(true)
         }
         .task {
             await loadProfileData()

@@ -12,6 +12,17 @@ struct UpdatesView: View {
     var body: some View {
         NavigationView {
             VStack {
+                // Custom header with Playfair Display
+                HStack {
+                    Text("Updates")
+                        .font(.custom("PlayfairDisplay-Bold", size: 34))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                
                 if isLoading {
                     loadingView
                 } else if activities.isEmpty {
@@ -20,8 +31,7 @@ struct UpdatesView: View {
                     activityFeedView
                 }
             }
-            .navigationTitle("Updates")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarHidden(true)
             .refreshable {
                 await loadActivities()
             }
@@ -57,7 +67,8 @@ struct UpdatesView: View {
                 .foregroundColor(.secondary)
             
             Text("No Updates Yet")
-                .font(DS.playfairDisplay(.title2, weight: .medium))
+                .font(.title2)
+                .fontWeight(.medium)
             
             Text("Follow friends to see their movie rankings and comments here")
                 .font(.subheadline)
@@ -257,7 +268,7 @@ struct NotificationMovieDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let rating = communityRating {
                 NavigationView {
-                    GlobalRatingDetailView(rating: rating, store: store, notificationSenderRating: notificationSenderRating)
+                    UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: notificationSenderRating)
                 }
             } else {
                 VStack(spacing: 20) {
