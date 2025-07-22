@@ -18,6 +18,12 @@ enum DS {
     // Playfair Display for headers and titles
     static func playfairDisplay(_ style: Font.TextStyle,
                                weight: Font.Weight = .regular) -> Font {
+        // Debug: Print available font names
+        #if DEBUG
+        print("Available fonts: \(UIFont.familyNames)")
+        print("Playfair Display fonts: \(UIFont.fontNames(forFamilyName: "Playfair Display"))")
+        #endif
+        
         switch weight {
         case .bold:
             return .custom("PlayfairDisplay-Bold", size: fontSize(for: style))

@@ -250,6 +250,20 @@ struct ContentView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
+            // Debug font test
+            VStack(spacing: 8) {
+                Text("Font Test - System Font")
+                    .font(.title2)
+                    .fontWeight(.medium)
+                
+                Text("Font Test - Playfair Display")
+                    .font(DS.playfairDisplay(.title2, weight: .medium))
+                    .foregroundColor(.accentColor)
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            
             Text("No \(store.selectedMediaType.rawValue)s yet")
                 .font(DS.playfairDisplay(.title2, weight: .medium))
             
