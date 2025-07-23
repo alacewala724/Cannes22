@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var isEditing = false
     @State private var showingFriendSearch = false
     @State private var selectedTab = 0
+    @State private var showingGrid = false
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -255,7 +256,35 @@ struct ContentView: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                globalRatingListView
+                VStack(spacing: 0) {
+                    // Toggle switch for view mode
+                    HStack {
+                        Text("List")
+                            .font(.subheadline)
+                            .foregroundColor(showingGrid ? .secondary : .primary)
+                        
+                        Toggle("", isOn: $showingGrid)
+                            .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                            .labelsHidden()
+                        
+                        Text("Grid")
+                            .font(.subheadline)
+                            .foregroundColor(showingGrid ? .primary : .secondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    
+                    // Content based on toggle
+                    if showingGrid {
+                        globalRatingGridView
+                    } else {
+                        globalRatingListView
+                    }
+                }
             }
         }
     }
@@ -335,6 +364,16 @@ struct ContentView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, UI.vGap)
         }
+    }
+    
+    private var globalRatingGridView: some View {
+        GlobalRatingGridView(
+            ratings: globalRatings,
+            onTap: { rating in
+                showingGlobalRatingDetail = rating
+            },
+            store: store
+        )
     }
     
     private var globalRatings: [GlobalRating] {

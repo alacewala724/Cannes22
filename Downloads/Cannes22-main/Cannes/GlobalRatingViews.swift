@@ -14,6 +14,153 @@ private func roundToTenths(_ value: Double) -> Double {
     return (value * 10).rounded() / 10
 }
 
+// MARK: - Grid View Components
+struct GlobalRatingGridItem: View {
+    let rating: GlobalRating
+    let position: Int
+    let onTap: () -> Void
+    @ObservedObject var store: MovieStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var calculatingScore = false
+    @State private var displayScore: Double = 0.0
+    @State private var posterPath: String?
+    @State private var isLoadingPoster = true
+    
+    var body: some View {
+        Button(action: onTap) {
+            ZStack(alignment: .topLeading) {
+                // Movie poster
+                AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
+                    switch phase {
+                    case .empty:
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure:
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    @unknown default:
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    }
+                }
+                .frame(width: 110, height: 165)
+                .clipped()
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                
+                // Score bubble or goat
+                ZStack {
+                    Circle()
+                        .fill(position == 1 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
+                        .frame(width: 32, height: 32)
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    
+                    if position == 1 {
+                        Text("🐐")
+                            .font(.title3)
+                    } else {
+                        Text(String(format: "%.1f", displayScore))
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+                }
+                .offset(x: 8, y: 8)
+                .onAppear {
+                    startScoreAnimation()
+                    loadPosterPath()
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func loadPosterPath() {
+        guard let tmdbId = rating.tmdbId else { return }
+        
+        Task {
+            do {
+                let tmdbService = TMDBService()
+                let movie: TMDBMovie
+                
+                if rating.mediaType == .tv {
+                    movie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                } else {
+                    movie = try await tmdbService.getMovieDetails(id: tmdbId)
+                }
+                
+                await MainActor.run {
+                    posterPath = movie.posterPath
+                    isLoadingPoster = false
+                }
+            } catch {
+                print("Error loading poster for \(rating.title): \(error)")
+                await MainActor.run {
+                    isLoadingPoster = false
+                }
+            }
+        }
+    }
+    
+    private func startScoreAnimation() {
+        let targetScore = roundToTenths(rating.confidenceAdjustedScore)
+        calculatingScore = true
+        
+        // Start with a random number
+        displayScore = Double.random(in: 0...10)
+        
+        // Create a timer that cycles through numbers
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
+            if calculatingScore {
+                // Cycle through random numbers around the target
+                let randomOffset = Double.random(in: -2...2)
+                displayScore = max(0, min(10, targetScore + randomOffset))
+            } else {
+                // Settle on the final value
+                displayScore = targetScore
+                timer.invalidate()
+            }
+        }
+        
+        // Stop calculating after 0.8 seconds and settle on final value
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            calculatingScore = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayScore = targetScore
+            }
+        }
+    }
+}
+
+struct GlobalRatingGridView: View {
+    let ratings: [GlobalRating]
+    let onTap: (GlobalRating) -> Void
+    @ObservedObject var store: MovieStore
+    
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
+            ForEach(Array(ratings.enumerated()), id: \.element.id) { index, rating in
+                GlobalRatingGridItem(
+                    rating: rating,
+                    position: index + 1,
+                    onTap: {
+                        onTap(rating)
+                    },
+                    store: store
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
 struct GlobalRatingRow: View {
     let rating: GlobalRating
     let position: Int
