@@ -306,11 +306,7 @@ struct FriendSearchView: View {
                     ContactRow(
                         contactUser: contactUser,
                         onFollow: {
-                            if let userProfile = contactUser.userProfile {
-                                Task {
-                                    await contactsService.followUser(userProfile)
-                                }
-                            }
+                            // This is now handled directly in ContactRow
                         },
                         onInvite: {
                             contactsService.inviteContact(contactUser)
@@ -356,10 +352,6 @@ struct UserSearchRow: View {
                     Text("@\(user.username)")
                         .font(.headline)
                         .foregroundColor(.primary)
-                    
-                    Text("Tap to view movies")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
                 }
                 
                 Spacer()
@@ -376,8 +368,9 @@ struct UserSearchRow: View {
                             if isUpdatingFriendStatus {
                                 ProgressView()
                                     .scaleEffect(0.8)
+                                    .foregroundColor(isFriend ? .red : .accentColor)
                             }
-                            Text(isFriend ? "Unfollow" : "Follow")
+                            Text(isUpdatingFriendStatus ? "..." : (isFriend ? "Unfollow" : "Follow"))
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
@@ -455,6 +448,7 @@ struct UserSearchRow: View {
             print("Error toggling follow status: \(error)")
             print("Error details: \(error.localizedDescription)")
             
+            // Don't change the state on error - keep the original state
             // Re-check the actual status from Firestore in case of error
             await checkFollowStatus()
         }
@@ -650,8 +644,9 @@ struct FollowingRow: View {
                             if isUnfollowing {
                                 ProgressView()
                                     .scaleEffect(0.8)
+                                    .foregroundColor(.red)
                             }
-                            Text("Unfollow")
+                            Text(isUnfollowing ? "..." : "Unfollow")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
@@ -707,7 +702,7 @@ struct FollowingRow: View {
             NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
         } catch {
             print("Error unfollowing user: \(error)")
-            // Only reset on error
+            // Only reset on error - keep loading state on success
             await MainActor.run {
                 isUnfollowing = false
             }

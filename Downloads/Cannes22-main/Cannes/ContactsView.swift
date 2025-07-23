@@ -221,8 +221,9 @@ struct ContactRow: View {
                         if isLoadingAction {
                             ProgressView()
                                 .scaleEffect(0.8)
+                                .foregroundColor(isFollowing ? .red : .white)
                         }
-                        Text(isFollowing ? "Unfollow" : "Follow")
+                        Text(isLoadingAction ? "..." : (isFollowing ? "Unfollow" : "Follow"))
                             .font(.subheadline)
                             .fontWeight(.medium)
                     }
@@ -303,6 +304,7 @@ struct ContactRow: View {
             isFollowing.toggle()
         } catch {
             print("ContactRow: Error \(isFollowing ? "unfollowing" : "following") user: \(error)")
+            // Don't toggle state on error - keep the original state
         }
         isLoadingAction = false
     }
