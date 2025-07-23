@@ -195,7 +195,7 @@ struct FriendSearchView: View {
     private var contactsView: some View {
         VStack(spacing: 0) {
             if contactsService.isLoading {
-                loadingView
+                contactsLoadingView
             } else if !contactsService.hasPermission {
                 permissionView
             } else if contactsService.contacts.isEmpty {
@@ -206,7 +206,7 @@ struct FriendSearchView: View {
         }
     }
     
-    private var loadingView: some View {
+    private var contactsLoadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
             Text("Loading contacts...")
@@ -324,104 +324,6 @@ struct FriendSearchView: View {
                 }
             }
         }
-    }
-}
-
-struct ContactRow: View {
-    let contactUser: ContactUser
-    let onFollow: () -> Void
-    let onInvite: () -> Void
-    let onTapProfile: () -> Void
-    @State private var isFollowing = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Avatar
-            Circle()
-                .fill(Color.accentColor.opacity(0.2))
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(String(contactUser.name.prefix(1)).uppercased())
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.accentColor)
-                )
-            
-            // Contact info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(contactUser.name)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                if let phone = contactUser.phone {
-                    Text(phone)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                if contactUser.isAppUser {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                        Text("Using App")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
-                } else {
-                    Text("Not on App")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            // Action button
-            if contactUser.isAppUser {
-                Button(action: {
-                    onFollow()
-                    isFollowing = true
-                }) {
-                    Text(isFollowing ? "Following" : "Follow")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(isFollowing ? .secondary : .white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(isFollowing ? Color.clear : Color.accentColor)
-                                .stroke(isFollowing ? Color.secondary : Color.clear, lineWidth: 1)
-                        )
-                }
-                .disabled(isFollowing)
-                .onTapGesture {
-                    if contactUser.userProfile != nil {
-                        onTapProfile()
-                    }
-                }
-            } else {
-                Button(action: onInvite) {
-                    Text("Invite")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.accentColor)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentColor, lineWidth: 1)
-                        )
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
     }
 }
 

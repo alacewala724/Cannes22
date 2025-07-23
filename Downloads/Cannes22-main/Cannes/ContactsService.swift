@@ -100,9 +100,13 @@ class ContactsService: ObservableObject {
         let phoneNumbers = contactUsers.compactMap { $0.phone }
         let uniquePhones = Array(Set(phoneNumbers)) // Remove duplicates
         
+        print("ContactsService: Found \(contactUsers.count) contacts with \(uniquePhones.count) unique phone numbers")
+        print("ContactsService: Sample phone numbers: \(uniquePhones.prefix(5))")
+        
         // Batch find users by phone numbers
         do {
             let matchingUsers = try await firestoreService.findUsersByPhoneNumbers(uniquePhones)
+            print("ContactsService: Found \(matchingUsers.count) matching users in the app")
             
             // Create a lookup dictionary for efficiency
             let userLookup = Dictionary(uniqueKeysWithValues: matchingUsers.map { ($0.uid, $0) })
@@ -111,16 +115,20 @@ class ContactsService: ObservableObject {
             for i in 0..<matchedContacts.count {
                 if let phone = matchedContacts[i].phone {
                     let cleanPhone = cleanPhoneNumber(phone)
+                    print("ContactsService: Checking contact '\(matchedContacts[i].name)' with phone: \(phone) -> cleaned: \(cleanPhone)")
                     
                     // Find matching user by phone number
                     if let matchingUser = matchingUsers.first(where: { user in
                         // Compare the cleaned phone numbers
                         if let userPhone = user.phoneNumber {
                             let cleanUserPhone = cleanPhoneNumber(userPhone)
-                            return cleanPhone == cleanUserPhone
+                            let isMatch = cleanPhone == cleanUserPhone
+                            print("ContactsService: Comparing with user '\(user.username)' phone: \(userPhone) -> cleaned: \(cleanUserPhone) -> match: \(isMatch)")
+                            return isMatch
                         }
                         return false
                     }) {
+                        print("ContactsService: ✅ MATCHED contact '\(matchedContacts[i].name)' with user '\(matchingUser.username)'")
                         matchedContacts[i] = ContactUser(
                             contact: matchedContacts[i].contact,
                             phone: matchedContacts[i].phone,
@@ -128,6 +136,8 @@ class ContactsService: ObservableObject {
                             isAppUser: true,
                             userProfile: matchingUser
                         )
+                    } else {
+                        print("ContactsService: ❌ No match found for contact '\(matchedContacts[i].name)'")
                     }
                 }
             }
@@ -143,6 +153,8 @@ class ContactsService: ObservableObject {
             return contact1.name.localizedCaseInsensitiveCompare(contact2.name) == .orderedAscending
         }
         
+        print("ContactsService: Final result - \(matchedContacts.filter { $0.isAppUser }.count) app users out of \(matchedContacts.count) total contacts")
+        
         return matchedContacts
     }
     
@@ -155,6 +167,13 @@ class ContactsService: ObservableObject {
             return String(digits.dropFirst())
         }
         
+        // If it's a 10-digit number, return as is
+        if digits.count == 10 {
+            return digits
+        }
+        
+        // If it's a 7-digit number, we might need to add area code
+        // For now, return as is and let the caller handle area code logic
         return digits
     }
     

@@ -2143,6 +2143,7 @@ extension FirestoreService {
             return UserProfile(
                 uid: document.documentID,
                 username: username,
+                phoneNumber: data["phoneNumber"] as? String,
                 movieCount: data["movieCount"] as? Int ?? 0
             )
         }
@@ -2169,6 +2170,7 @@ extension FirestoreService {
         return UserProfile(
             uid: document.documentID,
             username: username,
+            phoneNumber: data["phoneNumber"] as? String,
             movieCount: data["movieCount"] as? Int ?? 0
         )
     }
@@ -2190,16 +2192,21 @@ extension FirestoreService {
     func findUsersByPhoneNumbers(_ phoneNumbers: [String]) async throws -> [UserProfile] {
         let cleanPhones = phoneNumbers.map { cleanPhoneNumber($0) }
         
+        print("FirestoreService: Searching for users with phone numbers: \(cleanPhones)")
+        
         // Firestore has a limit of 10 items in 'in' queries, so we need to batch
         let batchSize = 10
         var allUsers: [UserProfile] = []
         
         for i in stride(from: 0, to: cleanPhones.count, by: batchSize) {
             let batch = Array(cleanPhones[i..<min(i + batchSize, cleanPhones.count)])
+            print("FirestoreService: Searching batch \(i/batchSize + 1): \(batch)")
             
             let snapshot = try await db.collection("users")
                 .whereField("phoneNumber", in: batch)
                 .getDocuments()
+            
+            print("FirestoreService: Found \(snapshot.documents.count) users in this batch")
             
             let batchUsers = snapshot.documents.compactMap { document -> UserProfile? in
                 let data = document.data()
@@ -2209,18 +2216,20 @@ extension FirestoreService {
                 
                 // Include phone number in the UserProfile for matching
                 let phoneNumber = data["phoneNumber"] as? String
+                print("FirestoreService: Found user '\(username)' with phone: \(phoneNumber ?? "nil")")
                 
                 return UserProfile(
                     uid: document.documentID,
                     username: username,
-                    movieCount: data["movieCount"] as? Int ?? 0,
-                    phoneNumber: phoneNumber
+                    phoneNumber: phoneNumber,
+                    movieCount: data["movieCount"] as? Int ?? 0
                 )
             }
             
             allUsers.append(contentsOf: batchUsers)
         }
         
+        print("FirestoreService: Total users found: \(allUsers.count)")
         return allUsers
     }
     
@@ -2229,11 +2238,24 @@ extension FirestoreService {
         // Remove all non-digit characters
         let digits = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         
+        print("FirestoreService: Cleaning phone number '\(phone)' -> digits: '\(digits)'")
+        
         // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
         if digits.hasPrefix("1") && digits.count == 11 {
-            return String(digits.dropFirst())
+            let result = String(digits.dropFirst())
+            print("FirestoreService: Removed leading 1 -> '\(result)'")
+            return result
         }
         
+        // If it's a 10-digit number, return as is
+        if digits.count == 10 {
+            print("FirestoreService: 10-digit number -> '\(digits)'")
+            return digits
+        }
+        
+        // If it's a 7-digit number, we might need to add area code
+        // For now, return as is and let the caller handle area code logic
+        print("FirestoreService: Other length (\(digits.count) digits) -> '\(digits)'")
         return digits
     }
     
