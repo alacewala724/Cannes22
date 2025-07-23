@@ -5,7 +5,6 @@ import FirebaseAuth
 
 struct ContactUser {
     let contact: CNContact
-    let email: String?
     let phone: String?
     let name: String
     let isAppUser: Bool
@@ -56,7 +55,8 @@ class ContactsService: ObservableObject {
         }
         
         let store = CNContactStore()
-        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactEmailAddressesKey, CNContactPhoneNumbersKey]
+        // Only request name and phone number - no email addresses
+        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactPhoneNumbersKey]
         let request = CNContactFetchRequest(keysToFetch: keys as [CNKeyDescriptor])
         
         var contactUsers: [ContactUser] = []
@@ -65,12 +65,10 @@ class ContactsService: ObservableObject {
             try store.enumerateContacts(with: request) { contact, stop in
                 let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
                 if !name.isEmpty {
-                    let emails = contact.emailAddresses.map { $0.value as String }
                     let phones = contact.phoneNumbers.map { $0.value.stringValue }
                     
                     let contactUser = ContactUser(
                         contact: contact,
-                        email: emails.first,
                         phone: phones.first,
                         name: name,
                         isAppUser: false,
@@ -80,7 +78,7 @@ class ContactsService: ObservableObject {
                 }
             }
             
-            // Match contacts with app users
+            // Match contacts with app users by phone number
             let matchedContacts = await matchContactsWithUsers(contactUsers)
             
             await MainActor.run {
@@ -98,21 +96,33 @@ class ContactsService: ObservableObject {
     private func matchContactsWithUsers(_ contactUsers: [ContactUser]) async -> [ContactUser] {
         var matchedContacts = contactUsers
         
-        // Get all app users
+        // Extract unique phone numbers for batch lookup
+        let phoneNumbers = contactUsers.compactMap { $0.phone }
+        let uniquePhones = Array(Set(phoneNumbers)) // Remove duplicates
+        
+        // Batch find users by phone numbers
         do {
-            let allUsers = try await firestoreService.getAllUsers()
+            let matchingUsers = try await firestoreService.findUsersByPhoneNumbers(uniquePhones)
             
-            // Match by email first
+            // Create a lookup dictionary for efficiency
+            let userLookup = Dictionary(uniqueKeysWithValues: matchingUsers.map { ($0.uid, $0) })
+            
+            // Match contacts with found users
             for i in 0..<matchedContacts.count {
-                if let email = matchedContacts[i].email {
-                    if let matchingUser = allUsers.first(where: { user in
-                        // Check if user has this email in their profile
-                        // This would need to be implemented in FirestoreService
-                        return false // Placeholder - need to implement email matching
+                if let phone = matchedContacts[i].phone {
+                    let cleanPhone = cleanPhoneNumber(phone)
+                    
+                    // Find matching user by phone number
+                    if let matchingUser = matchingUsers.first(where: { user in
+                        // Compare the cleaned phone numbers
+                        if let userPhone = user.phoneNumber {
+                            let cleanUserPhone = cleanPhoneNumber(userPhone)
+                            return cleanPhone == cleanUserPhone
+                        }
+                        return false
                     }) {
                         matchedContacts[i] = ContactUser(
                             contact: matchedContacts[i].contact,
-                            email: matchedContacts[i].email,
                             phone: matchedContacts[i].phone,
                             name: matchedContacts[i].name,
                             isAppUser: true,
@@ -125,7 +135,27 @@ class ContactsService: ObservableObject {
             print("Error matching contacts with users: \(error)")
         }
         
+        // Sort contacts: app users first, then alphabetical
+        matchedContacts.sort { contact1, contact2 in
+            if contact1.isAppUser != contact2.isAppUser {
+                return contact1.isAppUser && !contact2.isAppUser
+            }
+            return contact1.name.localizedCaseInsensitiveCompare(contact2.name) == .orderedAscending
+        }
+        
         return matchedContacts
+    }
+    
+    private func cleanPhoneNumber(_ phone: String) -> String {
+        // Remove all non-digit characters
+        let digits = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        
+        // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
+        if digits.hasPrefix("1") && digits.count == 11 {
+            return String(digits.dropFirst())
+        }
+        
+        return digits
     }
     
     func inviteContact(_ contact: ContactUser) {

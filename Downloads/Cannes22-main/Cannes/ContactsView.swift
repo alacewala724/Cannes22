@@ -68,10 +68,37 @@ struct ContactsView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 
-                Text("Connect with friends who are already using the app by allowing access to your contacts.")
+                Text("We only access your contacts' names and phone numbers to help you find friends who are already using the app. Your contact data is never stored or shared.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
+                
+                // Privacy notice
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.shield")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        Text("Privacy First")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                    }
+                    
+                    Text("• Only name and phone number accessed")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("• Data never leaves your device")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("• No contact information stored")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
             }
             
             Button(action: {
@@ -168,8 +195,8 @@ struct ContactRow: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                 
-                if let email = contactUser.email {
-                    Text(email)
+                if let phone = contactUser.phone {
+                    Text(phone)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }

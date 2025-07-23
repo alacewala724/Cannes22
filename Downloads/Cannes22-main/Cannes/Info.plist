@@ -50,6 +50,6 @@
 		<string>remote-notification</string>
 	</array>
 	<key>NSContactsUsageDescription</key>
-	<string>This app uses your contacts to help you find and connect with friends who are also using the app.</string>
+	<string>This app uses your contacts' names and phone numbers to help you find friends who are already using the app. Your contact data is never stored, shared, or transmitted - it's only used locally on your device for matching.</string>
 </dict>
 </plist>

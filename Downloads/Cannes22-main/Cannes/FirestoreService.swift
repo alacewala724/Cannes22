@@ -2148,6 +2148,95 @@ extension FirestoreService {
         }
     }
     
+    // Find user by phone number (for contacts matching)
+    func findUserByPhoneNumber(_ phoneNumber: String) async throws -> UserProfile? {
+        let cleanPhone = cleanPhoneNumber(phoneNumber)
+        
+        let snapshot = try await db.collection("users")
+            .whereField("phoneNumber", isEqualTo: cleanPhone)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else {
+            return nil
+        }
+        
+        let data = document.data()
+        guard let username = data["username"] as? String else {
+            return nil
+        }
+        
+        return UserProfile(
+            uid: document.documentID,
+            username: username,
+            movieCount: data["movieCount"] as? Int ?? 0
+        )
+    }
+    
+    // Update user profile with phone number
+    func updateUserPhoneNumber(_ phoneNumber: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let cleanPhone = cleanPhoneNumber(phoneNumber)
+        
+        try await db.collection("users").document(currentUser.uid).updateData([
+            "phoneNumber": cleanPhone
+        ])
+    }
+    
+    // Batch find users by phone numbers (for efficiency)
+    func findUsersByPhoneNumbers(_ phoneNumbers: [String]) async throws -> [UserProfile] {
+        let cleanPhones = phoneNumbers.map { cleanPhoneNumber($0) }
+        
+        // Firestore has a limit of 10 items in 'in' queries, so we need to batch
+        let batchSize = 10
+        var allUsers: [UserProfile] = []
+        
+        for i in stride(from: 0, to: cleanPhones.count, by: batchSize) {
+            let batch = Array(cleanPhones[i..<min(i + batchSize, cleanPhones.count)])
+            
+            let snapshot = try await db.collection("users")
+                .whereField("phoneNumber", in: batch)
+                .getDocuments()
+            
+            let batchUsers = snapshot.documents.compactMap { document -> UserProfile? in
+                let data = document.data()
+                guard let username = data["username"] as? String else {
+                    return nil
+                }
+                
+                // Include phone number in the UserProfile for matching
+                let phoneNumber = data["phoneNumber"] as? String
+                
+                return UserProfile(
+                    uid: document.documentID,
+                    username: username,
+                    movieCount: data["movieCount"] as? Int ?? 0,
+                    phoneNumber: phoneNumber
+                )
+            }
+            
+            allUsers.append(contentsOf: batchUsers)
+        }
+        
+        return allUsers
+    }
+    
+    // Helper function to clean phone numbers
+    private func cleanPhoneNumber(_ phone: String) -> String {
+        // Remove all non-digit characters
+        let digits = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        
+        // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
+        if digits.hasPrefix("1") && digits.count == 11 {
+            return String(digits.dropFirst())
+        }
+        
+        return digits
+    }
+    
     // Check if a user exists by email (for contacts matching)
     func findUserByEmail(_ email: String) async throws -> UserProfile? {
         // This would require storing email in user profiles
