@@ -8,7 +8,8 @@ struct RecommendationsView: View {
     @State private var searchResults: [TMDBMovie] = []
     @State private var isSearching = false
     @State private var showingGrid = false
-    @State private var showingMovieDetail: TMDBMovie?
+    @State private var showingMovieDetail = false
+    @State private var selectedMovie: TMDBMovie?
     @State private var futureCannesList: [FutureCannesItem] = []
     @State private var isLoadingFutureCannes = true
     
@@ -36,9 +37,11 @@ struct RecommendationsView: View {
         .task {
             await loadFutureCannesList()
         }
-        .sheet(item: $showingMovieDetail) { movie in
-            NavigationView {
-                UnifiedMovieDetailView(tmdbId: movie.id, store: store)
+        .sheet(isPresented: $showingMovieDetail) {
+            if let movie = selectedMovie {
+                NavigationView {
+                    UnifiedMovieDetailView(tmdbId: movie.id, store: store)
+                }
             }
         }
     }
@@ -157,7 +160,8 @@ struct RecommendationsView: View {
         LazyVStack(spacing: 12) {
             ForEach(searchResults, id: \.id) { movie in
                 RecommendationsSearchResultRow(movie: movie) {
-                    showingMovieDetail = movie
+                    selectedMovie = movie
+                    showingMovieDetail = true
                 } onAddToFutureCannes: {
                     Task {
                         await addToFutureCannes(movie: movie)
@@ -171,7 +175,8 @@ struct RecommendationsView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
             ForEach(searchResults, id: \.id) { movie in
                 RecommendationsSearchResultGridItem(movie: movie) {
-                    showingMovieDetail = movie
+                    selectedMovie = movie
+                    showingMovieDetail = true
                 } onAddToFutureCannes: {
                     Task {
                         await addToFutureCannes(movie: movie)
@@ -241,7 +246,8 @@ struct RecommendationsView: View {
         LazyVStack(spacing: 12) {
             ForEach(futureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
                 FutureCannesRow(item: item) {
-                    showingMovieDetail = item.movie
+                    selectedMovie = item.movie
+                    showingMovieDetail = true
                 } onRemove: {
                     Task {
                         await removeFromFutureCannes(item: item)
@@ -255,7 +261,8 @@ struct RecommendationsView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
             ForEach(futureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
                 FutureCannesGridItem(item: item) {
-                    showingMovieDetail = item.movie
+                    selectedMovie = item.movie
+                    showingMovieDetail = true
                 } onRemove: {
                     Task {
                         await removeFromFutureCannes(item: item)
