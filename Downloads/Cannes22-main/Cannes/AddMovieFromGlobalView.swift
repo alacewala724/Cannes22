@@ -8,6 +8,7 @@ struct AddMovieFromGlobalView: View {
     let onComplete: () -> Void
     
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var sentiment: MovieSentiment = .likedIt
     @State private var currentStep = 1
     @State private var newMovie: Movie? = nil
@@ -64,7 +65,7 @@ struct AddMovieFromGlobalView: View {
             VStack(spacing: 16) {
                 // Movie info
                 Text(tmdbMovie.displayTitle)
-                    .font(.title2)
+                    .font(.custom("PlayfairDisplay-Medium", size: 20))
                     .fontWeight(.medium)
                     .multilineTextAlignment(.center)
                 
@@ -110,7 +111,7 @@ struct AddMovieFromGlobalView: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(sentiment.color.opacity(0.15))
+                        .background(Color.adaptiveSentiment(for: sentiment.midpoint, colorScheme: colorScheme).opacity(0.15))
                         .cornerRadius(12)
                     }
                     .buttonStyle(PlainButtonStyle())

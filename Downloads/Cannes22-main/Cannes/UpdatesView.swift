@@ -8,6 +8,7 @@ struct UpdatesView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showError = false
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         NavigationView {
@@ -133,6 +134,7 @@ struct ActivityRowView: View {
     @ObservedObject var store: MovieStore
     @State private var showingMovieDetail = false
     @State private var showingUserProfile = false
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -159,7 +161,7 @@ struct ActivityRowView: View {
                             // For rankings and updates, show the text with only the number colored
                             (Text("\(activity.username) \(activity.type == .movieRanked ? "ranked" : "updated") \"\(activity.movieTitle)\" a ") +
                             Text(String(format: "%.1f", activity.score!))
-                                .foregroundColor(activity.sentiment?.color ?? .primary))
+                                .foregroundColor(activity.score != nil ? Color.adaptiveSentiment(for: activity.score!, colorScheme: colorScheme) : .primary))
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                         } else {
@@ -196,7 +198,7 @@ struct ActivityRowView: View {
                             .foregroundColor(.accentColor)
                         
                         Text(activity.movieTitle)
-                            .font(.subheadline)
+                            .font(.custom("PlayfairDisplay-Medium", size: 14))
                             .fontWeight(.medium)
                             .foregroundColor(.accentColor)
                         

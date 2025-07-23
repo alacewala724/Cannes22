@@ -7,6 +7,7 @@ import UIKit
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authService: AuthenticationService
+    @Environment(\.colorScheme) private var colorScheme
     
     @State private var currentPassword = ""
     @State private var newPassword = ""
@@ -130,7 +131,7 @@ struct SettingsView: View {
                                 
                                 if let successMessage = emailLinkSuccessMessage {
                                     Text(successMessage)
-                                        .foregroundColor(.green)
+                                        .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                         .font(.caption)
                                 }
                                 
@@ -167,7 +168,7 @@ struct SettingsView: View {
                                 
                                 if let successMessage = emailLinkSuccessMessage {
                                     Text(successMessage)
-                                        .foregroundColor(.green)
+                                        .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                         .font(.caption)
                                 }
                                 
@@ -283,7 +284,7 @@ struct SettingsView: View {
                                         
                                         if let successMessage = phoneLinkSuccessMessage {
                                             Text(successMessage)
-                                                .foregroundColor(.green)
+                                                .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                                 .font(.caption)
                                         }
                                         
@@ -350,7 +351,7 @@ struct SettingsView: View {
                                 
                                 if let successMessage = phoneLinkSuccessMessage {
                                     Text(successMessage)
-                                        .foregroundColor(.green)
+                                        .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                         .font(.caption)
                                 }
                                 
@@ -392,7 +393,7 @@ struct SettingsView: View {
                         
                         if let successMessage = passwordSuccessMessage {
                             Text(successMessage)
-                                .foregroundColor(.green)
+                                .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                 .font(.caption)
                         }
                         
@@ -429,7 +430,7 @@ struct SettingsView: View {
                         
                         if let successMessage = usernameSuccessMessage {
                             Text(successMessage)
-                                .foregroundColor(.green)
+                                .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
                                 .font(.caption)
                         }
                         

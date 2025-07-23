@@ -325,6 +325,7 @@ struct MovieRow: View {
     @ObservedObject var store: MovieStore
     let isEditing: Bool
     @State private var showingDetail = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: UI.vGap) {
@@ -356,7 +357,7 @@ struct MovieRow: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(movie.title)
-                            .font(.headline)
+                            .font(.custom("PlayfairDisplay-Medium", size: 16))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -369,30 +370,30 @@ struct MovieRow: View {
                         ZStack {
                             // Halo effect
                             Circle()
-                                .fill(Color.yellow.opacity(0.3))
+                                .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
                                 .frame(width: 52, height: 52)
                                 .blur(radius: 2)
                             
                             // Main golden circle
                             Circle()
-                                .fill(Color.yellow)
+                                .fill(Color.adaptiveGolden(for: colorScheme))
                                 .frame(width: 44, height: 44)
                                 .overlay(
                                     Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
-                                .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
+                                .shadow(color: Color.adaptiveGolden(for: colorScheme).opacity(0.5), radius: 4, x: 0, y: 0)
                         }
                         .frame(width: 52, height: 52)
                     } else {
                         Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
                             .font(position == 1 ? .title : .headline).bold()
-                            .foregroundColor(movie.sentiment.color)
+                            .foregroundColor(Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
                             .frame(width: 44, height: 44)
                             .background(
                                 Circle()
-                                    .stroke(movie.sentiment.color, lineWidth: 2)
+                                    .stroke(Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme), lineWidth: 2)
                             )
                             .frame(width: 52, height: 52)
                     }
@@ -404,10 +405,7 @@ struct MovieRow: View {
                             .frame(width: 44, height: 44)
                     }
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
-                .background(Color(.systemGray6))
-                .cornerRadius(UI.corner)
+                .listItem()
             }
             .buttonStyle(.plain)
             .disabled(isEditing)

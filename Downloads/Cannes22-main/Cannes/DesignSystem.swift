@@ -3,66 +3,87 @@
 
 import SwiftUI
 
-enum DS {
-    // Spacing and corner radii
-    static let corner: CGFloat = 12                // all cards / buttons
-    static let gap:    CGFloat = 12                // default vertical gap
-    static let hPad:   CGFloat = 16                // leading/trailing padding
-
-    // Fonts
-    static func font(_ style: Font.TextStyle,
-                     weight: Font.Weight = .regular) -> Font {
-        .system(style, design: .rounded).weight(weight)
-    }
+// MARK: - Design Tokens
+enum Design {
+    static let gutter:   CGFloat = 16        // inset from the safe-area edge
+    static let cardPad:  CGFloat = 16        // inner padding of every card
+    static let cardRadius: CGFloat = 18
     
-    // Playfair Display for headers and titles
-    static func playfairDisplay(_ style: Font.TextStyle,
-                               weight: Font.Weight = .regular) -> Font {
-        let fontName: String
-        switch weight {
-        case .bold:
-            fontName = "PlayfairDisplay-Bold"
-        case .medium, .semibold:
-            fontName = "PlayfairDisplay-Medium"
-        default:
-            fontName = "PlayfairDisplay-Regular"
-        }
-        
-        return .custom(fontName, size: fontSize(for: style))
-    }
-    
-    // Helper function to get font size for different text styles
-    private static func fontSize(for style: Font.TextStyle) -> CGFloat {
-        switch style {
-        case .largeTitle:
-            return 34
-        case .title:
-            return 28
-        case .title2:
-            return 22
-        case .title3:
-            return 20
-        case .headline:
-            return 17
-        case .body:
-            return 17
-        case .callout:
-            return 16
-        case .subheadline:
-            return 15
-        case .footnote:
-            return 13
-        case .caption:
-            return 12
-        case .caption2:
-            return 11
+    // Adaptive card background for light/dark mode
+    static func cardBG(for colorScheme: ColorScheme) -> Color {
+        switch colorScheme {
+        case .light:
+            return Color(.systemGray6)  // More visible in light mode
+        case .dark:
+            return Color(.systemGray5)  // Subtle but visible in dark mode
         @unknown default:
-            return 17
+            return Color(.systemGray5)
         }
     }
+    
+    // Adaptive shadows for light/dark mode
+    static func cardShadow(for colorScheme: ColorScheme) -> Color {
+        switch colorScheme {
+        case .light:
+            return Color.black.opacity(0.15)  // Dark shadow on light background
+        case .dark:
+            return Color.black.opacity(0.5)   // Stronger black shadow on dark background
+        @unknown default:
+            return Color.black.opacity(0.15)
+        }
+    }
+}
 
-    // Colours (add Asset-catalog "light + dark" variants for these)
-    static let tintGood     = Color("SentimentGood")     // green variants
-    static let tintNeutral  = Color("SentimentNeutral")  // gray variants
-    static let tintBad      = Color("SentimentBad")      // red variants
+// A one-liner you can attach to every section
+struct CardStyle: ViewModifier {
+    @Environment(\.colorScheme) var colorScheme
+    
+    func body(content: Content) -> some View {
+        content
+            .padding(Design.cardPad)
+            .background(Design.cardBG(for: colorScheme))
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardRadius, style: .continuous))
+            .shadow(color: Design.cardShadow(for: colorScheme),
+                    radius: 8, x: 0, y: 4)
+    }
+}
+
+// List item style with adaptive shadows
+struct ListItemStyle: ViewModifier {
+    @Environment(\.colorScheme) var colorScheme
+    
+    func body(content: Content) -> some View {
+        content
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .background(Design.cardBG(for: colorScheme))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: Design.cardShadow(for: colorScheme),
+                    radius: 4, x: 0, y: 2)
+    }
+}
+
+extension View {
+    func card() -> some View { modifier(CardStyle()) }
+    func listItem() -> some View { modifier(ListItemStyle()) }
+}
+
+// MARK: - Adaptive Sentiment Colors
+extension Color {
+    static func adaptiveSentiment(for score: Double, colorScheme: ColorScheme) -> Color {
+        switch score {
+        case 6.9...10.0:
+            return colorScheme == .light ? Color(red: 34/255, green: 139/255, blue: 34/255) : .green
+        case 4.0..<6.9:
+            return .gray
+        case 0.0..<4.0:
+            return .red
+        default:
+            return .gray
+        }
+    }
+    
+    static func adaptiveGolden(for colorScheme: ColorScheme) -> Color {
+        return colorScheme == .light ? Color(red: 239/255, green: 191/255, blue: 4/255) : .yellow
+    }
 } 

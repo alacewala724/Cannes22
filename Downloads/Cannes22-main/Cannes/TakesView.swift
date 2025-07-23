@@ -22,8 +22,9 @@ struct TakesView: View {
                         .fontWeight(.semibold)
                     
                     Text(movie.title)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .font(.custom("PlayfairDisplay-Medium", size: 18))
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
                 }
                 .padding()
                 

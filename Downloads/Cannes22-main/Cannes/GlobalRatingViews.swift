@@ -14,6 +14,7 @@ struct GlobalRatingRow: View {
     let position: Int
     let onTap: () -> Void
     @ObservedObject var store: MovieStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: onTap) {
@@ -25,7 +26,7 @@ struct GlobalRatingRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(rating.title)
-                        .font(.headline)
+                        .font(.custom("PlayfairDisplay-Medium", size: 16))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -39,7 +40,7 @@ struct GlobalRatingRow: View {
                        let userScore = store.getUserPersonalScore(for: tmdbId) {
                         let difference = userScore - rating.averageRating
                         let isHigher = difference > 0
-                        let color: Color = isHigher ? .green : .red
+                        let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
                         let arrow = isHigher ? "arrow.up" : "arrow.down"
                         
                         VStack(spacing: 1) {
@@ -72,30 +73,30 @@ struct GlobalRatingRow: View {
                         ZStack {
                             // Halo effect
                             Circle()
-                                .fill(Color.yellow.opacity(0.3))
+                                .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
                                 .frame(width: 52, height: 52)
                                 .blur(radius: 2)
                             
                             // Main golden circle
                             Circle()
-                                .fill(Color.yellow)
+                                .fill(Color.adaptiveGolden(for: colorScheme))
                                 .frame(width: 44, height: 44)
                                 .overlay(
                                     Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
-                                .shadow(color: .yellow.opacity(0.5), radius: 4, x: 0, y: 0)
+                                .shadow(color: Color.adaptiveGolden(for: colorScheme).opacity(0.5), radius: 4, x: 0, y: 0)
                         }
                         .frame(width: 52, height: 52)
                     } else {
                         Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
                             .font(position == 1 ? .title : .headline).bold()
-                            .foregroundColor(rating.sentimentColor)
+                            .foregroundColor(Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme))
                             .frame(width: 44, height: 44)
                             .background(
                                 Circle()
-                                    .stroke(rating.sentimentColor, lineWidth: 2)
+                                    .stroke(Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme), lineWidth: 2)
                             )
                             .frame(width: 52, height: 52)
                     }
@@ -106,10 +107,7 @@ struct GlobalRatingRow: View {
                     .font(.title3)
                     .frame(width: 44, height: 44)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
-            .background(Color(.systemGray6))
-            .cornerRadius(UI.corner)
+            .listItem()
         }
         .buttonStyle(.plain)
     }
@@ -127,6 +125,7 @@ struct UnifiedMovieDetailView: View {
     @ObservedObject var store: MovieStore
     let notificationSenderRating: FriendRating? // Optional notification sender's rating
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var movieDetails: AppModels.Movie?
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -150,6 +149,14 @@ struct UnifiedMovieDetailView: View {
     @State private var editingTake: Take?
     @State private var showingDeleteAlert = false
     @State private var takeToDelete: Take?
+    
+    // Seasons and Episodes state variables
+    @State private var seasons: [TMDBSeason] = []
+    @State private var isLoadingSeasons = false
+    @State private var selectedSeason: TMDBSeason?
+    @State private var episodes: [TMDBEpisode] = []
+    @State private var isLoadingEpisodes = false
+    @State private var showingSeasonsEpisodes = false
     
     // Friends' Ratings state variables
     @State private var selectedFriendUserId: String?
@@ -223,18 +230,9 @@ struct UnifiedMovieDetailView: View {
     
     private var displaySentimentColor: Color {
         if let rating = initialRating {
-            return rating.sentimentColor
+            return Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme)
         } else if let averageRating = displayAverageRating {
-            switch averageRating {
-            case 6.9...10.0:
-                return .green
-            case 4.0..<6.9:
-                return .gray
-            case 0.0..<4.0:
-                return .red
-            default:
-                return .gray
-            }
+            return Color.adaptiveSentiment(for: averageRating, colorScheme: colorScheme)
         }
         return .gray
     }
@@ -286,7 +284,7 @@ struct UnifiedMovieDetailView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 20)
                 
-                if isLoading || isLoadingFriendsRatings || isLoadingTakes {
+                if isLoading || isLoadingFriendsRatings || isLoadingTakes || isLoadingSeasons {
                     loadingView
                 } else if let error = errorMessage {
                     errorView(message: error)
@@ -297,7 +295,7 @@ struct UnifiedMovieDetailView: View {
                     fallbackView
                 }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, Design.gutter)
         }
         .navigationBarHidden(true)
         .background(Color(.systemGroupedBackground))
@@ -401,6 +399,7 @@ struct UnifiedMovieDetailView: View {
         isLoading = true
         isLoadingFriendsRatings = true
         isLoadingTakes = true
+        isLoadingSeasons = true
         
         Task {
             // Load all data concurrently
@@ -408,13 +407,15 @@ struct UnifiedMovieDetailView: View {
             async let friendsRatingsTask = loadFriendsRatingsAsync()
             async let takesTask = loadTakesAsync()
             async let communityRatingTask = loadCommunityRatingAsync()
+            async let seasonsTask = loadSeasonsAsync()
             
             // Wait for all tasks to complete
-            let (movieDetailsResult, friendsRatingsResult, takesResult, communityRatingResult) = await (
+            let (movieDetailsResult, friendsRatingsResult, takesResult, communityRatingResult, seasonsResult) = await (
                 movieDetailsTask,
                 friendsRatingsTask,
                 takesTask,
-                communityRatingTask
+                communityRatingTask,
+                seasonsTask
             )
             
             await MainActor.run {
@@ -435,10 +436,14 @@ struct UnifiedMovieDetailView: View {
                     numberOfRatings = rating.numberOfRatings
                 }
                 
+                // Update seasons
+                seasons = seasonsResult
+                
                 // Set all loading states to false
                 isLoading = false
                 isLoadingFriendsRatings = false
                 isLoadingTakes = false
+                isLoadingSeasons = false
             }
         }
     }
@@ -553,8 +558,44 @@ struct UnifiedMovieDetailView: View {
         }
     }
     
+    private func loadSeasonsAsync() async -> [TMDBSeason] {
+        guard let tmdbId = displayTmdbId, displayMediaType == .tv else { return [] }
+        
+        do {
+            return try await tmdbService.getTVShowSeasons(id: tmdbId)
+        } catch {
+            print("Error loading seasons: \(error)")
+            return []
+        }
+    }
+    
+    private func loadEpisodesForSeason(_ season: TMDBSeason) async {
+        guard let tmdbId = displayTmdbId else { return }
+        
+        isLoadingEpisodes = true
+        
+        do {
+            let loadedEpisodes = try await tmdbService.getEpisodes(tvId: tmdbId, season: season.seasonNumber)
+            await MainActor.run {
+                episodes = loadedEpisodes
+                isLoadingEpisodes = false
+            }
+        } catch {
+            print("Error loading episodes: \(error)")
+            await MainActor.run {
+                isLoadingEpisodes = false
+            }
+        }
+    }
+    
+    private func loadEpisodesForSeason(_ season: TMDBSeason) {
+        Task {
+            await loadEpisodesForSeason(season)
+        }
+    }
+    
     private var loadingView: some View {
-        VStack(spacing: 12) {
+        LazyVStack(spacing: 24) {
             // Poster skeleton - matches actual poster ZStack structure
             ZStack {
                 // Poster placeholder skeleton - matches posterPlaceholder
@@ -568,141 +609,175 @@ struct UnifiedMovieDetailView: View {
             }
             .frame(maxWidth: .infinity)
             
-            // Content skeleton - matches actual layout with shadows
-            VStack(alignment: .leading, spacing: 12) {
-                // Title and release date skeleton
-                VStack(alignment: .leading, spacing: 12) {
-                    // Title skeleton - matches PlayfairDisplay-Bold, size 32
-                    RoundedRectangle(cornerRadius: 8)
+            // Title and release date skeleton
+            VStack(alignment: .leading, spacing: 8) {
+                // Title skeleton - matches PlayfairDisplay-Bold, size 32
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 40)
+                    .frame(maxWidth: 320)
+                
+                // Release date skeleton
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(Color(.systemGray5))
-                        .frame(height: 40)
-                        .frame(maxWidth: 320)
+                        .frame(width: 12, height: 12)
                     
-                    // Release date skeleton
-                    HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: 180)
+                }
+            }
+            
+            // Rating section skeleton - matches actual rating circles layout with shadows
+            VStack(spacing: 8) {
+                // Labels row skeleton
+                GeometryReader { geometry in
+                    let side = (geometry.size.width - 2*18) / 3
+                    HStack(spacing: 18) {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color(.systemGray5))
-                            .frame(width: 12, height: 12)
-                        
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.systemGray5))
-                            .frame(height: 16)
-                            .frame(maxWidth: 180)
-                    }
-                }
-                
-                // Rating section skeleton - matches actual rating circles layout with shadows
-                VStack(spacing: 8) {
-                    // Labels row skeleton
-                    GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3
-                        HStack(spacing: 18) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color(.systemGray5))
-                                .frame(width: side, height: 20)
-                            
-                            Spacer()
-                                .frame(width: side)
-                            
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color(.systemGray5))
-                                .frame(width: side, height: 20)
-                        }
-                    }
-                    .frame(height: 20)
-                    
-                    // Numbers row skeleton - matches actual circle layout
-                    GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3
-                        HStack(spacing: 18) {
-                            // Community rating circle skeleton
-                            ZStack {
-                                Circle()
-                                    .stroke(Color(.systemGray5), lineWidth: 2)
-                                    .frame(width: side, height: side)
-                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                                
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(.systemGray4))
-                                    .frame(width: 32, height: 12)
-                            }
-                            
-                            // Difference indicator skeleton
-                            ZStack {
-                                Circle()
-                                    .fill(Color.clear)
-                                    .frame(width: side, height: side)
-                                
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(.systemGray4))
-                                    .frame(width: 40, height: 12)
-                            }
-                            
-                            // Your rating circle skeleton
-                            ZStack {
-                                Circle()
-                                    .stroke(Color(.systemGray5), lineWidth: 2)
-                                    .frame(width: side, height: side)
-                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                                
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(.systemGray4))
-                                    .frame(width: 32, height: 12)
-                            }
-                        }
-                    }
-                    .frame(height: 120)
-                }
-                .padding(.vertical, 24)
-                .padding(.horizontal, 10)
-                .background(Color(.systemBackground))
-                .cornerRadius(16)
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
-                
-                // Followings' ratings skeleton with shadows
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.systemGray5))
-                            .frame(height: 20)
-                            .frame(maxWidth: 150)
+                            .frame(width: side, height: 20)
                         
                         Spacer()
+                            .frame(width: side)
                         
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: 4)
                             .fill(Color(.systemGray5))
-                            .frame(height: 16)
-                            .frame(maxWidth: 80)
+                            .frame(width: side, height: 20)
                     }
-                    
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
-                        ForEach(0..<8, id: \.self) { _ in
-                            VStack(spacing: 8) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(.systemGray5))
-                                    .frame(height: 12)
-                                    .frame(maxWidth: 40)
+                }
+                .frame(height: 20)
+                
+                // Numbers row skeleton - matches actual circle layout
+                GeometryReader { geometry in
+                    let side = (geometry.size.width - 2*18) / 3
+                    HStack(spacing: 18) {
+                        // Community rating circle skeleton
+                        ZStack {
+                            Circle()
+                                .stroke(Color(.systemGray5), lineWidth: 2)
+                                .frame(width: side, height: side)
                                 
-                                ZStack {
-                                    Circle()
-                                        .fill(Color(.systemGray5))
-                                        .frame(width: 56, height: 56)
-                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                            
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray4))
+                                .frame(width: 32, height: 12)
+                        }
+                        
+                        // Difference indicator skeleton
+                        ZStack {
+                            Circle()
+                                .fill(Color.clear)
+                                .frame(width: side, height: side)
+                            
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray4))
+                                .frame(width: 40, height: 12)
+                        }
+                        
+                        // Your rating circle skeleton
+                        ZStack {
+                            Circle()
+                                .stroke(Color(.systemGray5), lineWidth: 2)
+                                .frame(width: side, height: side)
+                                
+                            
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray4))
+                                .frame(width: 32, height: 12)
+                        }
+                    }
+                }
+                .frame(height: 120)
+            }
+            .card()
+            .layoutPriority(1)
+            
+            // Followings' ratings skeleton with shadows
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 20)
+                        .frame(maxWidth: 150)
+                    
+                    Spacer()
+                    
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: 80)
+                }
+                
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        VStack(spacing: 8) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 12)
+                                .frame(maxWidth: 40)
+                            
+                            ZStack {
+                                Circle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 56, height: 56)
                                     
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color(.systemGray4))
-                                        .frame(width: 20, height: 6)
-                                }
+                                
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 20, height: 6)
                             }
                         }
                     }
                 }
-                .padding(24)
-                .background(Color(.systemBackground))
-                .cornerRadius(16)
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                .padding(.horizontal, 6)
             }
-            .padding(.horizontal, 4)
+            .card()
+            
+            // Runtime skeleton
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 12, height: 12)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: 80)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .card()
+            
+            // Overview skeleton
+            VStack(alignment: .leading, spacing: 8) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 20)
+                    .frame(maxWidth: 100)
+                
+                VStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: .infinity)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: .infinity)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 16)
+                        .frame(maxWidth: 280)
+                }
+            }
+            .card()
         }
         .padding(.vertical, 20)
         .opacity(isAppearing ? 1 : 0)
@@ -747,7 +822,7 @@ struct UnifiedMovieDetailView: View {
             
             VStack(alignment: .leading, spacing: 16) {
                 // Title and media type rating
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(displayTitle)
                         .font(.custom("PlayfairDisplay-Bold", size: 32))
                         .multilineTextAlignment(.leading)
@@ -764,7 +839,7 @@ struct UnifiedMovieDetailView: View {
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(Color(.systemGray6))
+                            .background(Color(.systemGray5))
                             .cornerRadius(8)
                     }
                 }
@@ -794,14 +869,14 @@ struct UnifiedMovieDetailView: View {
                 
                 let difference = userScore - (displayAverageRating ?? 0.0)
                 let isHigher = difference > 0
-                let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? .green : .red)
+                let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
                 let arrow = isHigher ? "arrow.up" : "arrow.down"
                 let roundedDifference = (difference * 10).rounded() / 10
                 
-                VStack(spacing: 8) {
-                    // ✅ Labels row (separate from numbers)
+                VStack(spacing: 6) {
+                    // Labels row
                     GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3  // 18-pt gaps → 3 columns
+                        let side = (geometry.size.width - 2*18) / 3
                         HStack(spacing: 18) {
                             Text("Community")
                                 .font(.subheadline).fontWeight(.medium)
@@ -822,81 +897,21 @@ struct UnifiedMovieDetailView: View {
                                 .frame(width: side, alignment: .center)
                         }
                     }
-                    .frame(height: 20)  // Fixed height for labels
+                    .frame(height: 18)
 
-                    // ✅ Numbers row (baseline aligned)
+                    // Numbers row
                     GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3  // 18-pt gaps → 3 columns
+                        let side = (geometry.size.width - 2*18) / 3
                         HStack(spacing: 18) {
-                            // ── Community ───────────────────────────────────────────────
-                            if let averageRating = displayAverageRating {
-                                ZStack {
-                                    Circle()
-                                        .stroke(displaySentimentColor, lineWidth: 2)
-                                        .frame(width: side, height: side)
-                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-
-                                    Text(String(format: "%.1f", averageRating))
-                                        .font(.largeTitle).bold()
-                                        .foregroundColor(displaySentimentColor)
-                                }
-                            } else {
-                                ZStack {
-                                    Circle()
-                                        .stroke(Color.gray, lineWidth: 2)
-                                        .frame(width: side, height: side)
-                                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-
-                                    Text("—")
-                                        .font(.largeTitle).bold()
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            // ── Net Difference column ───────────────────────────────────
-                            ZStack {
-                                // Invisible circle to match the circle dimensions
-                                Circle()
-                                    .fill(Color.clear)
-                                    .frame(width: side, height: side)
-                                
-                                if abs(roundedDifference) < 0.1 {
-                                    Text("—")
-                                        .font(.largeTitle).bold()
-                                        .foregroundColor(color)
-                                } else {
-                                    HStack(spacing: 2) { // 2 pt arrow gap
-                                        Image(systemName: arrow)
-                                            .font(.title).bold()
-                                            .foregroundColor(color)
-
-                                        Text(String(format: "%.1f", abs(roundedDifference)))
-                                            .font(.largeTitle).bold()
-                                            .foregroundColor(color)
-                                    }
-                                }
-                            }
-
-                            // ── Your Rating ─────────────────────────────────────────────
-                            ZStack {
-                                Circle()
-                                    .stroke(Color.accentColor, lineWidth: 2)
-                                    .frame(width: side, height: side)
-                                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-
-                                Text(String(format: "%.1f", userScore))
-                                    .font(.largeTitle).bold()
-                                    .foregroundColor(.accentColor)
-                            }
+                            ratingCircle(value: displayAverageRating, color: displaySentimentColor, size: side)
+                            diffCircle(value: roundedDifference, arrow: arrow, color: color, size: side)
+                            ratingCircle(value: userScore, color: .accentColor, size: side)
                         }
                     }
-                    .frame(height: 120)  // Fixed height for numbers
+                    .frame(height: 96)
                 }
-                .padding(.vertical, 24)
-                .padding(.horizontal, 10)
-                .background(Color(.systemBackground))
-                .cornerRadius(16)
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                .frame(minHeight: 120)
+                .layoutPriority(1)
 
             } else {
                 // Fallback if not rated
@@ -933,7 +948,7 @@ struct UnifiedMovieDetailView: View {
     }
     
     private func detailView(details: AppModels.Movie) -> some View {
-        VStack(spacing: 12) {
+        LazyVStack(spacing: 24) {
             // Poster area with improved design
             ZStack {
                 // Always show skeleton first (matches loading skeleton)
@@ -973,112 +988,120 @@ struct UnifiedMovieDetailView: View {
             }
             .frame(maxWidth: .infinity)
             
-            VStack(alignment: .leading, spacing: 12) {
-                // Title and Release Date with improved typography
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(details.displayTitle)
-                        .font(.custom("PlayfairDisplay-Bold", size: 32))
-                        .multilineTextAlignment(.leading)
-                        .foregroundColor(.primary)
-                        .lineLimit(3)
-                    
-                    if let releaseDate = details.displayDate {
-                        HStack(spacing: 8) {
-                            Image(systemName: "calendar")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("Released: \(formatDate(releaseDate))")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
+            // Title and Release Date with improved typography
+            VStack(alignment: .leading, spacing: 8) {
+                // Title
+                Text(details.displayTitle)
+                    .font(.custom("PlayfairDisplay-Bold", size: 32))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .foregroundColor(.primary)
+                    .lineLimit(3)
+                
+                // Release date
+                if let releaseDate = details.displayDate {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Released: \(formatDate(releaseDate))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                 }
-                
-                // User rating comparison or "Rank This" button (enhanced design)
-                userRatingSection
-                
-                // Followings' Ratings with improved grid
-                if !friendsRatings.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Text("Followings' Ratings")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                            
-                            Text("\(friendsRatings.count) ratings")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(.systemGray6))
-                                .cornerRadius(8)
-                        }
-                        
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
-                            ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
-                                Button(action: {
-                                    selectedFriendUserId = friendRating.friend.uid
-                                    showingFriendProfile = true
-                                }) {
-                                    VStack(spacing: 8) {
-                                        Text("@\(friendRating.friend.username)")
-                                            .font(.caption)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.primary)
-                                            .lineLimit(1)
-                                            .truncationMode(.tail)
-                                        
-                                        ZStack {
-                                            Circle()
-                                                .stroke(sentimentColor(for: friendRating.score), lineWidth: 2)
-                                                .frame(width: 56, height: 56)
-                                                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                                            
-                                            Text(String(format: "%.1f", friendRating.score))
-                                                .font(.title3)
-                                                .fontWeight(.bold)
-                                                .foregroundColor(sentimentColor(for: friendRating.score))
-                                        }
-                                    }
-                                    .onAppear {
-                                        print("UnifiedMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
-                                    }
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        .padding(.horizontal, 6)
-                    }
-                    .onAppear {
-                        print("UnifiedMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
-                    }
-                } else if isLoadingFriendsRatings {
-                    // Enhanced loading state for friends ratings
-                    VStack(alignment: .leading, spacing: 12) {
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Design.gutter)
+            
+            // User rating comparison or "Rank This" button (enhanced design)
+            userRatingSection
+                .card()
+                .layoutPriority(1)
+            
+            // Followings' Ratings with improved grid
+            if !friendsRatings.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
                         Text("Followings' Ratings")
                             .font(.title3)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
                         
-                        HStack(spacing: 12) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("Loading followings' ratings...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 18)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
+                        Spacer()
+                        
+                        Text("\(friendsRatings.count) ratings")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.systemGray5))
+                            .cornerRadius(8)
                     }
+                    
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
+                        ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
+                            Button(action: {
+                                selectedFriendUserId = friendRating.friend.uid
+                                showingFriendProfile = true
+                            }) {
+                                VStack(spacing: 8) {
+                                    Text("@\(friendRating.friend.username)")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    
+                                    ZStack {
+                                        Circle()
+                                            .stroke(Color.adaptiveSentiment(for: friendRating.score, colorScheme: colorScheme), lineWidth: 2)
+                                            .frame(width: 56, height: 56)
+                                            
+                                        
+                                        Text(String(format: "%.1f", friendRating.score))
+                                            .font(.title3)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(Color.adaptiveSentiment(for: friendRating.score, colorScheme: colorScheme))
+                                    }
+                                }
+                                .onAppear {
+                                    print("UnifiedMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 6)
                 }
-                
-                // Runtime with improved styling
-                if let runtime = details.displayRuntime {
+                .card()
+                .onAppear {
+                    print("UnifiedMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
+                }
+            } else if isLoadingFriendsRatings {
+                // Enhanced loading state for friends ratings
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Followings' Ratings")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading followings' ratings...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 18)
+                }
+                .card()
+            }
+            
+            // Runtime with improved styling
+            if let runtime = details.displayRuntime {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Image(systemName: "clock")
                             .font(.subheadline)
@@ -1089,29 +1112,103 @@ struct UnifiedMovieDetailView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
                 }
-                
-                // Overview with better typography
-                if let overview = details.overview, !overview.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Overview")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                        
-                        Text(overview)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .lineSpacing(4)
+                .card()
+            } else {
+                // Add spacing when there's no runtime (e.g., for TV shows)
+                Spacer()
+                    .frame(height: 12)
+            }
+            
+            // Overview with better typography
+            if let overview = details.overview, !overview.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Overview")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    Text(overview)
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .lineSpacing(4)
+                }
+                .card()
+            }
+            
+            // Takes Section with enhanced design
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Takes")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        showingAddTake = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                            Text("Add Take")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.accentColor)
                     }
                 }
                 
-                // Takes Section with enhanced design
+                if isLoadingTakes {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading takes...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                } else if takes.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                        Text("No takes yet")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        Text("Be the first to share your take!")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(takes) { take in
+                            EmbeddedTakeRow(
+                                take: take,
+                                onEdit: {
+                                    editingTake = take
+                                },
+                                onDelete: {
+                                    takeToDelete = take
+                                    showingDeleteAlert = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            .card()
+            
+            // Seasons and Episodes Section (TV Shows only)
+            if displayMediaType == .tv && !seasons.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        Text("Takes")
+                        Text("Seasons & Episodes")
                             .font(.title3)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
@@ -1119,12 +1216,12 @@ struct UnifiedMovieDetailView: View {
                         Spacer()
                         
                         Button(action: {
-                            showingAddTake = true
+                            showingSeasonsEpisodes.toggle()
                         }) {
                             HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.title3)
-                                Text("Add Take")
+                                Image(systemName: showingSeasonsEpisodes ? "chevron.up" : "chevron.down")
+                                    .font(.subheadline)
+                                Text(showingSeasonsEpisodes ? "Collapse" : "Expand")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
                             }
@@ -1132,82 +1229,61 @@ struct UnifiedMovieDetailView: View {
                         }
                     }
                     
-                    if isLoadingTakes {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("Loading takes...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    } else if takes.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.title2)
-                                .foregroundColor(.secondary)
-                            Text("No takes yet")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                            Text("Be the first to share your take!")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 24)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    } else {
-                        LazyVStack(spacing: 16) {
-                            ForEach(takes) { take in
-                                EmbeddedTakeRow(
-                                    take: take,
-                                    onEdit: {
-                                        editingTake = take
-                                    },
-                                    onDelete: {
-                                        takeToDelete = take
-                                        showingDeleteAlert = true
+                    if showingSeasonsEpisodes {
+                        LazyVStack(spacing: 12) {
+                            ForEach(seasons.sorted { $0.seasonNumber < $1.seasonNumber }) { season in
+                                SeasonRow(
+                                    season: season,
+                                    tvShowId: displayTmdbId ?? 0,
+                                    onTap: {
+                                        selectedSeason = season
+                                        loadEpisodesForSeason(season)
                                     }
                                 )
                             }
                         }
+                    } else {
+                        // Collapsed view - show season count
+                        HStack(spacing: 8) {
+                            Image(systemName: "tv")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("\(seasons.count) season\(seasons.count == 1 ? "" : "s")")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(8)
                     }
                 }
-                .padding(24)
-                .background(Color(.systemBackground))
-                .cornerRadius(16)
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
-                
-                // Re-rank button with improved styling
-                if let tmdbId = displayTmdbId,
-                   let userScore = store.getUserPersonalScore(for: tmdbId) {
-                    Button(action: {
-                        // Set the correct media type before starting the rating process
-                        store.selectedMediaType = displayMediaType
-                        showingReRankSheet = true
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.title3)
-                            Text("Re-rank This \(displayMediaType.rawValue)")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.white)
-                        .padding(.vertical, 16)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.orange)
-                        .cornerRadius(16)
-                        .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
+                .card()
+            }
+            
+            // Re-rank button with improved styling
+            if let tmdbId = displayTmdbId,
+               let userScore = store.getUserPersonalScore(for: tmdbId) {
+                Button(action: {
+                    // Set the correct media type before starting the rating process
+                    store.selectedMediaType = displayMediaType
+                    showingReRankSheet = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title3)
+                        Text("Re-rank This \(displayMediaType.rawValue)")
+                            .font(.headline)
+                            .fontWeight(.semibold)
                     }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.orange)
+                    .cornerRadius(16)
+                    .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
                 }
             }
-            .padding(.horizontal, 4)
         }
         .padding(.vertical, 20)
         .opacity(isAppearing ? 1 : 0)
@@ -1325,7 +1401,7 @@ struct UnifiedMovieDetailView: View {
     private func sentimentColor(for score: Double) -> Color {
         switch score {
         case 6.9...10.0:
-            return .green
+            return Color.adaptiveSentiment(for: score, colorScheme: colorScheme)
         case 4.0..<6.9:
             return .gray
         case 0.0..<4.0:
@@ -1333,6 +1409,63 @@ struct UnifiedMovieDetailView: View {
         default:
             return .gray
         }
+    }
+    
+    private func adaptiveSentimentColor(for score: Double, colorScheme: ColorScheme) -> Color {
+        switch score {
+        case 6.9...10.0:
+            return colorScheme == .light ? Color(red: 34/255, green: 139/255, blue: 34/255) : .green
+        case 4.0..<6.9:
+            return .gray
+        case 0.0..<4.0:
+            return .red
+        default:
+            return .gray
+        }
+    }
+
+    private func ratingCircle(value: Double?, color: Color, size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .stroke(color, lineWidth: 2)
+                .frame(width: size, height: size)
+            
+            if let value = value {
+                Text(String(format: "%.1f", value))
+                    .font(.title2).bold()
+                    .foregroundColor(color)
+            } else {
+                Text("—")
+                    .font(.title2).bold()
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(2)
+    }
+
+    private func diffCircle(value: Double, arrow: String, color: Color, size: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.clear)
+                .frame(width: size, height: size)
+            
+            if abs(value) < 0.1 {
+                Text("—")
+                    .font(.title2).bold()
+                    .foregroundColor(color)
+            } else {
+                HStack(spacing: 2) { // 2 pt arrow gap
+                    Image(systemName: arrow)
+                        .font(.title).bold()
+                        .foregroundColor(color)
+
+                    Text(String(format: "%.1f", abs(value)))
+                        .font(.title2).bold()
+                        .foregroundColor(color)
+                }
+            }
+        }
+        .padding(2)
     }
 }
 
@@ -1344,7 +1477,7 @@ struct EmbeddedTakeRow: View {
     @State private var isCurrentUser: Bool = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 // User avatar with improved design
                 ZStack {
@@ -1358,7 +1491,7 @@ struct EmbeddedTakeRow: View {
                         .foregroundColor(.accentColor)
                 }
                 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(isCurrentUser ? "My take" : "\(take.username)'s take")
                             .font(.subheadline)
@@ -1386,6 +1519,7 @@ struct EmbeddedTakeRow: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity)
                     
                     Text(formatDate(take.timestamp))
                         .font(.caption)
@@ -1396,13 +1530,12 @@ struct EmbeddedTakeRow: View {
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.leading)
                         .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .padding(16)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.03), radius: 4, x: 0, y: 2)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .onAppear {
             checkIfCurrentUser()
         }
@@ -1436,7 +1569,7 @@ struct AddTakeSheet: View {
         NavigationView {
             VStack(spacing: 24) {
                 // Header Section
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Add Your Take")
                         .font(.custom("PlayfairDisplay-Bold", size: 28))
                         .foregroundColor(.primary)
@@ -1451,7 +1584,7 @@ struct AddTakeSheet: View {
                 .padding(.top, 8)
                 
                 // Text Editor Section
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Your Take")
                         .font(.headline)
                         .fontWeight(.semibold)
@@ -1460,7 +1593,7 @@ struct AddTakeSheet: View {
                     TextEditor(text: $takeText)
                         .frame(minHeight: 140, maxHeight: 240)
                         .padding(16)
-                        .background(Color(.systemGray6))
+                        .background(Color(.systemGray5))
                         .cornerRadius(12)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
@@ -1480,7 +1613,7 @@ struct AddTakeSheet: View {
                         .foregroundColor(takeText.count > maxTakeCharacters ? .red : .secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color(.systemGray6))
+                        .background(Color(.systemGray5))
                         .cornerRadius(8)
                 }
                 
@@ -1536,7 +1669,7 @@ struct EditTakeSheet: View {
         NavigationView {
             VStack(spacing: 24) {
                 // Header Section
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Edit Your Take")
                         .font(.custom("PlayfairDisplay-Bold", size: 28))
                         .foregroundColor(.primary)
@@ -1551,7 +1684,7 @@ struct EditTakeSheet: View {
                 .padding(.top, 8)
                 
                 // Text Editor Section
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Your Take")
                         .font(.headline)
                         .fontWeight(.semibold)
@@ -1560,7 +1693,7 @@ struct EditTakeSheet: View {
                     TextEditor(text: $editedText)
                         .frame(minHeight: 140, maxHeight: 240)
                         .padding(16)
-                        .background(Color(.systemGray6))
+                        .background(Color(.systemGray5))
                         .cornerRadius(12)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
@@ -1580,7 +1713,7 @@ struct EditTakeSheet: View {
                         .foregroundColor(editedText.count > maxTakeCharacters ? .red : .secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color(.systemGray6))
+                        .background(Color(.systemGray5))
                         .cornerRadius(8)
                 }
                 
@@ -1633,5 +1766,149 @@ struct EditTakeSheet: View {
             print("Error updating take: \(error)")
         }
         isSaving = false
+    }
+} 
+
+// MARK: - Season Row Component
+struct SeasonRow: View {
+    let season: TMDBSeason
+    let tvShowId: Int
+    let onTap: () -> Void
+    @State private var showingEpisodes = false
+    @State private var episodes: [TMDBEpisode] = []
+    @State private var isLoadingEpisodes = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: {
+                if showingEpisodes {
+                    showingEpisodes = false
+                } else {
+                    onTap()
+                    loadEpisodes()
+                    showingEpisodes = true
+                }
+            }) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Season \(season.seasonNumber)")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Text("\(season.episodeCount) episode\(season.episodeCount == 1 ? "" : "s")")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: showingEpisodes ? "chevron.up" : "chevron.down")
+                        .font(.subheadline)
+                        .foregroundColor(.accentColor)
+                }
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            if showingEpisodes {
+                if isLoadingEpisodes {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading episodes...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .listItem()
+                } else if episodes.isEmpty {
+                    Text("No episodes available")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .listItem()
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(episodes.sorted { $0.episodeNumber < $1.episodeNumber }, id: \.identifier) { episode in
+                            EpisodeRow(episode: episode)
+                        }
+                    }
+                }
+            }
+        }
+        .listItem()
+    }
+    
+    private func loadEpisodes() {
+        let tmdbId = tvShowId
+        
+        isLoadingEpisodes = true
+        
+        Task {
+            do {
+                let loadedEpisodes = try await TMDBService().getEpisodes(tvId: tmdbId, season: season.seasonNumber)
+                await MainActor.run {
+                    episodes = loadedEpisodes
+                    isLoadingEpisodes = false
+                }
+            } catch {
+                print("Error loading episodes: \(error)")
+                await MainActor.run {
+                    isLoadingEpisodes = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Episode Row Component
+struct EpisodeRow: View {
+    let episode: TMDBEpisode
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Episode number
+            Text("\(episode.episodeNumber)")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.accentColor)
+                .frame(width: 30, alignment: .leading)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                
+                if let airDate = episode.airDate, !airDate.isEmpty {
+                    Text("Aired: \(formatDate(airDate))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                if !episode.overview.isEmpty {
+                    Text(episode.overview)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            
+            Spacer()
+        }
+        .listItem()
+    }
+    
+    private func formatDate(_ dateString: String) -> String {
+        let inputFormatter = DateFormatter()
+        inputFormatter.dateFormat = "yyyy-MM-dd"
+        
+        let outputFormatter = DateFormatter()
+        outputFormatter.dateFormat = "MMM d, yyyy"
+        
+        if let date = inputFormatter.date(from: dateString) {
+            return outputFormatter.string(from: date)
+        }
+        return dateString
     }
 } 

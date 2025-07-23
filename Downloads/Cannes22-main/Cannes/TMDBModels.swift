@@ -42,7 +42,7 @@ struct TMDBSeason: Codable, Identifiable, Equatable {
 }
 
 struct TMDBEpisode: Codable, Identifiable {
-    let id: Int
+    let id: Int?
     let episodeNumber: Int
     let name: String
     let overview: String
@@ -59,6 +59,11 @@ struct TMDBEpisode: Codable, Identifiable {
         case airDate = "air_date"
         case voteAverage = "vote_average"
         case voteCount = "vote_count"
+    }
+    
+    // Use episodeNumber as the identifier since id might not be present
+    var identifier: Int {
+        return id ?? episodeNumber
     }
 }
 

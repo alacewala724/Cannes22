@@ -5,6 +5,7 @@ import FirebaseFirestore
 struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
+    @Environment(\.colorScheme) private var colorScheme
     @State private var followers: [UserProfile] = []
     @State private var following: [UserProfile] = []
     @State private var followersCount = 0
@@ -128,7 +129,7 @@ struct ProfileView: View {
                     title: "Following",
                     count: followingCount,
                     icon: "person.2.circle.fill",
-                    color: .green
+                    color: Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme)
                 ) {
                     showingFollowing = true
                 }
@@ -257,8 +258,9 @@ struct StatCard: View {
                     .foregroundColor(.primary)
                 
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .font(.custom("PlayfairDisplay-Medium", size: 16))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)

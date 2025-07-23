@@ -5,6 +5,7 @@ import Foundation
 struct AddMovieView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: MovieStore
+    @Environment(\.colorScheme) private var colorScheme
     
     // Optional existing movie for re-ranking
     @State private var existingMovie: Movie?
@@ -251,7 +252,7 @@ struct AddMovieView: View {
             if let existing = existingMovie {
                 VStack(spacing: 16) {
                     Text(existing.title)
-                        .font(.title2)
+                        .font(.custom("PlayfairDisplay-Bold", size: 24))
                         .fontWeight(.medium)
                         .multilineTextAlignment(.center)
                     
@@ -326,7 +327,7 @@ struct AddMovieView: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(sentiment.color.opacity(0.15))
+                        .background(Color.adaptiveSentiment(for: sentiment.midpoint, colorScheme: colorScheme).opacity(0.15))
                         .cornerRadius(12)
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -359,51 +360,86 @@ struct ResultsList: View {
         ScrollView {
             LazyVStack(spacing: UI.vGap) {
                 ForEach(movies) { movie in
-                    Button(action: { select(movie) }) {
-                        HStack {
-                            if let posterPath = movie.poster_path {
-                                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w92\(posterPath)")) { image in
-                                    image.resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                } placeholder: {
-                                    Color.gray
-                                }
-                                .frame(width: 46, height: 69)
-                                .cornerRadius(UI.corner)
-                            }
-                            
-                            VStack(alignment: .leading) {
-                                Text(movie.displayTitle)
-                                    .font(.headline)
-                                if let date = movie.displayDate {
-                                    Text(date.prefix(4))  // Just show the year
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                }
-                                
-                                // Show if already ranked
-                                if let existingMovie = getExistingMovie(for: movie) {
-                                    HStack {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.green)
-                                            .font(.caption)
-                                        Text("Already ranked: \(existingMovie.sentiment.rawValue)")
-                                            .font(.caption)
-                                            .foregroundColor(.green)
-                                    }
-                                }
-                            }
-                            
-                            Spacer()
-                        }
-                        .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(UI.corner)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                    SearchResultRow(movie: movie, store: store, select: select)
                 }
             }
             .padding(.horizontal, UI.hPad)
+        }
+    }
+    
+    private func getExistingMovie(for movie: AppModels.Movie) -> Movie? {
+        let allMovies = store.movies + store.tvShows
+        return allMovies.first { $0.tmdbId == movie.id }
+    }
+}
+
+// MARK: - Search Result Row Component
+struct SearchResultRow: View {
+    let movie: AppModels.Movie
+    let store: MovieStore
+    let select: (AppModels.Movie) -> Void
+    
+    var body: some View {
+        Button(action: { select(movie) }) {
+            HStack {
+                SearchResultPoster(posterPath: movie.poster_path)
+                SearchResultInfo(movie: movie, store: store)
+                Spacer()
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(UI.corner)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Search Result Poster Component
+struct SearchResultPoster: View {
+    let posterPath: String?
+    
+    var body: some View {
+        if let posterPath = posterPath {
+            AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w92\(posterPath)")) { image in
+                image.resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.gray
+            }
+            .frame(width: 46, height: 69)
+            .cornerRadius(UI.corner)
+        }
+    }
+}
+
+// MARK: - Search Result Info Component
+struct SearchResultInfo: View {
+    let movie: AppModels.Movie
+    let store: MovieStore
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(movie.displayTitle)
+                .font(.custom("PlayfairDisplay-Medium", size: 16))
+            
+            if let date = movie.displayDate {
+                Text(date.prefix(4))
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            
+            // Show if already ranked
+            if let existingMovie = getExistingMovie(for: movie) {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
+                        .font(.caption)
+                    Text("Already ranked: \(existingMovie.sentiment.rawValue)")
+                        .font(.caption)
+                        .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
+                }
+            }
         }
     }
     
@@ -702,7 +738,7 @@ struct ComparisonView: View {
                     updateMidOrFinish()
                 }) {
                     Text(sortedMovies[mid].title)
-                        .font(.headline)
+                        .font(.custom("PlayfairDisplay-Medium", size: 18))
                         .fontWeight(.medium)
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -720,7 +756,7 @@ struct ComparisonView: View {
                     updateMidOrFinish()
                 }) {
                     Text(newMovie.title)
-                        .font(.headline)
+                        .font(.custom("PlayfairDisplay-Medium", size: 18))
                         .fontWeight(.medium)
                         .frame(maxWidth: .infinity)
                         .padding()

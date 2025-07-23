@@ -83,7 +83,14 @@ class TMDBService {
         }
         
         let (data, _) = try await URLSession.shared.data(from: url)
-        let seasonData = try JSONDecoder().decode(TMDBSeasonWithEpisodes.self, from: data)
-        return seasonData.episodes
+        
+        // Decode the episodes array directly from the response
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let episodesArray = json?["episodes"] as? [[String: Any]] else {
+            throw URLError(.cannotParseResponse)
+        }
+        
+        let episodesData = try JSONSerialization.data(withJSONObject: episodesArray)
+        return try JSONDecoder().decode([TMDBEpisode].self, from: episodesData)
     }
 } 
