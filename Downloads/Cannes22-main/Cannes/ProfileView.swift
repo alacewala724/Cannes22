@@ -237,16 +237,10 @@ struct ProfileView: View {
                 followersCount = fetchedFollowers.count
                 followingCount = fetchedFollowing.count
                 
-                // Use actual movie count from user profile, calculate TV show count from rankings
-                if let profile = userProfile {
-                    self.moviesCount = profile.movieCount ?? 0
-                    // Calculate TV show count from rankings since UserProfile doesn't have tvShowCount
-                    self.tvShowsCount = userRankings.filter { $0.mediaType == .tv }.count
-                } else {
-                    // Fallback to 0 if profile not found
-                    self.moviesCount = 0
-                    self.tvShowsCount = 0
-                }
+                // Calculate movie count from rankings since UserProfile.movieCount includes TV shows
+                self.moviesCount = userRankings.filter { $0.mediaType == .movie }.count
+                // Calculate TV show count from rankings since UserProfile doesn't have tvShowCount
+                self.tvShowsCount = userRankings.filter { $0.mediaType == .tv }.count
                 
                 isLoading = false
                 isLoadingStats = false
