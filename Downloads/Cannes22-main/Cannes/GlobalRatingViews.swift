@@ -169,6 +169,161 @@ struct GlobalRatingGridView: View {
     }
 }
 
+// MARK: - Personal Movie Grid Components
+struct PersonalMovieGridItem: View {
+    let movie: Movie
+    let position: Int
+    let onTap: () -> Void
+    @ObservedObject var store: MovieStore
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var calculatingScore = false
+    @State private var displayScore: Double = 0.0
+    @State private var posterPath: String?
+    @State private var isLoadingPoster = true
+    
+    var body: some View {
+        Button(action: onTap) {
+            ZStack(alignment: .topLeading) {
+                // Movie poster
+                AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
+                    switch phase {
+                    case .empty:
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure:
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    @unknown default:
+                        RoundedRectangle(cornerRadius: 0)
+                            .fill(Color(.systemGray5))
+                            .opacity(0.6)
+                    }
+                }
+                .frame(height: 200)
+                .clipped()
+                .cornerRadius(0)
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                
+                // Score bubble or goat
+                ZStack {
+                    // Aura effect for golden bubbles
+                    if position <= 5 && movie.score >= 9.0 {
+                        Circle()
+                            .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
+                            .frame(width: 40, height: 40)
+                            .blur(radius: 2)
+                    }
+                    
+                    Circle()
+                        .fill(position <= 5 && movie.score >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
+                        .frame(width: 32, height: 32)
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    
+                    if position == 1 {
+                        Text("🐐")
+                            .font(.title3)
+                    } else {
+                        Text(String(format: "%.1f", displayScore))
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(position <= 5 && movie.score >= 9.0 ? .black : .white)
+                    }
+                }
+                .offset(x: 8, y: 8)
+                .onAppear {
+                    startScoreAnimation()
+                    loadPosterPath()
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func loadPosterPath() {
+        guard let tmdbId = movie.tmdbId else { return }
+        
+        Task {
+            do {
+                let tmdbService = TMDBService()
+                let tmdbMovie: TMDBMovie
+                
+                if movie.mediaType == .tv {
+                    tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                } else {
+                    tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                }
+                
+                await MainActor.run {
+                    posterPath = tmdbMovie.posterPath
+                    isLoadingPoster = false
+                }
+            } catch {
+                print("Error loading poster for \(movie.title): \(error)")
+                await MainActor.run {
+                    isLoadingPoster = false
+                }
+            }
+        }
+    }
+    
+    private func startScoreAnimation() {
+        let targetScore = roundToTenths(movie.score)
+        calculatingScore = true
+        
+        // Start with a random number
+        displayScore = Double.random(in: 0...10)
+        
+        // Create a timer that cycles through numbers
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
+            if calculatingScore {
+                // Cycle through random numbers around the target
+                let randomOffset = Double.random(in: -2...2)
+                displayScore = max(0, min(10, targetScore + randomOffset))
+            } else {
+                // Settle on the final value
+                displayScore = targetScore
+                timer.invalidate()
+            }
+        }
+        
+        // Stop calculating after 0.8 seconds and settle on final value
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            calculatingScore = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayScore = targetScore
+            }
+        }
+    }
+}
+
+struct PersonalMovieGridView: View {
+    let movies: [Movie]
+    let onTap: (Movie) -> Void
+    @ObservedObject var store: MovieStore
+    
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+            ForEach(Array(movies.enumerated()), id: \.element.id) { index, movie in
+                PersonalMovieGridItem(
+                    movie: movie,
+                    position: index + 1,
+                    onTap: {
+                        onTap(movie)
+                    },
+                    store: store
+                )
+            }
+        }
+        .padding(.horizontal, 0)
+    }
+}
+
 struct GlobalRatingRow: View {
     let rating: GlobalRating
     let position: Int

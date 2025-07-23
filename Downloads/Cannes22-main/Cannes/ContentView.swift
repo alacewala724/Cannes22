@@ -164,27 +164,25 @@ struct ContentView: View {
                         .font(.custom("PlayfairDisplay-Bold", size: 34))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    // Toggle switch for view mode (only show in global view)
-                    if viewMode == .global {
-                        HStack(spacing: 6) {
-                            Text("List")
-                                .font(.caption)
-                                .foregroundColor(showingGrid ? .secondary : .primary)
-                            
-                            Toggle("", isOn: $showingGrid)
-                                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                                .labelsHidden()
-                                .scaleEffect(0.8)
-                            
-                            Text("Grid")
-                                .font(.caption)
-                                .foregroundColor(showingGrid ? .primary : .secondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(6)
+                    // Toggle switch for view mode (show in both personal and global views)
+                    HStack(spacing: 6) {
+                        Text("List")
+                            .font(.caption)
+                            .foregroundColor(showingGrid ? .secondary : .primary)
+                        
+                        Toggle("", isOn: $showingGrid)
+                            .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                            .labelsHidden()
+                            .scaleEffect(0.8)
+                        
+                        Text("Grid")
+                            .font(.caption)
+                            .foregroundColor(showingGrid ? .primary : .secondary)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(6)
                 }
                 
                 Text("@\(authService.username ?? "user")")
@@ -216,7 +214,12 @@ struct ContentView: View {
             } else if store.getMovies().isEmpty {
                 emptyStateView
             } else {
-                movieListView
+                // Content based on toggle
+                if showingGrid {
+                    personalGridView
+                } else {
+                    movieListView
+                }
             }
         }
     }
@@ -370,6 +373,20 @@ struct ContentView: View {
             ratings: globalRatings,
             onTap: { rating in
                 showingGlobalRatingDetail = rating
+            },
+            store: store
+        )
+    }
+    
+    private var personalGridView: some View {
+        PersonalMovieGridView(
+            movies: store.getMovies(),
+            onTap: { movie in
+                // Handle movie tap - show detail view
+                if movie.tmdbId != nil {
+                    // For now, just print the movie title
+                    print("Tapped movie: \(movie.title)")
+                }
             },
             store: store
         )
