@@ -83,7 +83,11 @@ class ContactsService: ObservableObject {
             
             await MainActor.run {
                 contacts = matchedContacts
-                isLoading = false
+                // Add a small delay to allow follow states to be checked
+                // This prevents the flicker when individual ContactRow components check their follow states
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
+                    isLoading = false
+                }
             }
         } catch {
             await MainActor.run {
