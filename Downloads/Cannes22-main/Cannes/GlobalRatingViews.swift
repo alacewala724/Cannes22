@@ -58,7 +58,7 @@ struct GlobalRatingGridItem: View {
                 // Score bubble or goat
                 ZStack {
                     Circle()
-                        .fill(position == 1 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
+                        .fill(position <= 5 && rating.confidenceAdjustedScore >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
                         .frame(width: 32, height: 32)
                         .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
                     

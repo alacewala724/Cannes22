@@ -28,20 +28,22 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
             // Main Rankings Tab
             NavigationView {
-                VStack(spacing: 0) {
-                    // Header
-                    headerView
-                    
-                    // Content
-                    Group {
-                        switch viewMode {
-                        case .personal:
-                            personalView
-                        case .global:
-                            globalView
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Header
+                        headerView
+                        
+                        // Content
+                        Group {
+                            switch viewMode {
+                            case .personal:
+                                personalView
+                            case .global:
+                                globalView
+                            }
                         }
+                        .animation(.easeInOut, value: viewMode)
                     }
-                    .animation(.easeInOut, value: viewMode)
                 }
                 .navigationBarHidden(true)
             }
@@ -281,9 +283,7 @@ struct ContentView: View {
             } else {
                 // Content based on toggle
                 if showingGrid {
-                    ScrollView {
-                        globalRatingGridView
-                    }
+                    globalRatingGridView
                 } else {
                     globalRatingListView
                 }
@@ -335,16 +335,14 @@ struct ContentView: View {
     }
     
     private var movieListView: some View {
-        ScrollView {
-            LazyVStack(spacing: UI.vGap) {
-                ForEach(Array(store.getMovies().enumerated()), id: \.element.id) { index, movie in
-                    MovieRow(movie: movie, position: index + 1, store: store, isEditing: isEditing)
-                }
-                .onDelete(perform: isEditing ? deleteMovies : nil)
+        LazyVStack(spacing: UI.vGap) {
+            ForEach(Array(store.getMovies().enumerated()), id: \.element.id) { index, movie in
+                MovieRow(movie: movie, position: index + 1, store: store, isEditing: isEditing)
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, UI.vGap)
+            .onDelete(perform: isEditing ? deleteMovies : nil)
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, UI.vGap)
     }
     
     private func deleteMovies(at offsets: IndexSet) {
@@ -352,20 +350,18 @@ struct ContentView: View {
     }
     
     private var globalRatingListView: some View {
-        ScrollView {
-            LazyVStack(spacing: UI.vGap) {
-                ForEach(Array(globalRatings.enumerated()), id: \.element.id) { index, rating in
-                    GlobalRatingRow(
-                        rating: rating,
-                        position: index + 1,
-                        onTap: { showingGlobalRatingDetail = rating },
-                        store: store
-                    )
-                }
+        LazyVStack(spacing: UI.vGap) {
+            ForEach(Array(globalRatings.enumerated()), id: \.element.id) { index, rating in
+                GlobalRatingRow(
+                    rating: rating,
+                    position: index + 1,
+                    onTap: { showingGlobalRatingDetail = rating },
+                    store: store
+                )
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, UI.vGap)
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, UI.vGap)
     }
     
     private var globalRatingGridView: some View {
