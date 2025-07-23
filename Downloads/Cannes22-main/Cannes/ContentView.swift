@@ -166,23 +166,24 @@ struct ContentView: View {
                     
                     // Toggle switch for view mode (only show in global view)
                     if viewMode == .global {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Text("List")
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundColor(showingGrid ? .secondary : .primary)
                             
                             Toggle("", isOn: $showingGrid)
                                 .toggleStyle(SwitchToggleStyle(tint: .accentColor))
                                 .labelsHidden()
+                                .scaleEffect(0.8)
                             
                             Text("Grid")
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundColor(showingGrid ? .primary : .secondary)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                         .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                        .cornerRadius(6)
                     }
                 }
                 
