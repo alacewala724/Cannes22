@@ -382,6 +382,8 @@ struct RecommendationsView: View {
     }
     
     private func addToFutureCannes(movie: AppModels.Movie) async {
+        print("DEBUG: Starting addToFutureCannes for movie: \(movie.displayTitle)")
+        
         do {
             let tmdbMovie = TMDBMovie(
                 id: movie.id,
@@ -399,13 +401,18 @@ struct RecommendationsView: View {
                 episodeRunTime: movie.episode_run_time
             )
             
+            print("DEBUG: Created TMDBMovie: \(tmdbMovie.title ?? tmdbMovie.name ?? "Unknown")")
+            
             let firestoreService = FirestoreService()
+            print("DEBUG: About to call addToFutureCannes on FirestoreService")
             try await firestoreService.addToFutureCannes(movie: tmdbMovie)
+            print("DEBUG: Successfully added to Future Cannes")
             
             // Reload the list
             await loadFutureCannesList()
         } catch {
-            print("Error adding to Future Cannes: \(error)")
+            print("ERROR adding to Future Cannes: \(error)")
+            print("ERROR details: \(error.localizedDescription)")
         }
     }
     
@@ -478,6 +485,7 @@ struct RecommendationsSearchResultRow: View {
                 Spacer()
                 
                 Button(action: {
+                    print("DEBUG: Add button tapped for movie: \(movie.displayTitle)")
                     isAdding = true
                     onAddToFutureCannes()
                 }) {
@@ -546,6 +554,7 @@ struct RecommendationsSearchResultGridItem: View {
                 
                 // Add button
                 Button(action: {
+                    print("DEBUG: Grid add button tapped for movie: \(movie.displayTitle)")
                     isAdding = true
                     onAddToFutureCannes()
                 }) {

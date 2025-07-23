@@ -2304,12 +2304,19 @@ extension FirestoreService {
     
     // Add a movie to Future Cannes list
     func addToFutureCannes(movie: TMDBMovie) async throws {
+        print("DEBUG FirestoreService: Starting addToFutureCannes")
+        
         guard let currentUser = Auth.auth().currentUser else {
+            print("DEBUG FirestoreService: User not authenticated")
             throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
         let currentUserId = currentUser.uid
         let itemId = UUID().uuidString
+        
+        print("DEBUG FirestoreService: Current user ID: \(currentUserId)")
+        print("DEBUG FirestoreService: Item ID: \(itemId)")
+        print("DEBUG FirestoreService: Movie title: \(movie.title ?? movie.name ?? "Unknown")")
         
         let itemData: [String: Any] = [
             "id": itemId,
@@ -2329,12 +2336,15 @@ extension FirestoreService {
             "dateAdded": FieldValue.serverTimestamp()
         ]
         
+        print("DEBUG FirestoreService: About to write to Firestore")
+        
         try await db.collection("users")
             .document(currentUserId)
             .collection("futureCannes")
             .document(itemId)
             .setData(itemData)
         
+        print("DEBUG FirestoreService: Successfully wrote to Firestore")
         print("addToFutureCannes: Added movie \(movie.title ?? movie.name ?? "Unknown") to Future Cannes")
     }
     
