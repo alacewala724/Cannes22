@@ -33,7 +33,7 @@ struct GlobalRatingGridItem: View {
                 AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
                     switch phase {
                     case .empty:
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 0)
                             .fill(Color(.systemGray5))
                             .opacity(0.6)
                     case .success(let image):
@@ -41,19 +41,19 @@ struct GlobalRatingGridItem: View {
                             .resizable()
                             .aspectRatio(contentMode: .fill)
                     case .failure:
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 0)
                             .fill(Color(.systemGray5))
                             .opacity(0.6)
                     @unknown default:
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 0)
                             .fill(Color(.systemGray5))
                             .opacity(0.6)
                     }
                 }
-                .frame(width: 110, height: 165)
+                .frame(height: 200)
                 .clipped()
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                .cornerRadius(0)
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 
                 // Score bubble or goat
                 ZStack {
@@ -145,7 +145,7 @@ struct GlobalRatingGridView: View {
     @ObservedObject var store: MovieStore
     
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 16) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
             ForEach(Array(ratings.enumerated()), id: \.element.id) { index, rating in
                 GlobalRatingGridItem(
                     rating: rating,
@@ -157,7 +157,7 @@ struct GlobalRatingGridView: View {
                 )
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 0)
     }
 }
 

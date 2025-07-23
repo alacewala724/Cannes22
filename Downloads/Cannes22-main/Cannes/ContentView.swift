@@ -157,9 +157,32 @@ struct ContentView: View {
             
             // Title and username
             VStack(alignment: .leading, spacing: 4) {
-                Text(viewMode.rawValue)
-                    .font(.custom("PlayfairDisplay-Bold", size: 34))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Text(viewMode.rawValue)
+                        .font(.custom("PlayfairDisplay-Bold", size: 34))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    // Toggle switch for view mode (only show in global view)
+                    if viewMode == .global {
+                        HStack(spacing: 8) {
+                            Text("List")
+                                .font(.subheadline)
+                                .foregroundColor(showingGrid ? .secondary : .primary)
+                            
+                            Toggle("", isOn: $showingGrid)
+                                .toggleStyle(SwitchToggleStyle(tint: .accentColor))
+                                .labelsHidden()
+                            
+                            Text("Grid")
+                                .font(.subheadline)
+                                .foregroundColor(showingGrid ? .primary : .secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                    }
+                }
                 
                 Text("@\(authService.username ?? "user")")
                     .font(.subheadline)
@@ -256,34 +279,11 @@ struct ContentView: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 0) {
-                    // Toggle switch for view mode
-                    HStack {
-                        Text("List")
-                            .font(.subheadline)
-                            .foregroundColor(showingGrid ? .secondary : .primary)
-                        
-                        Toggle("", isOn: $showingGrid)
-                            .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                            .labelsHidden()
-                        
-                        Text("Grid")
-                            .font(.subheadline)
-                            .foregroundColor(showingGrid ? .primary : .secondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    
-                    // Content based on toggle
-                    if showingGrid {
-                        globalRatingGridView
-                    } else {
-                        globalRatingListView
-                    }
+                // Content based on toggle
+                if showingGrid {
+                    globalRatingGridView
+                } else {
+                    globalRatingListView
                 }
             }
         }
