@@ -103,9 +103,13 @@ class ContactsService: ObservableObject {
         print("ContactsService: Found \(contactUsers.count) contacts with \(uniquePhones.count) unique phone numbers")
         print("ContactsService: Sample phone numbers: \(uniquePhones.prefix(5))")
         
+        // Clean all phone numbers before sending to Firestore
+        let cleanedPhoneNumbers = uniquePhones.map { cleanPhoneNumber($0) }
+        print("ContactsService: Cleaned phone numbers for Firestore query: \(cleanedPhoneNumbers)")
+        
         // Batch find users by phone numbers
         do {
-            let matchingUsers = try await firestoreService.findUsersByPhoneNumbers(uniquePhones)
+            let matchingUsers = try await firestoreService.findUsersByPhoneNumbers(cleanedPhoneNumbers)
             print("ContactsService: Found \(matchingUsers.count) matching users in the app")
             
             // Create a lookup dictionary for efficiency
@@ -138,6 +142,15 @@ class ContactsService: ObservableObject {
                         )
                     } else {
                         print("ContactsService: ❌ No match found for contact '\(matchedContacts[i].name)'")
+                        // Debug: Let's see what users we actually found
+                        if matchingUsers.isEmpty {
+                            print("ContactsService: No users found in Firestore for any of the phone numbers")
+                        } else {
+                            print("ContactsService: Found users but no match. Available users:")
+                            for user in matchingUsers {
+                                print("  - User: \(user.username), Phone: \(user.phoneNumber ?? "nil")")
+                            }
+                        }
                     }
                 }
             }
@@ -159,22 +172,30 @@ class ContactsService: ObservableObject {
     }
     
     private func cleanPhoneNumber(_ phone: String) -> String {
-        // Remove all non-digit characters
-        let digits = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        // Remove all non-digit characters except the + sign
+        let cleaned = phone.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        
+        // If it starts with +1 and has 12 characters (e.g., +19543743775), remove the +1
+        if cleaned.hasPrefix("+1") && cleaned.count == 12 {
+            return String(cleaned.dropFirst(2)) // Remove +1
+        }
         
         // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
-        if digits.hasPrefix("1") && digits.count == 11 {
-            return String(digits.dropFirst())
+        if cleaned.hasPrefix("1") && cleaned.count == 11 {
+            return String(cleaned.dropFirst())
         }
         
         // If it's a 10-digit number, return as is
-        if digits.count == 10 {
-            return digits
+        if cleaned.count == 10 {
+            return cleaned
         }
         
         // If it's a 7-digit number, we might need to add area code
         // For now, return as is and let the caller handle area code logic
-        return digits
+        return cleaned
     }
     
     func inviteContact(_ contact: ContactUser) {

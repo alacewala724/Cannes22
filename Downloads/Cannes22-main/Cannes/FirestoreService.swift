@@ -2235,28 +2235,38 @@ extension FirestoreService {
     
     // Helper function to clean phone numbers
     private func cleanPhoneNumber(_ phone: String) -> String {
-        // Remove all non-digit characters
-        let digits = phone.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        // Remove all non-digit characters except the + sign
+        let cleaned = phone.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "-", with: "")
         
-        print("FirestoreService: Cleaning phone number '\(phone)' -> digits: '\(digits)'")
+        print("FirestoreService: Cleaning phone number '\(phone)' -> cleaned: '\(cleaned)'")
+        
+        // If it starts with +1 and has 12 characters (e.g., +19543743775), remove the +1
+        if cleaned.hasPrefix("+1") && cleaned.count == 12 {
+            let result = String(cleaned.dropFirst(2)) // Remove +1
+            print("FirestoreService: Removed +1 prefix -> '\(result)'")
+            return result
+        }
         
         // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
-        if digits.hasPrefix("1") && digits.count == 11 {
-            let result = String(digits.dropFirst())
+        if cleaned.hasPrefix("1") && cleaned.count == 11 {
+            let result = String(cleaned.dropFirst())
             print("FirestoreService: Removed leading 1 -> '\(result)'")
             return result
         }
         
         // If it's a 10-digit number, return as is
-        if digits.count == 10 {
-            print("FirestoreService: 10-digit number -> '\(digits)'")
-            return digits
+        if cleaned.count == 10 {
+            print("FirestoreService: 10-digit number -> '\(cleaned)'")
+            return cleaned
         }
         
         // If it's a 7-digit number, we might need to add area code
         // For now, return as is and let the caller handle area code logic
-        print("FirestoreService: Other length (\(digits.count) digits) -> '\(digits)'")
-        return digits
+        print("FirestoreService: Other length (\(cleaned.count) characters) -> '\(cleaned)'")
+        return cleaned
     }
     
     // Check if a user exists by email (for contacts matching)
