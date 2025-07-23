@@ -173,19 +173,4 @@ class ContactsService: ObservableObject {
         // For now, we'll just show a success message
         print("Inviting contact: \(contact.name)")
     }
-    
-    func followUser(_ userProfile: UserProfile) async {
-        do {
-            try await firestoreService.followUser(userIdToFollow: userProfile.uid)
-            // Update the contact to show as followed
-            if let index = contacts.firstIndex(where: { $0.userProfile?.uid == userProfile.uid }) {
-                await MainActor.run {
-                    // Update the contact to show as followed
-                    // This would need to be implemented based on your UI needs
-                }
-            }
-        } catch {
-            print("Error following user: \(error)")
-        }
-    }
 } 

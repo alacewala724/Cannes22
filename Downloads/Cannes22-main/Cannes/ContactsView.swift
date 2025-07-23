@@ -148,11 +148,7 @@ struct ContactsView: View {
                     ContactRow(
                         contactUser: contactUser,
                         onFollow: {
-                            if let userProfile = contactUser.userProfile {
-                                Task {
-                                    await contactsService.followUser(userProfile)
-                                }
-                            }
+                            // This is now handled directly in ContactRow
                         },
                         onInvite: {
                             contactsService.inviteContact(contactUser)
@@ -175,6 +171,10 @@ struct ContactRow: View {
     let onInvite: () -> Void
     let onTapProfile: () -> Void
     @State private var isFollowing = false
+    @State private var isLoadingFollowState = false
+    @State private var isLoadingAction = false
+    
+    private let firestoreService = FirestoreService()
     
     var body: some View {
         HStack(spacing: 12) {
@@ -195,24 +195,15 @@ struct ContactRow: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                 
+                if contactUser.isAppUser, let userProfile = contactUser.userProfile {
+                    Text("@\(userProfile.username)")
+                        .font(.subheadline)
+                        .foregroundColor(.accentColor)
+                }
+                
                 if let phone = contactUser.phone {
                     Text(phone)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                if contactUser.isAppUser {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                        Text("Using App")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
-                } else {
-                    Text("Not on App")
-                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
@@ -222,22 +213,29 @@ struct ContactRow: View {
             // Action button
             if contactUser.isAppUser {
                 Button(action: {
-                    onFollow()
-                    isFollowing = true
+                    Task {
+                        await handleFollowAction()
+                    }
                 }) {
-                    Text(isFollowing ? "Following" : "Follow")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(isFollowing ? .secondary : .white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(isFollowing ? Color.clear : Color.accentColor)
-                                .stroke(isFollowing ? Color.secondary : Color.clear, lineWidth: 1)
-                        )
+                    HStack(spacing: 4) {
+                        if isLoadingAction {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                        Text(isFollowing ? "Unfollow" : "Follow")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(isFollowing ? .red : .white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isFollowing ? Color.clear : Color.accentColor)
+                            .stroke(isFollowing ? Color.red : Color.clear, lineWidth: 1)
+                    )
                 }
-                .disabled(isFollowing)
+                .disabled(isLoadingAction || isLoadingFollowState)
                 .onTapGesture {
                     if contactUser.userProfile != nil {
                         onTapProfile()
@@ -264,6 +262,49 @@ struct ContactRow: View {
         .cornerRadius(12)
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+        .onAppear {
+            if contactUser.isAppUser {
+                Task {
+                    await checkFollowState()
+                }
+            }
+        }
+    }
+    
+    private func checkFollowState() async {
+        guard let userProfile = contactUser.userProfile else { return }
+        
+        isLoadingFollowState = true
+        do {
+            isFollowing = try await firestoreService.isFollowing(userId: userProfile.uid)
+            print("ContactRow: User \(userProfile.username) follow state: \(isFollowing)")
+        } catch {
+            print("ContactRow: Error checking follow state: \(error)")
+        }
+        isLoadingFollowState = false
+    }
+    
+    private func handleFollowAction() async {
+        guard let userProfile = contactUser.userProfile else { return }
+        
+        isLoadingAction = true
+        do {
+            if isFollowing {
+                // Unfollow
+                try await firestoreService.unfollowUser(userIdToUnfollow: userProfile.uid)
+                print("ContactRow: Unfollowed user \(userProfile.username)")
+            } else {
+                // Follow
+                try await firestoreService.followUser(userIdToFollow: userProfile.uid)
+                print("ContactRow: Followed user \(userProfile.username)")
+            }
+            
+            // Update the follow state
+            isFollowing.toggle()
+        } catch {
+            print("ContactRow: Error \(isFollowing ? "unfollowing" : "following") user: \(error)")
+        }
+        isLoadingAction = false
     }
 }
 
