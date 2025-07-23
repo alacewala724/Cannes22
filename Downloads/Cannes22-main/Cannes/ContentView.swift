@@ -281,7 +281,9 @@ struct ContentView: View {
             } else {
                 // Content based on toggle
                 if showingGrid {
-                    globalRatingGridView
+                    ScrollView {
+                        globalRatingGridView
+                    }
                 } else {
                     globalRatingListView
                 }
