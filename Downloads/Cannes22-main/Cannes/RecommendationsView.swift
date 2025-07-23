@@ -4,14 +4,23 @@ import Foundation
 struct RecommendationsView: View {
     @ObservedObject var store: MovieStore
     @Environment(\.colorScheme) private var colorScheme
+    
     @State private var searchText = ""
-    @State private var searchResults: [TMDBMovie] = []
+    @State private var searchResults: [AppModels.Movie] = []
     @State private var isSearching = false
-    @State private var showingGrid = false
-    @State private var showingMovieDetail = false
-    @State private var selectedMovie: TMDBMovie?
+    @State private var searchType: SearchType = .movie
+    @State private var searchErrorMessage: String?
+    @State private var showSearchError = false
     @State private var futureCannesList: [FutureCannesItem] = []
     @State private var isLoadingFutureCannes = true
+    @State private var showingGrid = false
+    
+    private let tmdbService = TMDBService()
+    
+    enum SearchType {
+        case movie
+        case tvShow
+    }
     
     var body: some View {
         NavigationView {
@@ -37,12 +46,17 @@ struct RecommendationsView: View {
         .task {
             await loadFutureCannesList()
         }
-        .sheet(isPresented: $showingMovieDetail) {
-            if let movie = selectedMovie {
-                NavigationView {
-                    UnifiedMovieDetailView(tmdbId: movie.id, store: store)
+        .alert("Search Error", isPresented: $showSearchError) {
+            Button("Retry") {
+                if !searchText.isEmpty {
+                    Task {
+                        await searchContent(query: searchText)
+                    }
                 }
             }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(searchErrorMessage ?? "Failed to search for movies")
         }
     }
     
@@ -77,15 +91,20 @@ struct RecommendationsView: View {
             .padding(.horizontal, 16)
             
             // Media type selector
-            Picker("Media Type", selection: $store.selectedMediaType) {
-                ForEach(AppModels.MediaType.allCases, id: \.self) { type in
-                    Text(type.rawValue)
-                        .font(.headline)
-                        .tag(type)
-                }
+            Picker("Media Type", selection: $searchType) {
+                Text("Movies").tag(SearchType.movie)
+                Text("TV Shows").tag(SearchType.tvShow)
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal, 16)
+            .onChange(of: searchType) { _, _ in
+                searchResults = []
+                if !searchText.isEmpty {
+                    Task {
+                        await searchContent(query: searchText)
+                    }
+                }
+            }
         }
         .padding(.vertical, 8)
         .background(Color(.systemBackground))
@@ -93,7 +112,7 @@ struct RecommendationsView: View {
     
     private var searchSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Search \(store.selectedMediaType.rawValue)s")
+            Text("Search \(searchType == .movie ? "Movies" : "TV Shows")")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
@@ -103,11 +122,15 @@ struct RecommendationsView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
                 
-                TextField("Search \(store.selectedMediaType.rawValue)s...", text: $searchText)
+                TextField("Search for a \(searchType == .movie ? "movie" : "TV show")", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
                     .onChange(of: searchText) { _, newValue in
-                        Task {
-                            await performSearch(query: newValue)
+                        if !newValue.isEmpty {
+                            Task {
+                                await searchContent(query: newValue)
+                            }
+                        } else {
+                            searchResults = []
                         }
                     }
                 
@@ -160,9 +183,6 @@ struct RecommendationsView: View {
         LazyVStack(spacing: 12) {
             ForEach(searchResults, id: \.id) { movie in
                 RecommendationsSearchResultRow(movie: movie) {
-                    selectedMovie = movie
-                    showingMovieDetail = true
-                } onAddToFutureCannes: {
                     Task {
                         await addToFutureCannes(movie: movie)
                     }
@@ -175,9 +195,6 @@ struct RecommendationsView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
             ForEach(searchResults, id: \.id) { movie in
                 RecommendationsSearchResultGridItem(movie: movie) {
-                    selectedMovie = movie
-                    showingMovieDetail = true
-                } onAddToFutureCannes: {
                     Task {
                         await addToFutureCannes(movie: movie)
                     }
@@ -246,8 +263,7 @@ struct RecommendationsView: View {
         LazyVStack(spacing: 12) {
             ForEach(futureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
                 FutureCannesRow(item: item) {
-                    selectedMovie = item.movie
-                    showingMovieDetail = true
+                    // Show movie details
                 } onRemove: {
                     Task {
                         await removeFromFutureCannes(item: item)
@@ -261,8 +277,7 @@ struct RecommendationsView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
             ForEach(futureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
                 FutureCannesGridItem(item: item) {
-                    selectedMovie = item.movie
-                    showingMovieDetail = true
+                    // Show movie details
                 } onRemove: {
                     Task {
                         await removeFromFutureCannes(item: item)
@@ -274,8 +289,8 @@ struct RecommendationsView: View {
     
     // MARK: - Search Functions
     
-    private func performSearch(query: String) async {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    private func searchContent(query: String) async {
+        guard !query.isEmpty else {
             await MainActor.run {
                 searchResults = []
                 isSearching = false
@@ -288,13 +303,46 @@ struct RecommendationsView: View {
         }
         
         do {
-            let tmdbService = TMDBService()
-            let results: [TMDBMovie]
+            let results: [AppModels.Movie]
             
-            if store.selectedMediaType == .tv {
-                results = try await tmdbService.searchTVShows(query: query)
+            if searchType == .tvShow {
+                let tvResults = try await tmdbService.searchTVShows(query: query)
+                results = tvResults.map { tv in
+                    AppModels.Movie(
+                        id: tv.id,
+                        title: tv.title,
+                        name: tv.name,
+                        overview: tv.overview,
+                        poster_path: tv.posterPath,
+                        release_date: tv.releaseDate,
+                        first_air_date: tv.firstAirDate,
+                        vote_average: tv.voteAverage,
+                        vote_count: tv.voteCount,
+                        genres: tv.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
+                        media_type: "tv",
+                        runtime: tv.runtime,
+                        episode_run_time: tv.episodeRunTime
+                    )
+                }
             } else {
-                results = try await tmdbService.searchMovies(query: query)
+                let movieResults = try await tmdbService.searchMovies(query: query)
+                results = movieResults.map { movie in
+                    AppModels.Movie(
+                        id: movie.id,
+                        title: movie.title,
+                        name: movie.name,
+                        overview: movie.overview,
+                        poster_path: movie.posterPath,
+                        release_date: movie.releaseDate,
+                        first_air_date: movie.firstAirDate,
+                        vote_average: movie.voteAverage,
+                        vote_count: movie.voteCount,
+                        genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
+                        media_type: "movie",
+                        runtime: movie.runtime,
+                        episode_run_time: movie.episodeRunTime
+                    )
+                }
             }
             
             await MainActor.run {
@@ -302,9 +350,9 @@ struct RecommendationsView: View {
                 isSearching = false
             }
         } catch {
-            print("Search error: \(error)")
             await MainActor.run {
-                searchResults = []
+                searchErrorMessage = error.localizedDescription
+                showSearchError = true
                 isSearching = false
             }
         }
@@ -333,10 +381,26 @@ struct RecommendationsView: View {
         }
     }
     
-    private func addToFutureCannes(movie: TMDBMovie) async {
+    private func addToFutureCannes(movie: AppModels.Movie) async {
         do {
+            let tmdbMovie = TMDBMovie(
+                id: movie.id,
+                title: movie.title,
+                name: movie.name,
+                overview: movie.overview ?? "",
+                posterPath: movie.poster_path,
+                releaseDate: movie.release_date,
+                firstAirDate: movie.first_air_date,
+                voteAverage: movie.vote_average ?? 0.0,
+                voteCount: movie.vote_count ?? 0,
+                genres: movie.genres?.map { TMDBGenre(id: $0.id, name: $0.name) } ?? [],
+                mediaType: movie.media_type,
+                runtime: movie.runtime,
+                episodeRunTime: movie.episode_run_time
+            )
+            
             let firestoreService = FirestoreService()
-            try await firestoreService.addToFutureCannes(movie: movie)
+            try await firestoreService.addToFutureCannes(movie: tmdbMovie)
             
             // Reload the list
             await loadFutureCannesList()
@@ -361,46 +425,51 @@ struct RecommendationsView: View {
 // MARK: - Search Result Components
 
 struct RecommendationsSearchResultRow: View {
-    let movie: TMDBMovie
-    let onTap: () -> Void
+    let movie: AppModels.Movie
     let onAddToFutureCannes: () -> Void
     @State private var isAdding = false
     
     var body: some View {
-        Button(action: onTap) {
+        Button(action: onAddToFutureCannes) {
             HStack(spacing: 12) {
                 // Poster
-                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w92\(movie.posterPath ?? "")")) { phase in
-                    switch phase {
-                    case .empty:
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .frame(width: 60, height: 90)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 60, height: 90)
-                            .cornerRadius(8)
-                    case .failure:
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .frame(width: 60, height: 90)
-                    @unknown default:
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .frame(width: 60, height: 90)
+                if let posterPath = movie.poster_path {
+                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w92\(posterPath)")) { phase in
+                        switch phase {
+                        case .empty:
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray5))
+                                .frame(width: 60, height: 90)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 60, height: 90)
+                                .cornerRadius(8)
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray5))
+                                .frame(width: 60, height: 90)
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemGray5))
+                                .frame(width: 60, height: 90)
+                        }
                     }
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 60, height: 90)
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(movie.title ?? movie.name ?? "Unknown")
+                    Text(movie.displayTitle)
                         .font(.headline)
                         .foregroundColor(.primary)
                         .lineLimit(2)
                     
-                    if let releaseDate = movie.releaseDate ?? movie.firstAirDate {
-                        Text("Released: \(formatDate(releaseDate))")
+                    if let date = movie.displayDate {
+                        Text("Released: \(String(date.prefix(4)))")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -431,46 +500,40 @@ struct RecommendationsSearchResultRow: View {
         }
         .buttonStyle(PlainButtonStyle())
     }
-    
-    private func formatDate(_ dateString: String) -> String {
-        let inputFormatter = DateFormatter()
-        inputFormatter.dateFormat = "yyyy-MM-dd"
-        
-        let outputFormatter = DateFormatter()
-        outputFormatter.dateFormat = "MMM d, yyyy"
-        
-        if let date = inputFormatter.date(from: dateString) {
-            return outputFormatter.string(from: date)
-        }
-        return dateString
-    }
 }
 
 struct RecommendationsSearchResultGridItem: View {
-    let movie: TMDBMovie
-    let onTap: () -> Void
+    let movie: AppModels.Movie
     let onAddToFutureCannes: () -> Void
     @State private var isAdding = false
     
     var body: some View {
-        Button(action: onTap) {
+        Button(action: onAddToFutureCannes) {
             ZStack(alignment: .topTrailing) {
                 // Poster
-                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(movie.posterPath ?? "")")) { phase in
-                    switch phase {
-                    case .empty:
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(.systemGray5))
-                            .opacity(0.6)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure:
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(.systemGray5))
-                            .opacity(0.6)
-                    @unknown default:
+                Group {
+                    if let posterPath = movie.poster_path {
+                        AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { phase in
+                            switch phase {
+                            case .empty:
+                                RoundedRectangle(cornerRadius: 0)
+                                    .fill(Color(.systemGray5))
+                                    .opacity(0.6)
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            case .failure:
+                                RoundedRectangle(cornerRadius: 0)
+                                    .fill(Color(.systemGray5))
+                                    .opacity(0.6)
+                            @unknown default:
+                                RoundedRectangle(cornerRadius: 0)
+                                    .fill(Color(.systemGray5))
+                                    .opacity(0.6)
+                            }
+                        }
+                    } else {
                         RoundedRectangle(cornerRadius: 0)
                             .fill(Color(.systemGray5))
                             .opacity(0.6)
