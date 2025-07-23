@@ -16,6 +16,7 @@ struct FriendSearchView: View {
     @State private var isSearching = false
     @State private var showingFriendProfile: UserProfile?
     @State private var selectedTab = 0
+    @State private var showingContacts = false
     
     var body: some View {
         NavigationView {
@@ -24,6 +25,7 @@ struct FriendSearchView: View {
                 Picker("View", selection: $selectedTab) {
                     Text("Search").tag(0)
                     Text("Following").tag(1)
+                    Text("Contacts").tag(2)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding(.horizontal)
@@ -32,8 +34,10 @@ struct FriendSearchView: View {
                 // Content
                 if selectedTab == 0 {
                     searchView
-                } else {
+                } else if selectedTab == 1 {
                     FollowingListView(store: store)
+                } else {
+                    contactsView
                 }
             }
             .navigationTitle("Find People")
@@ -42,6 +46,9 @@ struct FriendSearchView: View {
         }
         .sheet(item: $showingFriendProfile) { profile in
             FriendProfileView(userProfile: profile, store: store)
+        }
+        .sheet(isPresented: $showingContacts) {
+            ContactsView(store: store)
         }
     }
     
@@ -174,6 +181,44 @@ struct FriendSearchView: View {
                 }
             }
         }
+    }
+    
+    private var contactsView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "person.2.circle")
+                .font(.system(size: 60))
+                .foregroundColor(.secondary)
+            
+            VStack(spacing: 12) {
+                Text("Find Friends from Contacts")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text("Connect with friends who are already using the app by importing your contacts.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Button(action: {
+                showingContacts = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.title3)
+                    Text("Import Contacts")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 16)
+                .background(Color.accentColor)
+                .cornerRadius(12)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

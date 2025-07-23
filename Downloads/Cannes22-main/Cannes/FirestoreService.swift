@@ -2128,4 +2128,31 @@ extension FirestoreService {
         
         return nil
     }
+    
+    // Get all users for contacts matching
+    func getAllUsers() async throws -> [UserProfile] {
+        let snapshot = try await db.collection("users").getDocuments()
+        
+        return snapshot.documents.compactMap { document in
+            let data = document.data()
+            
+            guard let username = data["username"] as? String else {
+                return nil
+            }
+            
+            return UserProfile(
+                uid: document.documentID,
+                username: username,
+                movieCount: data["movieCount"] as? Int ?? 0
+            )
+        }
+    }
+    
+    // Check if a user exists by email (for contacts matching)
+    func findUserByEmail(_ email: String) async throws -> UserProfile? {
+        // This would require storing email in user profiles
+        // For now, we'll return nil as this needs to be implemented
+        // based on how you want to store email addresses
+        return nil
+    }
 } 
