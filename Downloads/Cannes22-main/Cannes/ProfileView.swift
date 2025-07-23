@@ -224,7 +224,7 @@ struct ProfileView: View {
             async let userProfileTask = firestoreService.getUserProfile(userId: Auth.auth().currentUser?.uid ?? "")
             async let userRankingsTask = firestoreService.getUserRankings(userId: Auth.auth().currentUser?.uid ?? "")
             
-            let (fetchedFollowers, fetchedFollowing, userProfile, userRankings) = await (
+            let (fetchedFollowers, fetchedFollowing, _, userRankings) = await (
                 followersTask,
                 followingTask,
                 userProfileTask,

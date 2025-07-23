@@ -57,6 +57,14 @@ struct GlobalRatingGridItem: View {
                 
                 // Score bubble or goat
                 ZStack {
+                    // Aura effect for golden bubbles
+                    if position <= 5 && rating.confidenceAdjustedScore >= 9.0 {
+                        Circle()
+                            .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
+                            .frame(width: 40, height: 40)
+                            .blur(radius: 2)
+                    }
+                    
                     Circle()
                         .fill(position <= 5 && rating.confidenceAdjustedScore >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
                         .frame(width: 32, height: 32)
@@ -69,7 +77,7 @@ struct GlobalRatingGridItem: View {
                         Text(String(format: "%.1f", displayScore))
                             .font(.caption)
                             .fontWeight(.bold)
-                            .foregroundColor(.white)
+                            .foregroundColor(position <= 5 && rating.confidenceAdjustedScore >= 9.0 ? .black : .white)
                     }
                 }
                 .offset(x: 8, y: 8)
