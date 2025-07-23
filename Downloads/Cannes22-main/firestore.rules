@@ -40,6 +40,12 @@ service cloud.firestore {
         // Users can write to any user's followers list (for follow/unfollow operations)
         allow write, delete: if request.auth != null;
       }
+      
+      // Nested rule for futureCannes - users can manage their own Future Cannes list
+      match /futureCannes/{itemId} {
+        // Users can read and write their own Future Cannes list
+        allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // 🔥 Add this block for ratings
