@@ -9,17 +9,7 @@ struct ContactsView: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                if contactsService.isLoading {
-                    loadingView
-                } else if !contactsService.hasPermission {
-                    permissionView
-                } else if contactsService.contacts.isEmpty {
-                    emptyContactsView
-                } else {
-                    contactsListView
-                }
-            }
+            contactsView
             .navigationTitle("Contacts")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
@@ -160,6 +150,30 @@ struct ContactsView: View {
                         }
                     )
                 }
+            }
+        }
+    }
+    
+    private var contactsSkeletonView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { _ in
+                    ContactRowSkeleton()
+                }
+            }
+        }
+    }
+
+    private var contactsView: some View {
+        VStack(spacing: 0) {
+            if contactsService.isLoading {
+                contactsSkeletonView
+            } else if !contactsService.hasPermission {
+                permissionView
+            } else if contactsService.contacts.isEmpty {
+                emptyContactsView
+            } else {
+                contactsListView
             }
         }
     }

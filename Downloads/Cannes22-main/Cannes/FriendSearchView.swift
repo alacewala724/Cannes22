@@ -195,7 +195,7 @@ struct FriendSearchView: View {
     private var contactsView: some View {
         VStack(spacing: 0) {
             if contactsService.isLoading {
-                contactsLoadingView
+                contactsSkeletonView
             } else if !contactsService.hasPermission {
                 permissionView
             } else if contactsService.contacts.isEmpty {
@@ -206,13 +206,14 @@ struct FriendSearchView: View {
         }
     }
     
-    private var contactsLoadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading contacts...")
-                .foregroundColor(.secondary)
+    private var contactsSkeletonView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { _ in
+                    ContactRowSkeleton()
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var permissionView: some View {
@@ -320,6 +321,54 @@ struct FriendSearchView: View {
                 }
             }
         }
+    }
+}
+
+struct ContactRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar skeleton
+            Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 50, height: 50)
+                .opacity(0.6)
+            
+            // Contact info skeleton
+            VStack(alignment: .leading, spacing: 4) {
+                // Name skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 120, height: 16)
+                    .opacity(0.6)
+                
+                // Username skeleton (for app users)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 80, height: 12)
+                    .opacity(0.6)
+                
+                // Phone skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 100, height: 12)
+                    .opacity(0.6)
+            }
+            
+            Spacer()
+            
+            // Button skeleton
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.systemGray5))
+                .frame(width: 60, height: 32)
+                .opacity(0.6)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 
