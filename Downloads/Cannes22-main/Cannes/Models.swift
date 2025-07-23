@@ -171,6 +171,8 @@ struct GlobalRating: Identifiable, Codable, Hashable {
     let averageRating: Double
     let numberOfRatings: Int
     let tmdbId: Int?
+    let totalRatings: Int // Total number of ratings across all movies
+    let totalMovies: Int // Total number of movies in the system
     
     var displayScore: Double { averageRating }
     
@@ -184,6 +186,94 @@ struct GlobalRating: Identifiable, Codable, Hashable {
             return Color(.systemRed)    // didntLikeIt range
         default:
             return Color(.systemGray)
+        }
+    }
+    
+    // MARK: - Confidence Calculation
+    
+    /// Calculate the confidence-adjusted score for ranking
+    var confidenceAdjustedScore: Double {
+        // Dynamic confidence based on total ratings in the system
+        let baseConfidence = calculateBaseConfidence()
+        let ratingConfidence = calculateRatingConfidence()
+        let combinedConfidence = (baseConfidence + ratingConfidence) / 2.0
+        
+        // Calculate average ratings per movie and normalize
+        let averageRatingsPerMovie = Double(totalRatings) / max(1.0, Double(totalMovies))
+        let ratingRatio = Double(numberOfRatings) / averageRatingsPerMovie
+        let normalizedConfidence = min(1.0, ratingRatio)
+        
+        // Apply stronger confidence penalty, but normalize it
+        let confidencePenalty = (1.0 - combinedConfidence) * 0.3 * (1.0 - normalizedConfidence)
+        let adjustedScore = averageRating * (1.0 - confidencePenalty)
+        
+        return adjustedScore
+    }
+    
+    /// Calculate base confidence based on total ratings in system
+    private func calculateBaseConfidence() -> Double {
+        // Smooth sliding scale based on total ratings
+        let totalRatings = Double(totalRatings)
+        
+        // Formula: confidence = 0.2 + 0.75 * (1 - e^(-totalRatings/200))
+        // This gives:
+        // - 0.2 confidence for 0 ratings
+        // - 0.4 confidence for ~50 ratings
+        // - 0.6 confidence for ~150 ratings
+        // - 0.8 confidence for ~400 ratings
+        // - 1.0 confidence for ~1000+ ratings
+        let confidence = 0.2 + 0.75 * (1.0 - exp(-totalRatings / 200.0))
+        
+        return min(1.0, confidence) // Cap at 1.0
+    }
+    
+    /// Calculate confidence based on this specific rating's number of votes
+    private func calculateRatingConfidence() -> Double {
+        let votes = Double(numberOfRatings)
+        
+        // Smooth sliding scale based on number of votes
+        // Formula: confidence = 0.1 + 0.85 * (1 - e^(-votes/8))
+        // This gives:
+        // - 0.1 confidence for 0 votes
+        // - 0.3 confidence for ~2 votes
+        // - 0.5 confidence for ~4 votes
+        // - 0.7 confidence for ~7 votes
+        // - 0.85 confidence for ~12 votes
+        // - 1.0 confidence for ~20+ votes
+        let confidence = 0.1 + 0.85 * (1.0 - exp(-votes / 8.0))
+        
+        return min(1.0, confidence) // Cap at 1.0
+    }
+    
+    /// Calculate confidence level (0-1) where 1 is most confident
+    var confidenceLevel: Double {
+        let baseConfidence = calculateBaseConfidence()
+        let ratingConfidence = calculateRatingConfidence()
+        let combinedConfidence = (baseConfidence + ratingConfidence) / 2.0
+        
+        return min(1.0, combinedConfidence)
+    }
+    
+    /// Check if this rating meets minimum confidence requirements
+    var isConfident: Bool {
+        return confidenceLevel >= 0.3 // Lowered from 0.4 to be more inclusive
+    }
+    
+    /// Get the confidence interval range
+    var confidenceIntervalRange: (min: Double, max: Double) {
+        let standardError = 1.0 / sqrt(Double(numberOfRatings))
+        let margin = 1.96 * standardError
+        return (averageRating - margin, averageRating + margin)
+    }
+    
+    /// Get a confidence indicator string
+    var confidenceIndicator: String {
+        if confidenceLevel >= 0.6 {
+            return "🟢" // High confidence - lowered from 0.7
+        } else if confidenceLevel >= 0.3 {
+            return "🟡" // Medium confidence - lowered from 0.4
+        } else {
+            return "🔴" // Low confidence
         }
     }
 }

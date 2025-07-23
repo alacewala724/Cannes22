@@ -222,6 +222,26 @@ struct ContentView: View {
                         Text("Selected type: \(store.selectedMediaType.rawValue)")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        
+                        // Show confidence-adjusted ranking info
+                        if !globalRatings.isEmpty {
+                            Text("Top 3 (Confidence-Adjusted):")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            ForEach(Array(globalRatings.prefix(3).enumerated()), id: \.element.id) { index, rating in
+                                HStack {
+                                    Text("\(index + 1). ")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text(rating.title)
+                                        .font(.custom("PlayfairDisplay-Medium", size: 10))
+                                        .foregroundColor(.secondary)
+                                    Text(" - Raw: \(String(format: "%.1f", rating.averageRating)), Adjusted: \(String(format: "%.1f", rating.confidenceAdjustedScore)), Confidence: \(rating.confidenceIndicator)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
                     }
                     .padding()
                     .background(Color(.systemGray6))
@@ -236,12 +256,15 @@ struct ContentView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: UI.vGap) {
+                ForEach(0..<10, id: \.self) { _ in
+                    GlobalRatingRowSkeleton()
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, UI.vGap)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyStateView: some View {
@@ -326,6 +349,9 @@ struct MovieRow: View {
     let isEditing: Bool
     @State private var showingDetail = false
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingNumber = false
+    @State private var calculatingScore = false
+    @State private var displayScore: Double = 0.0
 
     var body: some View {
         HStack(spacing: UI.vGap) {
@@ -351,13 +377,27 @@ struct MovieRow: View {
             }) {
                 HStack(spacing: UI.vGap) {
                     Text("\(position)")
-                        .font(.headline)
+                        .font(.custom("PlayfairDisplay-Medium", size: 18))
                         .foregroundColor(.gray)
                         .frame(width: 30)
+                        .opacity(showingNumber ? 1 : 0)
+                        .scaleEffect(showingNumber ? 1 : 0.8)
+                        .animation(.easeOut(duration: 0.3).delay(Double(position) * 0.05), value: showingNumber)
+                        .overlay(
+                            // Loading placeholder
+                            Group {
+                                if !showingNumber {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color(.systemGray5))
+                                        .frame(width: 20, height: 18)
+                                        .opacity(0.6)
+                                }
+                            }
+                        )
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(movie.title)
-                            .font(.custom("PlayfairDisplay-Medium", size: 16))
+                            .font(.custom("PlayfairDisplay-Bold", size: 18))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -379,7 +419,7 @@ struct MovieRow: View {
                                 .fill(Color.adaptiveGolden(for: colorScheme))
                                 .frame(width: 44, height: 44)
                                 .overlay(
-                                    Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
@@ -387,7 +427,7 @@ struct MovieRow: View {
                         }
                         .frame(width: 52, height: 52)
                     } else {
-                        Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                             .font(position == 1 ? .title : .headline).bold()
                             .foregroundColor(Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
                             .frame(width: 44, height: 44)
@@ -415,6 +455,83 @@ struct MovieRow: View {
                 UnifiedMovieDetailView(movie: movie, store: store)
             }
         }
+        .onAppear {
+            // Trigger the number animation with a slight delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                showingNumber = true
+            }
+            
+            // Start the score calculating animation
+            startScoreAnimation()
+        }
+    }
+    
+    private func startScoreAnimation() {
+        let targetScore = movie.score
+        calculatingScore = true
+        
+        // Start with a random number
+        displayScore = Double.random(in: 0...10)
+        
+        // Create a timer that cycles through numbers
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
+            if calculatingScore {
+                // Cycle through random numbers around the target
+                let randomOffset = Double.random(in: -2...2)
+                displayScore = max(0, min(10, targetScore + randomOffset))
+            } else {
+                // Settle on the final value
+                displayScore = targetScore
+                timer.invalidate()
+            }
+        }
+        
+        // Stop calculating after 0.8 seconds and settle on final value
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            calculatingScore = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayScore = targetScore
+            }
+        }
+    }
+}
+
+struct GlobalRatingRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: UI.vGap) {
+            // Position skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 30, height: 18)
+                .opacity(0.6)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                // Title skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 200, height: 18)
+                    .opacity(0.6)
+            }
+            
+            Spacer()
+            
+            // Score circle skeleton
+            Circle()
+                .stroke(Color(.systemGray5), lineWidth: 2)
+                .frame(width: 52, height: 52)
+                .opacity(0.6)
+            
+            // Chevron skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 20, height: 20)
+                .opacity(0.6)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Color(.systemGray6))
+        .cornerRadius(UI.corner)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 

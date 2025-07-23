@@ -53,12 +53,15 @@ struct UpdatesView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading updates...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                ForEach(0..<8, id: \.self) { _ in
+                    ActivityRowSkeleton()
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyStateView: some View {
@@ -126,6 +129,66 @@ struct UpdatesView: View {
                 showError = true
             }
         }
+    }
+}
+
+struct ActivityRowSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                // User avatar skeleton
+                Circle()
+                    .fill(Color(.systemGray5))
+                    .frame(width: 40, height: 40)
+                    .opacity(0.6)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    // Activity text skeleton
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 200, height: 16)
+                        .opacity(0.6)
+                    
+                    // Time ago skeleton
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 80, height: 12)
+                        .opacity(0.6)
+                }
+                
+                Spacer()
+            }
+            
+            // Movie title button skeleton
+            HStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 12, height: 12)
+                    .opacity(0.6)
+                
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 150, height: 16)
+                    .opacity(0.6)
+                
+                Spacer()
+                
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 12, height: 12)
+                    .opacity(0.6)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 
@@ -315,7 +378,9 @@ struct NotificationMovieDetailView: View {
                         mediaType: mediaType,
                         averageRating: rating.averageRating,
                         numberOfRatings: rating.numberOfRatings,
-                        tmdbId: tmdbId
+                        tmdbId: tmdbId,
+                        totalRatings: 100, // Default value for this context
+                        totalMovies: 50 // Default value for this context
                     )
                 } else {
                     // If no community rating exists, create a default one
@@ -325,7 +390,9 @@ struct NotificationMovieDetailView: View {
                         mediaType: mediaType,
                         averageRating: 0.0,
                         numberOfRatings: 0,
-                        tmdbId: tmdbId
+                        tmdbId: tmdbId,
+                        totalRatings: 100, // Default value for this context
+                        totalMovies: 50 // Default value for this context
                     )
                 }
                 isLoading = false

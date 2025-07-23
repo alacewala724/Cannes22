@@ -15,21 +15,40 @@ struct GlobalRatingRow: View {
     let onTap: () -> Void
     @ObservedObject var store: MovieStore
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingNumber = false
+    @State private var calculatingScore = false
+    @State private var displayScore: Double = 0.0
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: UI.vGap) {
                 Text("\(position)")
-                    .font(.headline)
+                    .font(.custom("PlayfairDisplay-Medium", size: 18))
                     .foregroundColor(.gray)
                     .frame(width: 30)
+                    .opacity(showingNumber ? 1 : 0)
+                    .scaleEffect(showingNumber ? 1 : 0.8)
+                    .animation(.easeOut(duration: 0.3).delay(Double(position) * 0.05), value: showingNumber)
+                    .overlay(
+                        // Loading placeholder
+                        Group {
+                            if !showingNumber {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 20, height: 18)
+                                    .opacity(0.6)
+                            }
+                        }
+                    )
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(rating.title)
-                        .font(.custom("PlayfairDisplay-Medium", size: 16))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Text(rating.title)
+                            .font(.custom("PlayfairDisplay-Bold", size: 18))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 Spacer()
@@ -38,7 +57,7 @@ struct GlobalRatingRow: View {
                     // Show user's rating difference if they have rated this movie
                     if let tmdbId = rating.tmdbId,
                        let userScore = store.getUserPersonalScore(for: tmdbId) {
-                        let difference = userScore - rating.averageRating
+                        let difference = userScore - rating.confidenceAdjustedScore
                         let isHigher = difference > 0
                         let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
                         let arrow = isHigher ? "arrow.up" : "arrow.down"
@@ -55,7 +74,7 @@ struct GlobalRatingRow: View {
                                     .font(.caption2)
                                 // Round the difference to 1 decimal place to avoid floating-point precision issues
                                 let roundedDifference = (difference * 10).rounded() / 10
-                                let _ = debugDifference(userScore: userScore, averageRating: rating.averageRating, difference: difference)
+                                let _ = debugDifference(userScore: userScore, averageRating: rating.confidenceAdjustedScore, difference: difference)
                                 Text(String(format: "%.1f", abs(roundedDifference)))
                                     .font(.caption2)
                                     .foregroundColor(color)
@@ -69,7 +88,7 @@ struct GlobalRatingRow: View {
                     }
                     
                     // Golden circle for high scores in top 5
-                    if position <= 5 && rating.averageRating >= 9.0 {
+                    if position <= 5 && rating.confidenceAdjustedScore >= 9.0 {
                         ZStack {
                             // Halo effect
                             Circle()
@@ -82,7 +101,7 @@ struct GlobalRatingRow: View {
                                 .fill(Color.adaptiveGolden(for: colorScheme))
                                 .frame(width: 44, height: 44)
                                 .overlay(
-                                    Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
@@ -90,13 +109,13 @@ struct GlobalRatingRow: View {
                         }
                         .frame(width: 52, height: 52)
                     } else {
-                        Text(position == 1 ? "🐐" : String(format: "%.1f", rating.averageRating))
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                             .font(position == 1 ? .title : .headline).bold()
-                            .foregroundColor(Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme))
+                            .foregroundColor(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
                             .frame(width: 44, height: 44)
                             .background(
                                 Circle()
-                                    .stroke(Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme), lineWidth: 2)
+                                    .stroke(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme), lineWidth: 2)
                             )
                             .frame(width: 52, height: 52)
                     }
@@ -110,6 +129,44 @@ struct GlobalRatingRow: View {
             .listItem()
         }
         .buttonStyle(.plain)
+        .onAppear {
+            // Trigger the number animation with a slight delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                showingNumber = true
+            }
+            
+            // Start the score calculating animation
+            startScoreAnimation()
+        }
+    }
+
+    private func startScoreAnimation() {
+        let targetScore = rating.confidenceAdjustedScore
+        calculatingScore = true
+        
+        // Start with a random number
+        displayScore = Double.random(in: 0...10)
+        
+        // Create a timer that cycles through numbers
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
+            if calculatingScore {
+                // Cycle through random numbers around the target
+                let randomOffset = Double.random(in: -2...2)
+                displayScore = max(0, min(10, targetScore + randomOffset))
+            } else {
+                // Settle on the final value
+                displayScore = targetScore
+                timer.invalidate()
+            }
+        }
+        
+        // Stop calculating after 0.8 seconds and settle on final value
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            calculatingScore = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayScore = targetScore
+            }
+        }
     }
 }
 
@@ -213,7 +270,7 @@ struct UnifiedMovieDetailView: View {
     
     private var displayAverageRating: Double? {
         if let rating = initialRating {
-            return rating.averageRating
+            return rating.confidenceAdjustedScore
         } else if let communityRating = communityRating {
             return communityRating
         }
@@ -230,7 +287,7 @@ struct UnifiedMovieDetailView: View {
     
     private var displaySentimentColor: Color {
         if let rating = initialRating {
-            return Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme)
+            return Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme)
         } else if let averageRating = displayAverageRating {
             return Color.adaptiveSentiment(for: averageRating, colorScheme: colorScheme)
         }

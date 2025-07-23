@@ -347,12 +347,15 @@ struct FollowingListView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading following...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<8, id: \.self) { _ in
+                    FollowingRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyFollowingView: some View {
@@ -407,6 +410,45 @@ struct FollowingListView: View {
             print("Error loading following: \(error)")
         }
         isLoading = false
+    }
+}
+
+struct FollowingRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar skeleton
+            Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 50, height: 50)
+                .opacity(0.6)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                // Username skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 120, height: 16)
+                    .opacity(0.6)
+                
+                // Movies in common skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 100, height: 12)
+                    .opacity(0.6)
+            }
+            
+            Spacer()
+            
+            // Unfollow button skeleton
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(.systemGray5))
+                .frame(width: 60, height: 32)
+                .opacity(0.6)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 

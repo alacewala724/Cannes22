@@ -1083,6 +1083,9 @@ final class MovieStore: ObservableObject {
             var movieRatings: [GlobalRating] = []
             var tvRatings: [GlobalRating] = []
             
+            // First pass: collect all ratings to calculate total
+            var allRatings: [(title: String, averageRating: Double, numberOfRatings: Int, mediaType: AppModels.MediaType, tmdbId: Int?)] = []
+            
             for document in snapshot.documents {
                 let data = document.data()
                 
@@ -1097,25 +1100,44 @@ final class MovieStore: ObservableObject {
                 let mediaType: AppModels.MediaType = mediaTypeString.lowercased().contains("tv") ? .tv : .movie
                 let tmdbId = data["tmdbId"] as? Int
                 
-                let globalRating = GlobalRating(
-                    id: document.documentID,
+                allRatings.append((
                     title: title,
-                    mediaType: mediaType,
                     averageRating: averageRating,
                     numberOfRatings: numberOfRatings,
+                    mediaType: mediaType,
                     tmdbId: tmdbId
+                ))
+            }
+            
+            // Calculate total ratings across all movies
+            let totalRatings = allRatings.reduce(0) { $0 + $1.numberOfRatings }
+            let totalMovies = allRatings.count
+            print("loadGlobalRatingsFromServer: Total ratings across all movies: \(totalRatings)")
+            print("loadGlobalRatingsFromServer: Total movies: \(totalMovies)")
+            
+            // Second pass: create GlobalRating objects with total ratings
+            for rating in allRatings {
+                let globalRating = GlobalRating(
+                    id: UUID().uuidString, // Generate a unique ID since we don't have document ID here
+                    title: rating.title,
+                    mediaType: rating.mediaType,
+                    averageRating: rating.averageRating,
+                    numberOfRatings: rating.numberOfRatings,
+                    tmdbId: rating.tmdbId,
+                    totalRatings: totalRatings,
+                    totalMovies: totalMovies
                 )
                 
-                if mediaType == .movie {
+                if rating.mediaType == .movie {
                     movieRatings.append(globalRating)
                 } else {
                     tvRatings.append(globalRating)
                 }
             }
             
-            // Sort by rating (highest first)
-            movieRatings.sort { $0.averageRating > $1.averageRating }
-            tvRatings.sort { $0.averageRating > $1.averageRating }
+            // Sort by confidence-adjusted score (highest first)
+            movieRatings.sort { $0.confidenceAdjustedScore > $1.confidenceAdjustedScore }
+            tvRatings.sort { $0.confidenceAdjustedScore > $1.confidenceAdjustedScore }
             
             await MainActor.run { [movieRatings, tvRatings] in
                 self.globalMovieRatings = movieRatings

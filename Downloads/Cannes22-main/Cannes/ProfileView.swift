@@ -5,6 +5,7 @@ import FirebaseFirestore
 struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
+    @EnvironmentObject var authService: AuthenticationService
     @Environment(\.colorScheme) private var colorScheme
     @State private var followers: [UserProfile] = []
     @State private var following: [UserProfile] = []
@@ -13,6 +14,7 @@ struct ProfileView: View {
     @State private var moviesCount = 0
     @State private var tvShowsCount = 0
     @State private var isLoading = true
+    @State private var isLoadingStats = true
     @State private var showingFollowers = false
     @State private var showingFollowing = false
     @State private var username = ""
@@ -114,44 +116,51 @@ struct ProfileView: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 16) {
-                // Followers
-                StatCard(
-                    title: "Followers",
-                    count: followersCount,
-                    icon: "person.2.fill",
-                    color: .blue
-                ) {
-                    showingFollowers = true
-                }
-                
-                // Following
-                StatCard(
-                    title: "Following",
-                    count: followingCount,
-                    icon: "person.2.circle.fill",
-                    color: Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme)
-                ) {
-                    showingFollowing = true
-                }
-                
-                // Movies
-                StatCard(
-                    title: "Movies",
-                    count: moviesCount,
-                    icon: "film.fill",
-                    color: .orange
-                ) {
-                    // Could navigate to movies list
-                }
-                
-                // TV Shows
-                StatCard(
-                    title: "TV Shows",
-                    count: tvShowsCount,
-                    icon: "tv.fill",
-                    color: .purple
-                ) {
-                    // Could navigate to TV shows list
+                if isLoadingStats {
+                    // Loading skeleton cards
+                    ForEach(0..<4, id: \.self) { _ in
+                        StatCardSkeleton()
+                    }
+                } else {
+                    // Followers
+                    StatCard(
+                        title: "Followers",
+                        count: followersCount,
+                        icon: "person.2.fill",
+                        color: .blue
+                    ) {
+                        showingFollowers = true
+                    }
+                    
+                    // Following
+                    StatCard(
+                        title: "Following",
+                        count: followingCount,
+                        icon: "person.2.circle.fill",
+                        color: Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme)
+                    ) {
+                        showingFollowing = true
+                    }
+                    
+                    // Movies
+                    StatCard(
+                        title: "Movies",
+                        count: moviesCount,
+                        icon: "film.fill",
+                        color: .orange
+                    ) {
+                        // Could navigate to movies list
+                    }
+                    
+                    // TV Shows
+                    StatCard(
+                        title: "TV Shows",
+                        count: tvShowsCount,
+                        icon: "tv.fill",
+                        color: .purple
+                    ) {
+                        // Could navigate to TV shows list
+                    }
                 }
             }
         }
@@ -203,39 +212,81 @@ struct ProfileView: View {
     
     private func loadProfileData() async {
         isLoading = true
+        isLoadingStats = true
         
-        guard let currentUser = Auth.auth().currentUser else {
-            isLoading = false
-            return
-        }
+        // Load username from AuthenticationService
+        username = authService.username ?? "user"
         
         do {
-            // Get username from user document
-            if let userProfile = try await firestoreService.getUserProfile(userId: currentUser.uid) {
-                username = userProfile.username
-            } else {
-                // Fallback to email if no username found
-                username = currentUser.email?.components(separatedBy: "@").first ?? "user"
+            // Load all data concurrently
+            async let followersTask = firestoreService.getFollowers(userId: Auth.auth().currentUser?.uid ?? "")
+            async let followingTask = firestoreService.getFollowing()
+            async let userProfileTask = firestoreService.getUserProfile(userId: Auth.auth().currentUser?.uid ?? "")
+            async let userRankingsTask = firestoreService.getUserRankings(userId: Auth.auth().currentUser?.uid ?? "")
+            
+            let (fetchedFollowers, fetchedFollowing, userProfile, userRankings) = await (
+                followersTask,
+                followingTask,
+                userProfileTask,
+                userRankingsTask
+            )
+            
+            await MainActor.run {
+                followers = fetchedFollowers
+                following = fetchedFollowing
+                followersCount = fetchedFollowers.count
+                followingCount = fetchedFollowing.count
+                
+                // Use actual movie count from user profile, calculate TV show count from rankings
+                if let profile = userProfile {
+                    self.moviesCount = profile.movieCount ?? 0
+                    // Calculate TV show count from rankings since UserProfile doesn't have tvShowCount
+                    self.tvShowsCount = userRankings.filter { $0.mediaType == .tv }.count
+                } else {
+                    // Fallback to 0 if profile not found
+                    self.moviesCount = 0
+                    self.tvShowsCount = 0
+                }
+                
+                isLoading = false
+                isLoadingStats = false
             }
-            
-            // Load counts
-            followersCount = try await firestoreService.getFollowersCount(userId: currentUser.uid)
-            followingCount = try await firestoreService.getFollowingCount(userId: currentUser.uid)
-            
-            // Load lists
-            followers = try await firestoreService.getFollowers(userId: currentUser.uid)
-            following = try await firestoreService.getFollowing()
-            
-            // Load movie counts
-            let userMovies = try await firestoreService.getUserRankings(userId: currentUser.uid)
-            moviesCount = userMovies.filter { $0.mediaType == .movie }.count
-            tvShowsCount = userMovies.filter { $0.mediaType == .tv }.count
-            
         } catch {
             print("Error loading profile data: \(error)")
+            await MainActor.run {
+                isLoading = false
+                isLoadingStats = false
+            }
         }
-        
-        isLoading = false
+    }
+}
+
+struct StatCardSkeleton: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            // Icon skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 24, height: 24)
+                .opacity(0.6)
+            
+            // Count skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 40, height: 24)
+                .opacity(0.6)
+            
+            // Title skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 60, height: 16)
+                .opacity(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .background(Color(.systemGray6))
+        .cornerRadius(16)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 
@@ -278,11 +329,14 @@ struct FollowersListView: View {
     @State private var showingUserProfile: UserProfile?
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
+    @State private var isLoading = true
     
     var body: some View {
         NavigationView {
             VStack {
-                if followers.isEmpty {
+                if isLoading {
+                    loadingView
+                } else if followers.isEmpty {
                     emptyStateView
                 } else {
                     followersList
@@ -298,6 +352,13 @@ struct FollowersListView: View {
                 }
             }
         }
+        .task {
+            // Simulate loading time for better UX
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await MainActor.run {
+                isLoading = false
+            }
+        }
         .sheet(item: $showingUserProfile) { user in
             FriendProfileView(userProfile: user, store: MovieStore())
         }
@@ -306,6 +367,18 @@ struct FollowersListView: View {
         }
         .sheet(item: $showingUserFollowing) { user in
             UserFollowingListView(user: user)
+        }
+    }
+    
+    private var loadingView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<6, id: \.self) { _ in
+                    FollowerRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
     }
     
@@ -346,6 +419,46 @@ struct FollowersListView: View {
     }
 }
 
+struct FollowerRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar skeleton
+            Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 50, height: 50)
+                .opacity(0.6)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                // Username skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 120, height: 16)
+                    .opacity(0.6)
+                
+                // Stats skeleton
+                HStack(spacing: 16) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 60, height: 12)
+                        .opacity(0.6)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 60, height: 12)
+                        .opacity(0.6)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
+    }
+}
+
 struct FollowerRow: View {
     let follower: UserProfile
     let onTap: () -> Void
@@ -355,6 +468,8 @@ struct FollowerRow: View {
     @State private var isFollowing = false
     @State private var isLoading = true
     @State private var isCurrentUser = false
+    @State private var moviesInCommon = 0
+    @State private var isLoadingMoviesInCommon = true
     
     var body: some View {
         Button(action: onTap) {
@@ -375,9 +490,15 @@ struct FollowerRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(follower.movieCount ?? 0) movies")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if isLoadingMoviesInCommon {
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(moviesInCommon) movies in common")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Spacer()
@@ -407,6 +528,7 @@ struct FollowerRow: View {
             Task {
                 await checkFollowStatus()
                 await checkIfCurrentUser()
+                await loadMoviesInCommon()
             }
         }
     }
@@ -425,6 +547,17 @@ struct FollowerRow: View {
         if let currentUser = Auth.auth().currentUser {
             isCurrentUser = currentUser.uid == follower.uid
         }
+    }
+    
+    private func loadMoviesInCommon() async {
+        isLoadingMoviesInCommon = true
+        do {
+            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: follower.uid)
+        } catch {
+            print("Error loading movies in common: \(error)")
+            moviesInCommon = 0
+        }
+        isLoadingMoviesInCommon = false
     }
     
     private func onToggleFollow() {
@@ -454,11 +587,14 @@ struct ProfileFollowingListView: View {
     @State private var showingUserProfile: UserProfile?
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
+    @State private var isLoading = true
     
     var body: some View {
         NavigationView {
             VStack {
-                if following.isEmpty {
+                if isLoading {
+                    loadingView
+                } else if following.isEmpty {
                     emptyStateView
                 } else {
                     followingList
@@ -474,6 +610,13 @@ struct ProfileFollowingListView: View {
                 }
             }
         }
+        .task {
+            // Simulate loading time for better UX
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await MainActor.run {
+                isLoading = false
+            }
+        }
         .sheet(item: $showingUserProfile) { user in
             FriendProfileView(userProfile: user, store: MovieStore())
         }
@@ -482,6 +625,18 @@ struct ProfileFollowingListView: View {
         }
         .sheet(item: $showingUserFollowing) { user in
             UserFollowingListView(user: user)
+        }
+    }
+    
+    private var loadingView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<6, id: \.self) { _ in
+                    ProfileFollowingRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
     }
     
@@ -522,6 +677,46 @@ struct ProfileFollowingListView: View {
     }
 }
 
+struct ProfileFollowingRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar skeleton
+            Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 50, height: 50)
+                .opacity(0.6)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                // Username skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 120, height: 16)
+                    .opacity(0.6)
+                
+                // Stats skeleton
+                HStack(spacing: 16) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 60, height: 12)
+                        .opacity(0.6)
+                    
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(width: 60, height: 12)
+                        .opacity(0.6)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
+    }
+}
+
 struct ProfileFollowingRow: View {
     let user: UserProfile
     let onTap: () -> Void
@@ -530,6 +725,8 @@ struct ProfileFollowingRow: View {
     @StateObject private var firestoreService = FirestoreService()
     @State private var isUnfollowing = false
     @State private var isCurrentUser = false
+    @State private var moviesInCommon = 0
+    @State private var isLoadingMoviesInCommon = true
     
     var body: some View {
         Button(action: onTap) {
@@ -550,9 +747,15 @@ struct ProfileFollowingRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(user.movieCount ?? 0) movies")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if isLoadingMoviesInCommon {
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(moviesInCommon) movies in common")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Spacer()
@@ -594,6 +797,7 @@ struct ProfileFollowingRow: View {
         .onAppear {
             Task {
                 await checkIfCurrentUser()
+                await loadMoviesInCommon()
             }
         }
     }
@@ -602,6 +806,17 @@ struct ProfileFollowingRow: View {
         if let currentUser = Auth.auth().currentUser {
             isCurrentUser = currentUser.uid == user.uid
         }
+    }
+    
+    private func loadMoviesInCommon() async {
+        isLoadingMoviesInCommon = true
+        do {
+            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+        } catch {
+            print("Error loading movies in common: \(error)")
+            moviesInCommon = 0
+        }
+        isLoadingMoviesInCommon = false
     }
     
     private func unfollowUser() async {
@@ -674,12 +889,15 @@ struct UserFollowersListView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading followers...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<6, id: \.self) { _ in
+                    FollowerRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyStateView: some View {
@@ -704,7 +922,7 @@ struct UserFollowersListView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(followers, id: \.uid) { follower in
-                    UserFollowerRow(follower: follower) {
+                    FollowerRow(follower: follower) {
                         showingUserProfile = follower
                     } onFollowersTap: {
                         showingUserFollowers = follower
@@ -738,6 +956,8 @@ struct UserFollowerRow: View {
     @State private var isFollowing = false
     @State private var isLoading = true
     @State private var isCurrentUser = false
+    @State private var moviesInCommon = 0
+    @State private var isLoadingMoviesInCommon = true
     
     var body: some View {
         Button(action: onTap) {
@@ -758,9 +978,15 @@ struct UserFollowerRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(follower.movieCount ?? 0) movies")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if isLoadingMoviesInCommon {
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(moviesInCommon) movies in common")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Spacer()
@@ -790,6 +1016,7 @@ struct UserFollowerRow: View {
             Task {
                 await checkFollowStatus()
                 await checkIfCurrentUser()
+                await loadMoviesInCommon()
             }
         }
     }
@@ -808,6 +1035,17 @@ struct UserFollowerRow: View {
         if let currentUser = Auth.auth().currentUser {
             isCurrentUser = currentUser.uid == follower.uid
         }
+    }
+    
+    private func loadMoviesInCommon() async {
+        isLoadingMoviesInCommon = true
+        do {
+            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: follower.uid)
+        } catch {
+            print("Error loading movies in common: \(error)")
+            moviesInCommon = 0
+        }
+        isLoadingMoviesInCommon = false
     }
     
     private func onToggleFollow() {
@@ -876,12 +1114,15 @@ struct UserFollowingListView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading following...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<6, id: \.self) { _ in
+                    ProfileFollowingRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyStateView: some View {
@@ -906,7 +1147,7 @@ struct UserFollowingListView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(following, id: \.uid) { followedUser in
-                    UserFollowingRow(user: followedUser) {
+                    ProfileFollowingRow(user: followedUser) {
                         showingUserProfile = followedUser
                     } onFollowersTap: {
                         showingUserFollowers = followedUser
@@ -923,26 +1164,7 @@ struct UserFollowingListView: View {
     private func loadFollowing() async {
         isLoading = true
         do {
-            // Get the user's following list
-            let followingSnapshot = try await Firestore.firestore()
-                .collection("users")
-                .document(user.uid)
-                .collection("following")
-                .getDocuments()
-            
-            var followingUsers: [UserProfile] = []
-            
-            for followingDoc in followingSnapshot.documents {
-                let followedUserId = followingDoc.documentID
-                
-                if let userProfile = try await firestoreService.getUserProfile(userId: followedUserId) {
-                    followingUsers.append(userProfile)
-                }
-            }
-            
-            await MainActor.run {
-                following = followingUsers
-            }
+            following = try await firestoreService.getFollowing()
         } catch {
             print("Error loading following: \(error)")
         }
@@ -959,6 +1181,8 @@ struct UserFollowingRow: View {
     @State private var isFollowing = false
     @State private var isLoading = true
     @State private var isCurrentUser = false
+    @State private var moviesInCommon = 0
+    @State private var isLoadingMoviesInCommon = true
     
     var body: some View {
         Button(action: onTap) {
@@ -979,9 +1203,15 @@ struct UserFollowingRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(user.movieCount ?? 0) movies")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if isLoadingMoviesInCommon {
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(moviesInCommon) movies in common")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Spacer()
@@ -1011,6 +1241,7 @@ struct UserFollowingRow: View {
             Task {
                 await checkFollowStatus()
                 await checkIfCurrentUser()
+                await loadMoviesInCommon()
             }
         }
     }
@@ -1029,6 +1260,17 @@ struct UserFollowingRow: View {
         if let currentUser = Auth.auth().currentUser {
             isCurrentUser = currentUser.uid == user.uid
         }
+    }
+    
+    private func loadMoviesInCommon() async {
+        isLoadingMoviesInCommon = true
+        do {
+            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+        } catch {
+            print("Error loading movies in common: \(error)")
+            moviesInCommon = 0
+        }
+        isLoadingMoviesInCommon = false
     }
     
     private func onToggleFollow() {

@@ -162,6 +162,7 @@ struct FriendProfileView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color(.systemGray5))
                             .frame(width: 40, height: 24)
+                            .opacity(0.6)
                         Text("Followers")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -171,11 +172,13 @@ struct FriendProfileView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color(.systemGray5))
                             .frame(width: 40, height: 24)
+                            .opacity(0.6)
                         Text("Following")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
+                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: isLoadingFollowData)
             }
         }
         .padding()
@@ -410,18 +413,35 @@ struct FriendMovieRow: View {
     @ObservedObject var store: MovieStore
     @State private var showingDetail = false
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingNumber = false
+    @State private var calculatingScore = false
+    @State private var displayScore: Double = 0.0
     
     var body: some View {
         Button(action: { showingDetail = true }) {
             HStack(spacing: UI.vGap) {
                 Text("\(position)")
-                    .font(.headline)
+                    .font(.custom("PlayfairDisplay-Medium", size: 18))
                     .foregroundColor(.gray)
                     .frame(width: 30)
+                    .opacity(showingNumber ? 1 : 0)
+                    .scaleEffect(showingNumber ? 1 : 0.8)
+                    .animation(.easeOut(duration: 0.3).delay(Double(position) * 0.05), value: showingNumber)
+                    .overlay(
+                        // Loading placeholder
+                        Group {
+                            if !showingNumber {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 20, height: 18)
+                                    .opacity(0.6)
+                            }
+                        }
+                    )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(movie.title)
-                        .font(.custom("PlayfairDisplay-Medium", size: 16))
+                        .font(.custom("PlayfairDisplay-Bold", size: 18))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -443,7 +463,7 @@ struct FriendMovieRow: View {
                             .fill(Color.adaptiveGolden(for: colorScheme))
                             .frame(width: 44, height: 44)
                             .overlay(
-                                Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
+                                Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                                     .font(position == 1 ? .title : .headline).bold()
                                     .foregroundColor(.black)
                             )
@@ -451,7 +471,7 @@ struct FriendMovieRow: View {
                     }
                     .frame(width: 52, height: 52)
                 } else {
-                    Text(position == 1 ? "🐐" : String(format: "%.1f", movie.score))
+                    Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
                         .font(position == 1 ? .title : .headline).bold()
                         .foregroundColor(Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
                         .frame(width: 44, height: 44)
@@ -476,6 +496,44 @@ struct FriendMovieRow: View {
         .sheet(isPresented: $showingDetail) {
             if let tmdbId = movie.tmdbId {
                 UnifiedMovieDetailView(movie: movie, store: store)
+            }
+        }
+        .onAppear {
+            // Trigger the number animation with a slight delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                showingNumber = true
+            }
+            
+            // Start the score calculating animation
+            startScoreAnimation()
+        }
+    }
+    
+    private func startScoreAnimation() {
+        let targetScore = movie.score
+        calculatingScore = true
+        
+        // Start with a random number
+        displayScore = Double.random(in: 0...10)
+        
+        // Create a timer that cycles through numbers
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
+            if calculatingScore {
+                // Cycle through random numbers around the target
+                let randomOffset = Double.random(in: -2...2)
+                displayScore = max(0, min(10, targetScore + randomOffset))
+            } else {
+                // Settle on the final value
+                displayScore = targetScore
+                timer.invalidate()
+            }
+        }
+        
+        // Stop calculating after 0.8 seconds and settle on final value
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            calculatingScore = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayScore = targetScore
             }
         }
     }
