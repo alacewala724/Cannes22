@@ -440,6 +440,11 @@ final class MovieStore: ObservableObject {
                     // Don't fail the whole operation if activity update fails
                 }
                 
+                // Remove from Future Cannes if it was there
+                if let tmdbId = finalMovie.tmdbId {
+                    await removeFromFutureCannesIfRanked(tmdbId: tmdbId)
+                }
+                
                 // Update cache after successful insertion
                 await MainActor.run {
                     updateCacheAfterInsertion()
@@ -1186,5 +1191,26 @@ final class MovieStore: ObservableObject {
         let personalMovies = movies + tvShows
         let allGenres = personalMovies.flatMap { $0.genres }
         return Array(Set(allGenres)).sorted { $0.name < $1.name }
+    }
+    
+    // MARK: - Future Cannes Integration
+    
+    // Remove movie from Future Cannes when it's ranked
+    func removeFromFutureCannesIfRanked(tmdbId: Int) async {
+        do {
+            // Check if this movie is in the user's Future Cannes list
+            let isInFutureCannes = try await firestoreService.isInFutureCannes(tmdbId: tmdbId)
+            
+            if isInFutureCannes {
+                // Get the Future Cannes list to find the item ID
+                let futureCannesList = try await firestoreService.getFutureCannesList()
+                if let item = futureCannesList.first(where: { $0.movie.id == tmdbId }) {
+                    try await firestoreService.removeFromFutureCannes(itemId: item.id)
+                    print("MovieStore: Removed movie with TMDB ID \(tmdbId) from Future Cannes after ranking")
+                }
+            }
+        } catch {
+            print("MovieStore: Error removing from Future Cannes: \(error)")
+        }
     }
 } 

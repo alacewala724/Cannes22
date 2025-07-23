@@ -68,6 +68,14 @@ struct ContentView: View {
                     Text("Profile")
                 }
                 .tag(2)
+            
+            // Recommendations Tab
+            RecommendationsView(store: store)
+                .tabItem {
+                    Image(systemName: "magnifyingglass")
+                    Text("Recommendations")
+                }
+                .tag(3)
         }
         .sheet(isPresented: $showingAddMovie) {
             AddMovieView(store: store, existingMovie: nil)

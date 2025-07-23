@@ -704,6 +704,11 @@ struct ComparisonView: View {
                             // Don't fail the whole operation if activity update fails
                         }
                         
+                        // Remove from Future Cannes if it was there
+                        if let tmdbId = finalMovie.tmdbId {
+                            await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
+                        }
+                        
                         // Resume continuation after all operations complete
                         continuation.resume()
                     } catch {

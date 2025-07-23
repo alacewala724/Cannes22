@@ -2299,4 +2299,143 @@ extension FirestoreService {
         // based on how you want to store email addresses
         return nil
     }
+    
+    // MARK: - Future Cannes Methods
+    
+    // Add a movie to Future Cannes list
+    func addToFutureCannes(movie: TMDBMovie) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        let itemId = UUID().uuidString
+        
+        let itemData: [String: Any] = [
+            "id": itemId,
+            "movieId": movie.id,
+            "title": movie.title ?? movie.name ?? "Unknown",
+            "name": movie.name,
+            "overview": movie.overview,
+            "posterPath": movie.posterPath,
+            "releaseDate": movie.releaseDate,
+            "firstAirDate": movie.firstAirDate,
+            "voteAverage": movie.voteAverage,
+            "voteCount": movie.voteCount,
+            "genres": movie.genres?.map { ["id": $0.id, "name": $0.name] } ?? [],
+            "mediaType": movie.mediaType ?? "movie",
+            "runtime": movie.runtime as Any,
+            "episodeRunTime": movie.episodeRunTime as Any,
+            "dateAdded": FieldValue.serverTimestamp()
+        ]
+        
+        try await db.collection("users")
+            .document(currentUserId)
+            .collection("futureCannes")
+            .document(itemId)
+            .setData(itemData)
+        
+        print("addToFutureCannes: Added movie \(movie.title ?? movie.name ?? "Unknown") to Future Cannes")
+    }
+    
+    // Remove a movie from Future Cannes list
+    func removeFromFutureCannes(itemId: String) async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        try await db.collection("users")
+            .document(currentUserId)
+            .collection("futureCannes")
+            .document(itemId)
+            .delete()
+        
+        print("removeFromFutureCannes: Removed item \(itemId) from Future Cannes")
+    }
+    
+    // Get Future Cannes list
+    func getFutureCannesList() async throws -> [FutureCannesItem] {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("futureCannes")
+            .order(by: "dateAdded", descending: true)
+            .getDocuments()
+        
+        return snapshot.documents.compactMap { document -> FutureCannesItem? in
+            let data = document.data()
+            
+            guard let id = data["id"] as? String,
+                  let movieId = data["movieId"] as? Int,
+                  let title = data["title"] as? String,
+                  let dateAdded = data["dateAdded"] as? Timestamp,
+                  let mediaTypeString = data["mediaType"] as? String,
+                  let mediaType = AppModels.MediaType(rawValue: mediaTypeString) else {
+                return nil
+            }
+            
+            let name = data["name"] as? String
+            let overview = data["overview"] as? String
+            let posterPath = data["posterPath"] as? String
+            let releaseDate = data["releaseDate"] as? String
+            let firstAirDate = data["firstAirDate"] as? String
+            let voteAverage = data["voteAverage"] as? Double ?? 0.0
+            let voteCount = data["voteCount"] as? Int ?? 0
+            let runtime = data["runtime"] as? Int
+            let episodeRunTime = data["episodeRunTime"] as? [Int]
+            
+            let genres: [TMDBGenre] = (data["genres"] as? [[String: Any]])?.compactMap { genreData in
+                guard let id = genreData["id"] as? Int,
+                      let name = genreData["name"] as? String else { return nil }
+                return TMDBGenre(id: id, name: name)
+            } ?? []
+            
+            let movie = TMDBMovie(
+                id: movieId,
+                title: title,
+                name: name,
+                overview: overview ?? "",
+                posterPath: posterPath,
+                releaseDate: releaseDate,
+                firstAirDate: firstAirDate,
+                voteAverage: voteAverage,
+                voteCount: voteCount,
+                genres: genres,
+                mediaType: mediaType.rawValue,
+                runtime: runtime,
+                episodeRunTime: episodeRunTime
+            )
+            
+            return FutureCannesItem(
+                id: id,
+                movie: movie,
+                dateAdded: dateAdded.dateValue()
+            )
+        }
+    }
+    
+    // Check if a movie is in Future Cannes list
+    func isInFutureCannes(tmdbId: Int) async throws -> Bool {
+        guard let currentUser = Auth.auth().currentUser else {
+            return false
+        }
+        
+        let currentUserId = currentUser.uid
+        
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("futureCannes")
+            .whereField("movieId", isEqualTo: tmdbId)
+            .limit(to: 1)
+            .getDocuments()
+        
+        return !snapshot.documents.isEmpty
+    }
 } 
