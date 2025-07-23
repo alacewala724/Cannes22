@@ -2,6 +2,11 @@ import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
 
+// MARK: - Score Rounding Helper
+private func roundToTenths(_ value: Double) -> Double {
+    return (value * 10).rounded() / 10
+}
+
 struct FriendProfileView: View {
     let userProfile: UserProfile
     @ObservedObject var store: MovieStore
@@ -510,7 +515,7 @@ struct FriendMovieRow: View {
     }
     
     private func startScoreAnimation() {
-        let targetScore = movie.score
+        let targetScore = roundToTenths(movie.score)
         calculatingScore = true
         
         // Start with a random number

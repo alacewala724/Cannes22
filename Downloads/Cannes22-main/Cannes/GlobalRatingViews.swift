@@ -9,6 +9,11 @@ private func debugDifference(userScore: Double, averageRating: Double, differenc
     print("DEBUG DIFFERENCE: roundedDifference=\(roundedDifference)")
 }
 
+// MARK: - Score Rounding Helper
+private func roundToTenths(_ value: Double) -> Double {
+    return (value * 10).rounded() / 10
+}
+
 struct GlobalRatingRow: View {
     let rating: GlobalRating
     let position: Int
@@ -57,7 +62,10 @@ struct GlobalRatingRow: View {
                     // Show user's rating difference if they have rated this movie
                     if let tmdbId = rating.tmdbId,
                        let userScore = store.getUserPersonalScore(for: tmdbId) {
-                        let difference = userScore - rating.confidenceAdjustedScore
+                        // Round both scores consistently before calculating difference
+                        let roundedUserScore = roundToTenths(userScore)
+                        let roundedCommunityScore = roundToTenths(rating.confidenceAdjustedScore)
+                        let difference = roundedUserScore - roundedCommunityScore
                         let isHigher = difference > 0
                         let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
                         let arrow = isHigher ? "arrow.up" : "arrow.down"
@@ -72,10 +80,7 @@ struct GlobalRatingRow: View {
                                 Image(systemName: arrow)
                                     .foregroundColor(color)
                                     .font(.caption2)
-                                // Round the difference to 1 decimal place to avoid floating-point precision issues
-                                let roundedDifference = (difference * 10).rounded() / 10
-                                let _ = debugDifference(userScore: userScore, averageRating: rating.confidenceAdjustedScore, difference: difference)
-                                Text(String(format: "%.1f", abs(roundedDifference)))
+                                Text(String(format: "%.1f", abs(difference)))
                                     .font(.caption2)
                                     .foregroundColor(color)
                             }
@@ -141,7 +146,7 @@ struct GlobalRatingRow: View {
     }
 
     private func startScoreAnimation() {
-        let targetScore = rating.confidenceAdjustedScore
+        let targetScore = roundToTenths(rating.confidenceAdjustedScore)
         calculatingScore = true
         
         // Start with a random number
@@ -924,11 +929,13 @@ struct UnifiedMovieDetailView: View {
             if let tmdbId = displayTmdbId,
                let userScore = store.getUserPersonalScore(for: tmdbId) {
                 
-                let difference = userScore - (displayAverageRating ?? 0.0)
+                // Round both scores consistently before calculating difference
+                let roundedUserScore = roundToTenths(userScore)
+                let roundedCommunityScore = roundToTenths(displayAverageRating ?? 0.0)
+                let difference = roundedUserScore - roundedCommunityScore
                 let isHigher = difference > 0
                 let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
                 let arrow = isHigher ? "arrow.up" : "arrow.down"
-                let roundedDifference = (difference * 10).rounded() / 10
                 
                 VStack(spacing: 6) {
                     // Labels row
@@ -960,9 +967,9 @@ struct UnifiedMovieDetailView: View {
                     GeometryReader { geometry in
                         let side = (geometry.size.width - 2*18) / 3
                         HStack(spacing: 18) {
-                            ratingCircle(value: displayAverageRating, color: displaySentimentColor, size: side)
-                            diffCircle(value: roundedDifference, arrow: arrow, color: color, size: side)
-                            ratingCircle(value: userScore, color: .accentColor, size: side)
+                            ratingCircle(value: roundedCommunityScore, color: displaySentimentColor, size: side)
+                            diffCircle(value: difference, arrow: arrow, color: color, size: side)
+                            ratingCircle(value: roundedUserScore, color: .accentColor, size: side)
                         }
                     }
                     .frame(height: 96)
