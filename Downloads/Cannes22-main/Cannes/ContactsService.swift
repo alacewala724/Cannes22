@@ -96,38 +96,31 @@ class ContactsService: ObservableObject {
     private func matchContactsWithUsers(_ contactUsers: [ContactUser]) async -> [ContactUser] {
         var matchedContacts = contactUsers
         
-        // Extract unique phone numbers for batch lookup
-        let phoneNumbers = contactUsers.compactMap { $0.phone }
-        let uniquePhones = Array(Set(phoneNumbers)) // Remove duplicates
+        print("ContactsService: Found \(contactUsers.count) contacts to match")
         
-        print("ContactsService: Found \(contactUsers.count) contacts with \(uniquePhones.count) unique phone numbers")
-        print("ContactsService: Sample phone numbers: \(uniquePhones.prefix(5))")
-        
-        // Clean all phone numbers before sending to Firestore
-        let cleanedPhoneNumbers = uniquePhones.map { cleanPhoneNumber($0) }
-        print("ContactsService: Cleaned phone numbers for Firestore query: \(cleanedPhoneNumbers)")
-        
-        // Batch find users by phone numbers
+        // Get all users from Firestore (simplified approach)
         do {
-            let matchingUsers = try await firestoreService.findUsersByPhoneNumbers(cleanedPhoneNumbers)
-            print("ContactsService: Found \(matchingUsers.count) matching users in the app")
+            let allUsers = try await firestoreService.getAllUsers()
+            print("ContactsService: Found \(allUsers.count) total users in the app")
             
-            // Create a lookup dictionary for efficiency
-            let userLookup = Dictionary(uniqueKeysWithValues: matchingUsers.map { ($0.uid, $0) })
+            // Debug: Show all users and their phone numbers
+            print("ContactsService: DETAILED DEBUG - All users found in Firestore:")
+            for (index, user) in allUsers.enumerated() {
+                print("ContactsService: User \(index + 1): '\(user.username)' with phone: '\(user.phoneNumber ?? "nil")'")
+            }
             
-            // Match contacts with found users
+            // Match contacts with users using simple phone number comparison
             for i in 0..<matchedContacts.count {
-                if let phone = matchedContacts[i].phone {
-                    let cleanPhone = cleanPhoneNumber(phone)
-                    print("ContactsService: Checking contact '\(matchedContacts[i].name)' with phone: \(phone) -> cleaned: \(cleanPhone)")
+                if let contactPhone = matchedContacts[i].phone {
+                    let cleanContactPhone = getLast10Digits(contactPhone)
+                    print("ContactsService: Checking contact '\(matchedContacts[i].name)' with phone: \(contactPhone) -> last 10 digits: \(cleanContactPhone)")
                     
-                    // Find matching user by phone number
-                    if let matchingUser = matchingUsers.first(where: { user in
-                        // Compare the cleaned phone numbers
+                    // Find matching user by phone number (last 10 digits)
+                    if let matchingUser = allUsers.first(where: { user in
                         if let userPhone = user.phoneNumber {
-                            let cleanUserPhone = cleanPhoneNumber(userPhone)
-                            let isMatch = cleanPhone == cleanUserPhone
-                            print("ContactsService: Comparing with user '\(user.username)' phone: \(userPhone) -> cleaned: \(cleanUserPhone) -> match: \(isMatch)")
+                            let cleanUserPhone = getLast10Digits(userPhone)
+                            let isMatch = cleanContactPhone == cleanUserPhone
+                            print("ContactsService: Comparing with user '\(user.username)' phone: \(userPhone) -> last 10 digits: \(cleanUserPhone) -> match: \(isMatch)")
                             return isMatch
                         }
                         return false
@@ -142,15 +135,6 @@ class ContactsService: ObservableObject {
                         )
                     } else {
                         print("ContactsService: ❌ No match found for contact '\(matchedContacts[i].name)'")
-                        // Debug: Let's see what users we actually found
-                        if matchingUsers.isEmpty {
-                            print("ContactsService: No users found in Firestore for any of the phone numbers")
-                        } else {
-                            print("ContactsService: Found users but no match. Available users:")
-                            for user in matchingUsers {
-                                print("  - User: \(user.username), Phone: \(user.phoneNumber ?? "nil")")
-                            }
-                        }
                     }
                 }
             }
@@ -171,31 +155,17 @@ class ContactsService: ObservableObject {
         return matchedContacts
     }
     
-    private func cleanPhoneNumber(_ phone: String) -> String {
-        // Remove all non-digit characters except the + sign
-        let cleaned = phone.replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "(", with: "")
-            .replacingOccurrences(of: ")", with: "")
-            .replacingOccurrences(of: "-", with: "")
+    // Simple function to get last 10 digits of a phone number
+    private func getLast10Digits(_ phone: String) -> String {
+        // Remove all non-digit characters
+        let digitsOnly = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
         
-        // If it starts with +1 and has 12 characters (e.g., +19543743775), remove the +1
-        if cleaned.hasPrefix("+1") && cleaned.count == 12 {
-            return String(cleaned.dropFirst(2)) // Remove +1
+        // Return last 10 digits (or all digits if less than 10)
+        if digitsOnly.count >= 10 {
+            return String(digitsOnly.suffix(10))
+        } else {
+            return digitsOnly
         }
-        
-        // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
-        if cleaned.hasPrefix("1") && cleaned.count == 11 {
-            return String(cleaned.dropFirst())
-        }
-        
-        // If it's a 10-digit number, return as is
-        if cleaned.count == 10 {
-            return cleaned
-        }
-        
-        // If it's a 7-digit number, we might need to add area code
-        // For now, return as is and let the caller handle area code logic
-        return cleaned
     }
     
     func inviteContact(_ contact: ContactUser) {

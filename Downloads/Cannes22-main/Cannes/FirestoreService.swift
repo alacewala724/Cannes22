@@ -2129,24 +2129,34 @@ extension FirestoreService {
         return nil
     }
     
-    // Get all users for contacts matching
+    // Get all users for contacts matching (simplified approach)
     func getAllUsers() async throws -> [UserProfile] {
+        print("FirestoreService: Getting all users for contacts matching")
+        
         let snapshot = try await db.collection("users").getDocuments()
         
-        return snapshot.documents.compactMap { document in
+        let users = snapshot.documents.compactMap { document -> UserProfile? in
             let data = document.data()
             
             guard let username = data["username"] as? String else {
                 return nil
             }
             
+            let phoneNumber = data["phoneNumber"] as? String
+            let movieCount = data["movieCount"] as? Int ?? 0
+            
+            print("FirestoreService: Found user '\(username)' with phone: \(phoneNumber ?? "nil")")
+            
             return UserProfile(
                 uid: document.documentID,
                 username: username,
-                phoneNumber: data["phoneNumber"] as? String,
-                movieCount: data["movieCount"] as? Int ?? 0
+                phoneNumber: phoneNumber,
+                movieCount: movieCount
             )
         }
+        
+        print("FirestoreService: Total users found: \(users.count)")
+        return users
     }
     
     // Find user by phone number (for contacts matching)
@@ -2194,12 +2204,25 @@ extension FirestoreService {
         
         print("FirestoreService: Searching for users with phone numbers: \(cleanPhones)")
         
+        // Also create versions with +1 prefix for numbers that don't have it
+        var allSearchPhones: [String] = []
+        for phone in cleanPhones {
+            allSearchPhones.append(phone)
+            // If it's a 10-digit number without +1, also search for the +1 version
+            if phone.count == 10 && !phone.hasPrefix("+") {
+                allSearchPhones.append("+1" + phone)
+                print("FirestoreService: Also searching for +1 version: +1\(phone)")
+            }
+        }
+        
+        print("FirestoreService: Total search phone numbers (including +1 variants): \(allSearchPhones)")
+        
         // Firestore has a limit of 10 items in 'in' queries, so we need to batch
         let batchSize = 10
         var allUsers: [UserProfile] = []
         
-        for i in stride(from: 0, to: cleanPhones.count, by: batchSize) {
-            let batch = Array(cleanPhones[i..<min(i + batchSize, cleanPhones.count)])
+        for i in stride(from: 0, to: allSearchPhones.count, by: batchSize) {
+            let batch = Array(allSearchPhones[i..<min(i + batchSize, allSearchPhones.count)])
             print("FirestoreService: Searching batch \(i/batchSize + 1): \(batch)")
             
             let snapshot = try await db.collection("users")
