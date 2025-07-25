@@ -55,6 +55,11 @@ struct ProfileView: View {
         }
         .task {
             await loadProfileData()
+            
+            // Preload current user's following data in the background
+            Task {
+                await firestoreService.preloadCurrentUserFollowing()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
             Task {
@@ -605,11 +610,8 @@ struct ProfileFollowingListView: View {
             }
         }
         .task {
-            // Simulate loading time for better UX
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-            await MainActor.run {
-                isLoading = false
-            }
+            // Show content immediately since we already have the data
+            isLoading = false
         }
         .sheet(item: $showingUserProfile) { user in
             FriendProfileView(userProfile: user, store: MovieStore())
@@ -1075,7 +1077,7 @@ struct UserFollowingListView: View {
     var body: some View {
         NavigationView {
             VStack {
-                if isLoading {
+                if isLoading && following.isEmpty {
                     loadingView
                 } else if following.isEmpty {
                     emptyStateView
@@ -1141,7 +1143,7 @@ struct UserFollowingListView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(following, id: \.uid) { followedUser in
-                    ProfileFollowingRow(user: followedUser) {
+                    UserFollowingRow(user: followedUser) {
                         showingUserProfile = followedUser
                     } onFollowersTap: {
                         showingUserFollowers = followedUser
@@ -1156,9 +1158,18 @@ struct UserFollowingListView: View {
     }
     
     private func loadFollowing() async {
+        // Check if we have cached data first
+        if let cachedData = firestoreService.getCachedFollowing(for: user.uid) {
+            print("UserFollowingListView: Using cached data for user \(user.uid)")
+            following = cachedData
+            isLoading = false
+            return
+        }
+        
+        // Only show loading if we need to fetch fresh data
         isLoading = true
         do {
-            following = try await firestoreService.getFollowing()
+            following = try await firestoreService.getFollowingForUser(userId: user.uid)
         } catch {
             print("Error loading following: \(error)")
         }

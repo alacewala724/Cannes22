@@ -51,6 +51,10 @@ struct FriendSearchView: View {
         .sheet(isPresented: $showingContacts) {
             ContactsView(store: store)
         }
+        .task {
+            // Preload current user's following data in the background
+            await firestoreService.preloadCurrentUserFollowing()
+        }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 2 {
                 // Load contacts when contacts tab is selected
@@ -110,12 +114,15 @@ struct FriendSearchView: View {
     }
     
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Searching...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(0..<12, id: \.self) { _ in
+                    FollowingRowSkeleton()
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var emptyResultsView: some View {
@@ -518,7 +525,7 @@ struct FollowingListView: View {
     
     var body: some View {
         VStack {
-            if isLoading {
+            if isLoading && following.isEmpty {
                 loadingView
             } else if following.isEmpty {
                 emptyFollowingView
@@ -542,7 +549,7 @@ struct FollowingListView: View {
     private var loadingView: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(0..<8, id: \.self) { _ in
+                ForEach(0..<12, id: \.self) { _ in
                     FollowingRowSkeleton()
                 }
             }
@@ -584,6 +591,28 @@ struct FollowingListView: View {
     }
     
     private func loadFollowing() async {
+        // Check if we have cached data first
+        if let cachedData = firestoreService.getCachedFollowing(for: Auth.auth().currentUser?.uid ?? "") {
+            print("FollowingListView: Using cached data for current user")
+            following = cachedData
+            
+            // Calculate movies in common for each followed user
+            for user in following {
+                do {
+                    let count = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+                    moviesInCommon[user.uid] = count
+                    print("FollowingListView: \(user.username) has \(count) movies in common")
+                } catch {
+                    print("FollowingListView: Error getting movies in common for \(user.username): \(error)")
+                    moviesInCommon[user.uid] = 0
+                }
+            }
+            
+            isLoading = false
+            return
+        }
+        
+        // Only show loading if we need to fetch fresh data
         isLoading = true
         do {
             following = try await firestoreService.getFollowing()

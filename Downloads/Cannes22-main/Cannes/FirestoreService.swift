@@ -5,6 +5,27 @@ import FirebaseAuth
 class FirestoreService: ObservableObject {
     private let db = Firestore.firestore()
     
+    // Cache for following lists to improve performance
+    private var followingCache: [String: (users: [UserProfile], timestamp: Date)] = [:]
+    private let cacheExpirationTime: TimeInterval = 300 // 5 minutes
+    
+    // MARK: - Cache Access
+    
+    /// Check if following data is cached for a user
+    func isFollowingCached(for userId: String) -> Bool {
+        guard let cachedData = followingCache[userId] else { return false }
+        return Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime
+    }
+    
+    /// Get cached following data for a user
+    func getCachedFollowing(for userId: String) -> [UserProfile]? {
+        guard let cachedData = followingCache[userId],
+              Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime else {
+            return nil
+        }
+        return cachedData.users
+    }
+    
     // Get a user's personal rankings
     func getUserRankings(userId: String) async throws -> [Movie] {
         print("getUserRankings: Loading rankings for user: \(userId)")
@@ -749,7 +770,7 @@ class FirestoreService: ObservableObject {
         
         print("fixExistingCommunityRatings: Fixed \(fixedCount) community ratings")
     }
-}
+} 
 
 extension FirestoreService {
     // MARK: - Batch Updates
@@ -1143,6 +1164,10 @@ extension FirestoreService {
                 "followedAt": FieldValue.serverTimestamp()
             ])
         
+        // Clear cache for both users since their following/followers lists changed
+        clearFollowingCache(for: currentUserId)
+        clearFollowingCache(for: userIdToFollow)
+        
         print("followUser: Successfully followed user \(userIdToFollow)")
     }
     
@@ -1172,6 +1197,10 @@ extension FirestoreService {
             .document(currentUserId)
             .delete()
         
+        // Clear cache for both users since their following/followers lists changed
+        clearFollowingCache(for: currentUserId)
+        clearFollowingCache(for: userIdToUnfollow)
+        
         print("unfollowUser: Successfully unfollowed user \(userIdToUnfollow)")
     }
     
@@ -1183,6 +1212,14 @@ extension FirestoreService {
         
         let currentUserId = currentUser.uid
         
+        // Check cache first
+        if let cachedData = followingCache[currentUserId],
+           Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime {
+            print("🚀 getFollowing: Using CACHED data for user \(currentUserId) (\(cachedData.users.count) following)")
+            return cachedData.users
+        }
+        
+        print("🔄 getFollowing: Fetching FRESH data for user \(currentUserId)")
         let followingSnapshot = try await db.collection("users")
             .document(currentUserId)
             .collection("following")
@@ -1197,6 +1234,10 @@ extension FirestoreService {
                 following.append(userProfile)
             }
         }
+        
+        // Cache the result
+        followingCache[currentUserId] = (users: following, timestamp: Date())
+        print("💾 getFollowing: Cached data for user \(currentUserId) with \(following.count) following")
         
         return following
     }
@@ -2447,5 +2488,120 @@ extension FirestoreService {
             .getDocuments()
         
         return !snapshot.documents.isEmpty
+    }
+    
+    // Get users that a specific user follows
+    func getFollowingForUser(userId: String) async throws -> [UserProfile] {
+        // Check cache first
+        if let cachedData = followingCache[userId],
+           Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime {
+            print("🚀 getFollowingForUser: Using CACHED data for user \(userId) (\(cachedData.users.count) following)")
+            return cachedData.users
+        }
+        
+        print("🔄 getFollowingForUser: Fetching FRESH data for user \(userId)")
+        let followingSnapshot = try await db.collection("users")
+            .document(userId)
+            .collection("following")
+            .getDocuments()
+        
+        var following: [UserProfile] = []
+        
+        for followingDoc in followingSnapshot.documents {
+            let followedUserId = followingDoc.documentID
+            
+            if let userProfile = try await getUserProfile(userId: followedUserId) {
+                following.append(userProfile)
+            }
+        }
+        
+        // Cache the result
+        followingCache[userId] = (users: following, timestamp: Date())
+        print("💾 getFollowingForUser: Cached data for user \(userId) with \(following.count) following")
+        
+        return following
+    }
+    
+    // MARK: - Cache Management
+    
+    /// Clear the following cache for a specific user
+    func clearFollowingCache(for userId: String) {
+        followingCache.removeValue(forKey: userId)
+        print("clearFollowingCache: Cleared cache for user \(userId)")
+    }
+    
+    /// Clear the following cache for the current user
+    func clearCurrentUserFollowingCache() {
+        guard let currentUser = Auth.auth().currentUser else { return }
+        clearFollowingCache(for: currentUser.uid)
+    }
+    
+    /// Clear all following cache
+    func clearAllFollowingCache() {
+        followingCache.removeAll()
+        print("clearAllFollowingCache: Cleared all following cache")
+    }
+    
+    /// Get cache status for debugging
+    func getFollowingCacheStatus() -> [String: Int] {
+        var status: [String: Int] = [:]
+        for (userId, cachedData) in followingCache {
+            let age = Int(Date().timeIntervalSince(cachedData.timestamp))
+            status[userId] = age
+        }
+        return status
+    }
+    
+    /// Debug method to print cache status
+    func debugPrintCacheStatus() {
+        let status = getFollowingCacheStatus()
+        print("🔍 Cache Status:")
+        if status.isEmpty {
+            print("   No cached data")
+        } else {
+            for (userId, ageSeconds) in status {
+                let isExpired = ageSeconds >= Int(cacheExpirationTime)
+                let status = isExpired ? "EXPIRED" : "VALID"
+                print("   User \(userId): \(ageSeconds)s old (\(status))")
+            }
+        }
+    }
+    
+    /// Preload following data for the current user in the background
+    func preloadCurrentUserFollowing() async {
+        guard let currentUser = Auth.auth().currentUser else { return }
+        
+        // Only preload if not already cached or cache is expired
+        if let cachedData = followingCache[currentUser.uid],
+           Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime {
+            print("preloadCurrentUserFollowing: Cache is still valid, skipping preload")
+            return
+        }
+        
+        print("preloadCurrentUserFollowing: Starting background preload")
+        do {
+            _ = try await getFollowing()
+            print("preloadCurrentUserFollowing: Successfully preloaded following data")
+        } catch {
+            print("preloadCurrentUserFollowing: Error preloading following data: \(error)")
+        }
+    }
+    
+    /// Preload following data for a specific user in the background
+    func preloadUserFollowing(userId: String) async {
+        // Only preload if not already cached or cache is expired
+        if let cachedData = followingCache[userId],
+           Date().timeIntervalSince(cachedData.timestamp) < cacheExpirationTime {
+            print("preloadUserFollowing: Cache is still valid for user \(userId), skipping preload")
+            return
+        }
+        
+        print("preloadUserFollowing: Starting background preload for user \(userId)")
+        do {
+            _ = try await getFollowingForUser(userId: userId)
+            print("preloadUserFollowing: Successfully preloaded following data for user \(userId)")
+        } catch {
+            print("preloadUserFollowing: Error preloading following data for user \(userId): \(error)")
+        }
     }
 } 

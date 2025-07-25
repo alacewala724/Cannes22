@@ -57,6 +57,11 @@ struct FriendProfileView: View {
             print("FriendProfileView: Opening profile for user: \(userProfile.username)")
             await loadFriendMovies()
             await loadFollowData()
+            
+            // Preload following data for this user in the background
+            Task {
+                await firestoreService.preloadUserFollowing(userId: userProfile.uid)
+            }
         }
         .onChange(of: selectedMediaType) { _, _ in
             Task {

@@ -1,5 +1,7 @@
 import SwiftUI
 import Contacts
+import FirebaseAuth
+import FirebaseFirestore
 
 struct ContactsView: View {
     @StateObject private var contactsService = ContactsService()
@@ -187,6 +189,7 @@ struct ContactRow: View {
     @State private var isFollowing = false
     @State private var isLoadingFollowState = false
     @State private var isLoadingAction = false
+    @State private var isCurrentUser = false
     
     private let firestoreService = FirestoreService()
     
@@ -224,50 +227,52 @@ struct ContactRow: View {
             
             Spacer()
             
-            // Action button
-            if contactUser.isAppUser {
-                Button(action: {
-                    Task {
-                        await handleFollowAction()
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        if isLoadingAction {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .foregroundColor(isFollowing ? .red : .white)
+            // Action button - only show if not current user
+            if !isCurrentUser {
+                if contactUser.isAppUser {
+                    Button(action: {
+                        Task {
+                            await handleFollowAction()
                         }
-                        Text(isLoadingAction ? "..." : (isFollowing ? "Unfollow" : "Follow"))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(isFollowing ? .red : .white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(isFollowing ? Color.clear : Color.accentColor)
-                            .stroke(isFollowing ? Color.red : Color.clear, lineWidth: 1)
-                    )
-                }
-                .disabled(isLoadingAction || isLoadingFollowState)
-                .onTapGesture {
-                    if contactUser.userProfile != nil {
-                        onTapProfile()
-                    }
-                }
-            } else {
-                Button(action: onInvite) {
-                    Text("Invite")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.accentColor)
+                    }) {
+                        HStack(spacing: 4) {
+                            if isLoadingAction {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .foregroundColor(isFollowing ? .red : .white)
+                            }
+                            Text(isLoadingAction ? "..." : (isFollowing ? "Unfollow" : "Follow"))
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(isFollowing ? .red : .white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentColor, lineWidth: 1)
+                                .fill(isFollowing ? Color.clear : Color.accentColor)
+                                .stroke(isFollowing ? Color.red : Color.clear, lineWidth: 1)
                         )
+                    }
+                    .disabled(isLoadingAction || isLoadingFollowState)
+                    .onTapGesture {
+                        if contactUser.userProfile != nil {
+                            onTapProfile()
+                        }
+                    }
+                } else {
+                    Button(action: onInvite) {
+                        Text("Invite")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.accentColor)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.accentColor, lineWidth: 1)
+                            )
+                    }
                 }
             }
         }
@@ -278,12 +283,59 @@ struct ContactRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
         .onAppear {
+            checkIfCurrentUser()
             if contactUser.isAppUser {
                 Task {
                     await checkFollowState()
                 }
             }
         }
+    }
+    
+    private func checkIfCurrentUser() {
+        // Get current user's phone number from Firestore
+        Task {
+            if let currentUser = Auth.auth().currentUser {
+                do {
+                    let userDoc = try await Firestore.firestore()
+                        .collection("users")
+                        .document(currentUser.uid)
+                        .getDocument()
+                    
+                    let currentUserPhone = userDoc.get("phoneNumber") as? String
+                    
+                    await MainActor.run {
+                        // Compare phone numbers (both should be cleaned)
+                        if let contactPhone = contactUser.phone,
+                           let currentPhone = currentUserPhone {
+                            isCurrentUser = cleanPhoneNumber(contactPhone) == cleanPhoneNumber(currentPhone)
+                        }
+                    }
+                } catch {
+                    print("ContactRow: Error checking if contact is current user: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func cleanPhoneNumber(_ phone: String) -> String {
+        // Remove all non-digit characters except the + sign
+        let cleaned = phone.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        
+        // If it starts with +1 and has 12 characters (e.g., +19543743775), remove the +1
+        if cleaned.hasPrefix("+1") && cleaned.count == 12 {
+            return String(cleaned.dropFirst(2)) // Remove +1
+        }
+        
+        // If it starts with 1 and has 11 digits, remove the 1 (US numbers)
+        if cleaned.hasPrefix("1") && cleaned.count == 11 {
+            return String(cleaned.dropFirst())
+        }
+        
+        return cleaned
     }
     
     private func checkFollowState() async {
