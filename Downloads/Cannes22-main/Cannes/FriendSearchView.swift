@@ -6,6 +6,7 @@ import Network
 // MARK: - Notification Names
 extension Notification.Name {
     static let refreshFollowingList = Notification.Name("refreshFollowingList")
+    static let refreshProfile = Notification.Name("refreshProfile")
 }
 
 struct FriendSearchView: View {
@@ -560,6 +561,7 @@ struct FriendSearchView: View {
 struct MoviePosterAvatar: View {
     let userProfile: UserProfile
     let size: CGFloat
+    let refreshID: String? // Optional refresh ID to force reload
     @State private var posterPath: String?
     @State private var isLoadingPoster = false
     
@@ -594,6 +596,11 @@ struct MoviePosterAvatar: View {
             }
         }
         .onAppear {
+            loadTopMoviePoster()
+        }
+        .onChange(of: refreshID) { _, _ in
+            // Force reload when refreshID changes
+            posterPath = nil
             loadTopMoviePoster()
         }
     }
@@ -707,7 +714,7 @@ struct UserSearchRow: View {
         }) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: user, size: 50)
+                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.safeDisplayName)")
@@ -1237,7 +1244,7 @@ struct FollowingRow: View {
         }) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: user, size: 50)
+                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.safeDisplayName)")

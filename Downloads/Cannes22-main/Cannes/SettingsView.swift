@@ -811,6 +811,12 @@ struct SettingsView: View {
                 await MainActor.run {
                     posterUpdateMessage = "Your movie poster updated successfully!"
                     isUpdatingMyPoster = false
+                    
+                    // Force page reload by posting notification
+                    NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+                    
+                    // Additional notification for profile refresh
+                    NotificationCenter.default.post(name: .refreshProfile, object: nil)
                 }
             } catch {
                 await MainActor.run {

@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
     @State private var showingSettings = false
+    @State private var posterRefreshID = UUID().uuidString
     
     var body: some View {
         NavigationView {
@@ -66,6 +67,12 @@ struct ProfileView: View {
                 await loadProfileData()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("refreshProfile"))) { _ in
+            Task {
+                await loadProfileData()
+                posterRefreshID = UUID().uuidString
+            }
+        }
         .sheet(isPresented: $showingFollowers) {
             FollowersListView(followers: followers)
         }
@@ -91,7 +98,8 @@ struct ProfileView: View {
                     uid: Auth.auth().currentUser?.uid ?? "",
                     username: username
                 ),
-                size: 100
+                size: 100,
+                refreshID: posterRefreshID
             )
             
             VStack(spacing: 8) {
