@@ -997,6 +997,9 @@ struct FollowingRow: View {
     @State private var lastOperationId = UUID()
     @State private var pendingUnfollow = false
     
+    // Optimistic UI state
+    @State private var optimisticFollowState = false
+    
     var body: some View {
         Button(action: {
             print("FollowingRow: Tapped on user \(user.username) to view movies")
@@ -1030,25 +1033,29 @@ struct FollowingRow: View {
                 if !isCurrentUser {
                     Button(action: {
                         Task {
-                            await unfollowUser()
+                            if optimisticFollowState {
+                                await followUser()
+                            } else {
+                                await unfollowUser()
+                            }
                         }
                     }) {
                         HStack(spacing: 4) {
                             if isUnfollowing {
                                 ProgressView()
                                     .scaleEffect(0.8)
-                                    .foregroundColor(.red)
+                                    .foregroundColor(optimisticFollowState ? .accentColor : .red)
                             }
-                            Text(isUnfollowing ? "..." : "Unfollow")
+                            Text(isUnfollowing ? "..." : (optimisticFollowState ? "Follow" : "Unfollow"))
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
-                        .foregroundColor(.red)
+                        .foregroundColor(optimisticFollowState ? .accentColor : .red)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.red, lineWidth: 1)
+                                .stroke(optimisticFollowState ? Color.accentColor : Color.red, lineWidth: 1)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1111,6 +1118,7 @@ struct FollowingRow: View {
             lastOperationId = operationId
             pendingUnfollow = true
             isUnfollowing = true
+            optimisticFollowState = true // Optimistically show "Follow" state
         }
         
         do {
@@ -1121,7 +1129,9 @@ struct FollowingRow: View {
             await MainActor.run {
                 if lastOperationId == operationId {
                     pendingUnfollow = false
-                    // Don't reset isUnfollowing here - let the parent view handle the refresh
+                    isUnfollowing = false
+                    // Keep optimisticFollowState = true to show "Follow" button
+                    // The user can now click "Follow" to reverse the action
                 }
             }
             
@@ -1135,6 +1145,7 @@ struct FollowingRow: View {
                     showNetworkError = true
                     pendingUnfollow = false
                     isUnfollowing = false
+                    optimisticFollowState = false // Rollback to "Unfollow" state on error
                 }
             }
         }
@@ -1156,8 +1167,83 @@ struct FollowingRow: View {
         }
     }
     
+    private func handleFollowError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to follow user. Please try again."
+        }
+    }
+    
     private func retryUnfollowOperation() async {
-        await unfollowUser()
+        if optimisticFollowState {
+            await followUser()
+        } else {
+            await unfollowUser()
+        }
+    }
+
+    private func followUser() async {
+        // Prevent concurrent operations
+        guard !pendingUnfollow else {
+            print("followUser: Operation already in progress, ignoring tap")
+            return
+        }
+
+        // Check network connectivity before making the request
+        guard networkMonitor.isConnected else {
+            await MainActor.run {
+                networkError = "No internet connection. Please check your network and try again."
+                showNetworkError = true
+            }
+            return
+        }
+
+        let operationId = UUID()
+
+        await MainActor.run {
+            lastOperationId = operationId
+            pendingUnfollow = true
+            isUnfollowing = true
+            optimisticFollowState = false // Optimistically show "Unfollow" state
+        }
+
+        do {
+            try await firestoreService.followUser(userIdToFollow: user.uid)
+            print("FollowingRow: Successfully followed \(user.username)")
+
+            // Success - keep the optimistic state
+            await MainActor.run {
+                if lastOperationId == operationId {
+                    pendingUnfollow = false
+                    isUnfollowing = false
+                    // Keep optimisticFollowState = false to show "Unfollow" button
+                    // The user can now click "Unfollow" to reverse the action
+                }
+            }
+
+            // Post a notification to refresh the following list
+            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+        } catch {
+            print("Error following user: \(error)")
+            await MainActor.run {
+                if lastOperationId == operationId {
+                    networkError = handleFollowError(error)
+                    showNetworkError = true
+                    pendingUnfollow = false
+                    isUnfollowing = false
+                    optimisticFollowState = true // Rollback to "Follow" state on error
+                }
+            }
+        }
     }
 }
 
