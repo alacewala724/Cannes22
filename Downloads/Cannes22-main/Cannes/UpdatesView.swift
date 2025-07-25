@@ -216,11 +216,17 @@ struct UpdatesView: View {
             LazyVStack(spacing: 0) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
+                        .onAppear {
+                            print("DEBUG: Rendering follow notification for \(activity.username)")
+                        }
                 }
             }
         }
         .refreshable {
             await loadFollowNotificationsWithAnimation()
+        }
+        .onAppear {
+            print("DEBUG: Following list has \(followNotifications.count) items")
         }
     }
     
@@ -365,11 +371,6 @@ struct FollowNotificationRow: View {
             
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .onAppear {
             Task {
                 await checkFollowStatus()
