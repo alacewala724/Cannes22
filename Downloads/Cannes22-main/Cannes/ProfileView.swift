@@ -681,21 +681,18 @@ struct ProfileFollowingListView: View {
     }
     
     private func reloadFollowingData() async {
-        isLoading = true
         do {
             // Clear the cache to force fresh data
             firestoreService.clearCurrentUserFollowingCache()
             // Reload the following data from Firestore
             let updatedFollowing = try await firestoreService.getFollowing()
             await MainActor.run {
-                currentFollowing = updatedFollowing
-                isLoading = false
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    currentFollowing = updatedFollowing
+                }
             }
         } catch {
             print("Error reloading following data: \(error)")
-            await MainActor.run {
-                isLoading = false
-            }
         }
     }
 }
@@ -785,7 +782,8 @@ struct ProfileFollowingRow: View {
                         HStack(spacing: 4) {
                             if isUnfollowing {
                                 ProgressView()
-                                    .scaleEffect(0.8)
+                                    .scaleEffect(0.7)
+                                    .foregroundColor(.red)
                             }
                             Text("Unfollow")
                                 .font(.system(size: 14, weight: .medium))
@@ -800,8 +798,8 @@ struct ProfileFollowingRow: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(isUnfollowing)
-                    .scaleEffect(isUnfollowing ? 0.95 : 1.0)
-                    .animation(.easeInOut(duration: 0.1), value: isUnfollowing)
+                    .opacity(isUnfollowing ? 0.7 : 1.0)
+                    .animation(.easeInOut(duration: 0.2), value: isUnfollowing)
                 }
             }
             .padding()
@@ -848,7 +846,7 @@ struct ProfileFollowingRow: View {
             
             // Reset the loading state after a short delay to allow the UI to update
             await MainActor.run {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     isUnfollowing = false
                 }
             }
