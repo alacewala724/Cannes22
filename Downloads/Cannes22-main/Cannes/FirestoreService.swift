@@ -2185,8 +2185,8 @@ extension FirestoreService {
             "timestamp": FieldValue.serverTimestamp()
         ]
         
-        // Create the activity in the followed user's activities collection
-        try await db.collection("users").document(followedUserId).collection("activities").document(activityId).setData(activityData)
+        // Create the activity in the global activities collection
+        try await db.collection("activities").document(activityId).setData(activityData)
         print("Created follow activity update: \(username) followed \(followedUsername)")
     }
     
@@ -2262,10 +2262,9 @@ extension FirestoreService {
         }
         
         // Also get follow activities where the current user is mentioned
-        let followActivitiesSnapshot = try await db.collection("users")
-            .document(currentUserId)
-            .collection("activities")
+        let followActivitiesSnapshot = try await db.collection("activities")
             .whereField("type", isEqualTo: ActivityUpdate.ActivityType.userFollowed.rawValue)
+            .whereField("movieId", isEqualTo: currentUserId) // movieId contains the followed user's ID
             .order(by: "timestamp", descending: true)
             .limit(to: limit)
             .getDocuments()
