@@ -46,6 +46,14 @@ service cloud.firestore {
         // Users can read and write their own Future Cannes list
         allow read, write, delete: if request.auth != null && request.auth.uid == userId;
       }
+      
+      // Nested rule for activities - users can read their own activities (for follow notifications)
+      match /activities/{activityId} {
+        // Users can read their own activities (for follow notifications)
+        allow read: if request.auth != null && request.auth.uid == userId;
+        // Users can write to any user's activities (for creating follow notifications)
+        allow write, delete: if request.auth != null;
+      }
     }
 
     // 🔥 Add this block for ratings
