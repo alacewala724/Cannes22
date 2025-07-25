@@ -420,7 +420,7 @@ struct ActivityRowView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 14)
+        .padding(.vertical, activity.type == .userFollowed ? 10 : 14)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
