@@ -377,6 +377,7 @@ struct FollowNotificationRow: View {
         .padding(.horizontal, 12)
         .background(Color(.systemBackground))
         .cornerRadius(16)
+        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .onAppear {
             Task {
                 await checkFollowStatus()
