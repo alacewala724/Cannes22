@@ -531,8 +531,16 @@ struct SettingsView: View {
             return
         }
         
-        guard newPassword.count >= 6 else {
-            passwordErrorMessage = "Password must be at least 6 characters"
+        // Validate new password
+        if let passwordError = InputValidator.getPasswordValidationError(newPassword) {
+            passwordErrorMessage = passwordError
+            passwordSuccessMessage = nil
+            return
+        }
+        
+        // Validate current password is not empty
+        if currentPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            passwordErrorMessage = "Current password is required"
             passwordSuccessMessage = nil
             return
         }
@@ -563,6 +571,13 @@ struct SettingsView: View {
     private func changeUsername() {
         guard !newUsername.isEmpty else { return }
         
+        // Validate username
+        if let usernameError = InputValidator.getUsernameValidationError(newUsername) {
+            usernameErrorMessage = usernameError
+            usernameSuccessMessage = nil
+            return
+        }
+        
         isChangingUsername = true
         usernameErrorMessage = nil
         usernameSuccessMessage = nil
@@ -587,6 +602,13 @@ struct SettingsView: View {
     private func checkUsernameAvailability() {
         guard !newUsername.isEmpty else {
             usernameErrorMessage = nil
+            return
+        }
+        
+        // Validate username format first
+        if let usernameError = InputValidator.getUsernameValidationError(newUsername) {
+            usernameErrorMessage = usernameError
+            isCheckingUsername = false
             return
         }
         

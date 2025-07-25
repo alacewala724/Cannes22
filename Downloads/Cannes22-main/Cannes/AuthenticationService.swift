@@ -249,6 +249,15 @@ class AuthenticationService: ObservableObject {
     }
     
     func signIn(email: String, password: String) async throws {
+        // Validate input before making API call
+        if let emailError = InputValidator.getEmailValidationError(email) {
+            throw AuthError.custom(emailError)
+        }
+        
+        if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw AuthError.custom("Password is required")
+        }
+        
         do {
             let result = try await Auth.auth().signIn(withEmail: email, password: password)
             let user = result.user
@@ -269,6 +278,15 @@ class AuthenticationService: ObservableObject {
     }
     
     func signUp(email: String, password: String) async throws {
+        // Validate input before making API call
+        if let emailError = InputValidator.getEmailValidationError(email) {
+            throw AuthError.custom(emailError)
+        }
+        
+        if let passwordError = InputValidator.getPasswordValidationError(password) {
+            throw AuthError.custom(passwordError)
+        }
+        
         do {
             let result = try await auth.createUser(withEmail: email, password: password)
             let user = result.user
@@ -342,10 +360,15 @@ class AuthenticationService: ObservableObject {
             throw AuthError.custom("No user is currently signed in")
         }
         
-        let trimmedUsername = newUsername.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Validate username before making API call
+        if let usernameError = InputValidator.getUsernameValidationError(newUsername) {
+            throw AuthError.custom(usernameError)
+        }
+        
+        let sanitizedUsername = InputValidator.sanitizeUsername(newUsername)
         
         // Double-check username availability
-        let isAvailable = try await isUsernameAvailable(trimmedUsername)
+        let isAvailable = try await isUsernameAvailable(sanitizedUsername)
         guard isAvailable else {
             throw AuthError.custom("Username is already taken")
         }
@@ -355,13 +378,13 @@ class AuthenticationService: ObservableObject {
         
         do {
             try await userDocRef.updateData([
-                "username": trimmedUsername,
+                "username": sanitizedUsername,
                 "updatedAt": FieldValue.serverTimestamp()
             ])
             
             // Update local username
             await MainActor.run {
-                self.username = trimmedUsername
+                self.username = sanitizedUsername
             }
         } catch {
             throw AuthError.custom("Failed to update username: \(error.localizedDescription)")
@@ -893,6 +916,15 @@ class AuthenticationService: ObservableObject {
         // Check if user has phone number but no email
         guard currentUser.phoneNumber != nil && currentUser.email == nil else {
             throw AuthError.custom("Email linking is only available for phone-authenticated users without an email")
+        }
+        
+        // Validate input before making API call
+        if let emailError = InputValidator.getEmailValidationError(email) {
+            throw AuthError.custom(emailError)
+        }
+        
+        if let passwordError = InputValidator.getPasswordValidationError(password) {
+            throw AuthError.custom(passwordError)
         }
         
         // Create email credential

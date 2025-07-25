@@ -25,6 +25,14 @@ struct AuthView: View {
     @State private var selectedCountry = CountryCode.popular[0] // Default to US
     @State private var showingCountryPicker = false
     
+    // Validation states
+    @State private var emailValidationError: String?
+    @State private var passwordValidationError: String?
+    @State private var passwordStrength: Int = 0
+    @State private var passwordStrengthDescription: String = ""
+    @State private var passwordStrengthColor: String = "gray"
+    @State private var showPasswordStrength = false
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 24) {
@@ -124,37 +132,115 @@ struct AuthView: View {
                 authMode = .phoneVerification
             }
         }
+        // Real-time validation
+        .onChange(of: email) { _, newEmail in
+            validateEmail(newEmail)
+        }
+        .onChange(of: password) { _, newPassword in
+            validatePassword(newPassword)
+        }
     }
     
     private var emailAuthForm: some View {
         VStack(spacing: 16) {
-            TextField("Email", text: $email)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .textContentType(.emailAddress)
-                .autocapitalization(.none)
-                .keyboardType(.emailAddress)
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            hideKeyboard()
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Email", text: $email)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textContentType(.emailAddress)
+                    .autocapitalization(.none)
+                    .keyboardType(.emailAddress)
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") {
+                                hideKeyboard()
+                            }
+                            .foregroundColor(.accentColor)
                         }
-                        .foregroundColor(.accentColor)
                     }
+                
+                if let error = emailValidationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .transition(.opacity)
                 }
+            }
             
-            SecureField("Password", text: $password)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .textContentType(authMode == .signUp ? .newPassword : .password)
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            hideKeyboard()
+            VStack(alignment: .leading, spacing: 4) {
+                SecureField("Password", text: $password)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textContentType(authMode == .signUp ? .newPassword : .password)
+                    .onTapGesture {
+                        if authMode == .signUp {
+                            showPasswordStrength = true
                         }
-                        .foregroundColor(.accentColor)
                     }
+                    .toolbar {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") {
+                                hideKeyboard()
+                            }
+                            .foregroundColor(.accentColor)
+                        }
+                    }
+                
+                if authMode == .signUp && showPasswordStrength {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Password Strength:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(passwordStrengthDescription)
+                                .font(.caption)
+                                .foregroundColor(Color(passwordStrengthColor))
+                                .fontWeight(.medium)
+                        }
+                        
+                        // Password strength bar
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(height: 4)
+                                    .cornerRadius(2)
+                                
+                                Rectangle()
+                                    .fill(Color(passwordStrengthColor))
+                                    .frame(width: geometry.size.width * CGFloat(passwordStrength) / 4, height: 4)
+                                    .cornerRadius(2)
+                            }
+                        }
+                        .frame(height: 4)
+                        
+                        // Password requirements
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Requirements:")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            
+                            RequirementRow(text: "At least 8 characters", isMet: password.count >= 8)
+                            RequirementRow(text: "One lowercase letter", isMet: password.range(of: "[a-z]", options: .regularExpression) != nil)
+                            RequirementRow(text: "One uppercase letter", isMet: password.range(of: "[A-Z]", options: .regularExpression) != nil)
+                            RequirementRow(text: "One number", isMet: password.range(of: "\\d", options: .regularExpression) != nil)
+                            RequirementRow(text: "One special character (@$!%*?&)", isMet: password.range(of: "[@$!%*?&]", options: .regularExpression) != nil)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
                 }
+                
+                if let error = passwordValidationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .transition(.opacity)
+                }
+            }
             
             Button(action: {
                 Task {
@@ -171,11 +257,11 @@ struct AuthView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.accentColor)
+                .background(isFormValid ? Color.accentColor : Color.gray)
                 .foregroundColor(.white)
                 .cornerRadius(12)
             }
-            .disabled(isLoading || email.isEmpty || password.isEmpty)
+            .disabled(isLoading || !isFormValid)
             
             if authMode == .signIn {
                 Button("Forgot Password?") {
@@ -511,6 +597,33 @@ struct AuthView: View {
         }
         isLoading = false
     }
+    
+    // MARK: - Validation
+    private var isFormValid: Bool {
+        let isEmailValid = emailValidationError == nil && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isPasswordValid = passwordValidationError == nil && !password.isEmpty
+        
+        if authMode == .signUp {
+            return isEmailValid && isPasswordValid && InputValidator.isValidPassword(password)
+        } else {
+            return isEmailValid && isPasswordValid
+        }
+    }
+    
+    private func validateEmail(_ email: String) {
+        emailValidationError = InputValidator.getEmailValidationError(email)
+    }
+    
+    private func validatePassword(_ password: String) {
+        if authMode == .signUp {
+            passwordValidationError = InputValidator.getPasswordValidationError(password)
+            passwordStrength = InputValidator.getPasswordStrength(password)
+            passwordStrengthDescription = InputValidator.getPasswordStrengthDescription(password)
+            passwordStrengthColor = InputValidator.getPasswordStrengthColor(password)
+        } else {
+            passwordValidationError = nil
+        }
+    }
 }
 
 // MARK: - View Extensions
@@ -531,5 +644,23 @@ extension View {
 extension View {
     func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+} 
+
+// MARK: - Requirement Row Component
+struct RequirementRow: View {
+    let text: String
+    let isMet: Bool
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isMet ? "checkmark.circle.fill" : "circle")
+                .font(.caption2)
+                .foregroundColor(isMet ? .green : .gray)
+            
+            Text(text)
+                .font(.caption2)
+                .foregroundColor(isMet ? .primary : .secondary)
+        }
     }
 } 
