@@ -102,6 +102,10 @@ struct UpdatesView: View {
         isLoading = true
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
+            print("UpdatesView: Loaded \(fetchedActivities.count) activities")
+            for (index, activity) in fetchedActivities.enumerated() {
+                print("UpdatesView: Activity \(index): \(activity.displayText) - Type: \(activity.type.rawValue)")
+            }
             await MainActor.run {
                 activities = fetchedActivities
                 isLoading = false

@@ -2274,6 +2274,9 @@ extension FirestoreService {
         let followActivities = followActivitiesSnapshot.documents.compactMap { doc -> ActivityUpdate? in
             let data = doc.data()
             
+            print("FirestoreService: Parsing follow activity document: \(doc.documentID)")
+            print("FirestoreService: Follow activity data: \(data)")
+            
             guard let id = data["id"] as? String,
                   let userId = data["userId"] as? String,
                   let username = data["username"] as? String,
@@ -2285,6 +2288,8 @@ extension FirestoreService {
                 print("FirestoreService: Failed to parse follow activity data: \(data)")
                 return nil
             }
+            
+            print("FirestoreService: Successfully parsed follow activity for user: \(username)")
             
             // Handle NSNull values properly
             let tmdbId: Int?
@@ -2335,7 +2340,7 @@ extension FirestoreService {
                 comment = nil
             }
             
-            return ActivityUpdate(
+            let activity = ActivityUpdate(
                 id: id,
                 userId: userId,
                 username: username,
@@ -2349,6 +2354,9 @@ extension FirestoreService {
                 comment: comment,
                 timestamp: timestamp
             )
+            
+            print("FirestoreService: Created follow activity: \(activity.displayText)")
+            return activity
         }
         
         // Combine and sort all activities by timestamp
