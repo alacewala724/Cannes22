@@ -2270,6 +2270,8 @@ extension FirestoreService {
             .limit(to: limit)
             .getDocuments()
         
+        print("FirestoreService: Found \(followActivitiesSnapshot.documents.count) follow activities for user \(currentUserId)")
+        
         let followActivities = followActivitiesSnapshot.documents.compactMap { doc -> ActivityUpdate? in
             let data = doc.data()
             
@@ -2281,16 +2283,58 @@ extension FirestoreService {
                   let movieTitle = data["movieTitle"] as? String,
                   let movieId = data["movieId"] as? String,
                   let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() else {
+                print("FirestoreService: Failed to parse follow activity data: \(data)")
                 return nil
             }
             
-            let tmdbId = data["tmdbId"] as? Int
+            // Handle NSNull values properly
+            let tmdbId: Int?
+            if let tmdbIdValue = data["tmdbId"] {
+                if tmdbIdValue is NSNull {
+                    tmdbId = nil
+                } else {
+                    tmdbId = tmdbIdValue as? Int
+                }
+            } else {
+                tmdbId = nil
+            }
+            
             let mediaTypeString = data["mediaType"] as? String
             let mediaType = mediaTypeString.flatMap { AppModels.MediaType(rawValue: $0) } ?? .movie
-            let score = data["score"] as? Double
-            let sentimentString = data["sentiment"] as? String
-            let sentiment = sentimentString.flatMap { MovieSentiment(rawValue: $0) }
-            let comment = data["comment"] as? String
+            
+            let score: Double?
+            if let scoreValue = data["score"] {
+                if scoreValue is NSNull {
+                    score = nil
+                } else {
+                    score = scoreValue as? Double
+                }
+            } else {
+                score = nil
+            }
+            
+            let sentiment: MovieSentiment?
+            if let sentimentValue = data["sentiment"] {
+                if sentimentValue is NSNull {
+                    sentiment = nil
+                } else {
+                    let sentimentString = sentimentValue as? String
+                    sentiment = sentimentString.flatMap { MovieSentiment(rawValue: $0) }
+                }
+            } else {
+                sentiment = nil
+            }
+            
+            let comment: String?
+            if let commentValue = data["comment"] {
+                if commentValue is NSNull {
+                    comment = nil
+                } else {
+                    comment = commentValue as? String
+                }
+            } else {
+                comment = nil
+            }
             
             return ActivityUpdate(
                 id: id,
@@ -2311,6 +2355,8 @@ extension FirestoreService {
         // Combine and sort all activities by timestamp
         allActivities.append(contentsOf: followActivities)
         allActivities.sort { $0.timestamp > $1.timestamp }
+        
+        print("FirestoreService: Returning \(allActivities.count) total activities (\(allActivities.count - followActivities.count) friend activities + \(followActivities.count) follow activities)")
         
         return Array(allActivities.prefix(limit))
     }
