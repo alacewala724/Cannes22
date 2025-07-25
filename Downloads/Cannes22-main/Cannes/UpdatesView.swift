@@ -338,7 +338,7 @@ struct FollowNotificationRow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             // Simple circular avatar instead of MoviePosterAvatar
             Button(action: {
                 showingUserProfile = true
