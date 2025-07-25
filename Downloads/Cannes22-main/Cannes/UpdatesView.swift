@@ -213,13 +213,12 @@ struct UpdatesView: View {
     
     private var followingListView: some View {
         ScrollView {
-            LazyVStack(spacing: 2) {
+            LazyVStack(spacing: 0) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
                 }
             }
             .padding(.horizontal, 4)
-            .padding(.top, 4)
         }
         .refreshable {
             await loadFollowNotificationsWithAnimation()
