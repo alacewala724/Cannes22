@@ -578,13 +578,14 @@ struct ProfileFollowingListView: View {
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
     @State private var isLoading = true
+    @State private var currentFollowing: [UserProfile] = []
     
     var body: some View {
         NavigationView {
             VStack {
                 if isLoading {
                     loadingView
-                } else if following.isEmpty {
+                } else if currentFollowing.isEmpty {
                     emptyStateView
                 } else {
                     followingList
@@ -601,8 +602,14 @@ struct ProfileFollowingListView: View {
             }
         }
         .task {
-            // Show content immediately since we already have the data
+            // Initialize with the passed data
+            currentFollowing = following
             isLoading = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
+            Task {
+                await reloadFollowingData()
+            }
         }
         .sheet(item: $showingUserProfile) { user in
             FriendProfileView(userProfile: user, store: MovieStore())
@@ -648,7 +655,7 @@ struct ProfileFollowingListView: View {
     private var followingList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(following, id: \.uid) { user in
+                ForEach(currentFollowing, id: \.uid) { user in
                     ProfileFollowingRow(user: user) {
                         showingUserProfile = user
                     } onFollowersTap: {
@@ -660,6 +667,23 @@ struct ProfileFollowingListView: View {
             }
             .padding(.horizontal)
             .padding(.top)
+        }
+    }
+    
+    private func reloadFollowingData() async {
+        isLoading = true
+        do {
+            // Reload the following data from Firestore
+            let updatedFollowing = try await firestoreService.getFollowing()
+            await MainActor.run {
+                currentFollowing = updatedFollowing
+                isLoading = false
+            }
+        } catch {
+            print("Error reloading following data: \(error)")
+            await MainActor.run {
+                isLoading = false
+            }
         }
     }
 }
@@ -807,11 +831,15 @@ struct ProfileFollowingRow: View {
             try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
             print("ProfileFollowingRow: Successfully unfollowed \(user.username)")
             
-            // Keep the button in loading state and let the parent view refresh
-            // Don't reset isUnfollowing here - let the parent view handle the refresh
-            
             // Post a notification to refresh the profile data
             NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+            
+            // Reset the loading state after a short delay to allow the UI to update
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isUnfollowing = false
+                }
+            }
         } catch {
             print("Error unfollowing user: \(error)")
             // Only reset on error
