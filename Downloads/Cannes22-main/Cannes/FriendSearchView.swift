@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
+import Network
 
 // MARK: - Notification Names
 extension Notification.Name {
@@ -11,6 +12,7 @@ struct FriendSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
     @StateObject private var contactsService = ContactsService()
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @ObservedObject var store: MovieStore
     @State private var searchText = ""
     @State private var searchResults: [UserProfile] = []
@@ -18,6 +20,16 @@ struct FriendSearchView: View {
     @State private var showingFriendProfile: UserProfile?
     @State private var selectedTab = 0
     @State private var showingContacts = false
+    
+    // Network connectivity states
+    @State private var networkError: String?
+    @State private var showNetworkError = false
+    @State private var retryCount = 0
+    @State private var isRetrying = false
+    
+    // Search debouncing
+    @State private var searchTask: Task<Void, Never>?
+    @State private var lastSearchQuery = ""
     
     var body: some View {
         NavigationView {
@@ -63,6 +75,41 @@ struct FriendSearchView: View {
                 }
             }
         }
+        .onDisappear {
+            // Cancel any pending search tasks
+            searchTask?.cancel()
+        }
+        .alert("Network Error", isPresented: $showNetworkError) {
+            Button("Retry") {
+                Task {
+                    await retryLastOperation()
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(networkError ?? "An unknown network error occurred")
+        }
+        .overlay(
+            // Offline indicator
+            VStack {
+                if !networkMonitor.isConnected {
+                    HStack {
+                        Image(systemName: "wifi.slash")
+                            .foregroundColor(.white)
+                        Text("No Internet Connection")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.red)
+                    .cornerRadius(8)
+                    .padding(.top, 8)
+                }
+                Spacer()
+            }
+        )
     }
     
     private var searchView: some View {
@@ -181,21 +228,119 @@ struct FriendSearchView: View {
             return
         }
         
-        isSearching = true
+        // Cancel previous search task
+        searchTask?.cancel()
         
-        Task {
-            do {
-                let results = try await firestoreService.searchUsersByUsername(query: query)
+        // Debounce search requests
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms delay
+            
+            // Check if task was cancelled
+            if Task.isCancelled { return }
+            
+            // Check if query has changed
+            if query != lastSearchQuery {
                 await MainActor.run {
-                    searchResults = results
-                    isSearching = false
+                    lastSearchQuery = query
                 }
-            } catch {
-                print("Error searching users: \(error)")
-                await MainActor.run {
+                
+                await performDebouncedSearch(query: query)
+            }
+        }
+    }
+    
+    private func performDebouncedSearch(query: String) async {
+        // Check network connectivity before making the request
+        guard networkMonitor.isConnected else {
+            await MainActor.run {
+                networkError = "No internet connection. Please check your network and try again."
+                showNetworkError = true
+            }
+            return
+        }
+        
+        await MainActor.run {
+            isSearching = true
+            retryCount = 0
+        }
+        
+        await performSearchWithRetry(query: query)
+    }
+    
+    private func performSearchWithRetry(query: String, maxRetries: Int = 3) async {
+        do {
+            // Add timeout to prevent hanging operations
+            let results = try await withTimeout(seconds: 10) {
+                try await firestoreService.searchUsersByUsername(query: query)
+            }
+            
+            await MainActor.run {
+                searchResults = results
+                isSearching = false
+                retryCount = 0
+                networkError = nil
+            }
+        } catch {
+            await MainActor.run {
+                retryCount += 1
+                
+                if retryCount < maxRetries {
+                    // Retry with exponential backoff
+                    let delay = Double(retryCount) * 1.0
+                    Task {
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        await performSearchWithRetry(query: query, maxRetries: maxRetries)
+                    }
+                } else {
+                    // Max retries reached, show error
                     isSearching = false
+                    networkError = handleSearchError(error)
+                    showNetworkError = true
                 }
             }
+        }
+    }
+    
+    private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+            
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+    
+    private func handleSearchError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to search users. Please try again."
+        }
+    }
+    
+    private func retryLastOperation() async {
+        isRetrying = true
+        defer { isRetrying = false }
+        
+        // Check if we have a search query to retry
+        if !searchText.isEmpty {
+            await performSearchWithRetry(query: searchText)
         }
     }
     
@@ -383,9 +528,21 @@ struct UserSearchRow: View {
     let user: UserProfile
     let onTap: () -> Void
     @StateObject private var firestoreService = FirestoreService()
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var isFriend = false
     @State private var isLoadingFriendStatus = true
     @State private var isUpdatingFriendStatus = false
+    @State private var networkError: String?
+    @State private var showNetworkError = false
+    
+    // Race condition prevention
+    @State private var lastOperationId = UUID()
+    @State private var pendingOperation: FollowOperation?
+    
+    private enum FollowOperation {
+        case follow
+        case unfollow
+    }
     
     var body: some View {
         Button(action: {
@@ -439,7 +596,7 @@ struct UserSearchRow: View {
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .disabled(isUpdatingFriendStatus)
+                    .disabled(isUpdatingFriendStatus || pendingOperation != nil)
                     .scaleEffect(isUpdatingFriendStatus ? 0.95 : 1.0)
                     .animation(.easeInOut(duration: 0.1), value: isUpdatingFriendStatus)
                 }
@@ -458,6 +615,16 @@ struct UserSearchRow: View {
                 await checkFollowStatus()
             }
         }
+        .alert("Network Error", isPresented: $showNetworkError) {
+            Button("Retry") {
+                Task {
+                    await retryFollowOperation()
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(networkError ?? "An unknown network error occurred")
+        }
     }
     
     private func checkFollowStatus() async {
@@ -471,56 +638,126 @@ struct UserSearchRow: View {
     }
     
     private func toggleFollowStatus() async {
-        print("toggleFollowStatus: Starting for user \(user.username) (UID: \(user.uid))")
-        print("toggleFollowStatus: Current follow status: \(isFriend)")
+        // Prevent concurrent operations
+        guard pendingOperation == nil else {
+            print("toggleFollowStatus: Operation already in progress, ignoring tap")
+            return
+        }
+        
+        // Check network connectivity before making the request
+        guard networkMonitor.isConnected else {
+            await MainActor.run {
+                networkError = "No internet connection. Please check your network and try again."
+                showNetworkError = true
+            }
+            return
+        }
+        
+        let operationId = UUID()
+        let operation: FollowOperation = isFriend ? .unfollow : .follow
         
         await MainActor.run {
+            lastOperationId = operationId
+            pendingOperation = operation
             isUpdatingFriendStatus = true
         }
         
+        // Optimistic UI update
+        let originalState = isFriend
+        await MainActor.run {
+            isFriend = !isFriend // Optimistically update UI
+        }
+        
         do {
-            if isFriend {
-                print("toggleFollowStatus: Unfollowing user")
+            if operation == .unfollow {
+                print("toggleFollowStatus: Unfollowing user \(user.username)")
                 try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
-                await MainActor.run {
-                    isFriend = false
-                }
                 print("toggleFollowStatus: User unfollowed successfully")
-                
-                // Post notification to refresh following list if we're in the following tab
-                NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
             } else {
-                print("toggleFollowStatus: Following user")
+                print("toggleFollowStatus: Following user \(user.username)")
                 try await firestoreService.followUser(userIdToFollow: user.uid)
-                await MainActor.run {
-                    isFriend = true
-                }
                 print("toggleFollowStatus: User followed successfully")
-                
-                // Post notification to refresh following list if we're in the following tab
-                NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
             }
+            
+            // Success - keep the optimistic update
+            await MainActor.run {
+                if lastOperationId == operationId {
+                    pendingOperation = nil
+                    isUpdatingFriendStatus = false
+                    networkError = nil
+                }
+            }
+            
+            // Post notification to refresh following list
+            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+            
         } catch {
             print("Error toggling follow status: \(error)")
             print("Error details: \(error.localizedDescription)")
             
-            // Don't change the state on error - keep the original state
-            // Re-check the actual status from Firestore in case of error
+            // Rollback optimistic update on failure
+            await MainActor.run {
+                if lastOperationId == operationId {
+                    isFriend = originalState // Rollback to original state
+                    pendingOperation = nil
+                    isUpdatingFriendStatus = false
+                    networkError = handleFollowError(error)
+                    showNetworkError = true
+                }
+            }
+            
+            // Re-check the actual status from Firestore to ensure consistency
             await checkFollowStatus()
         }
-        
-        await MainActor.run {
-            isUpdatingFriendStatus = false
+    }
+    
+    private func handleSearchError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to search users. Please try again."
+        }
+    }
+    
+    private func retryFollowOperation() async {
+        await toggleFollowStatus()
+    }
+    
+    private func handleFollowError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to update follow status. Please try again."
         }
     }
 }
 
 struct FollowingListView: View {
     @StateObject private var firestoreService = FirestoreService()
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var following: [UserProfile] = []
     @State private var isLoading = true
     @State private var showingUserProfile: UserProfile?
     @State private var moviesInCommon: [String: Int] = [:] // user UID -> count
+    @State private var networkError: String?
+    @State private var showNetworkError = false
+    @State private var retryCount = 0
     @ObservedObject var store: MovieStore
     
     var body: some View {
@@ -544,6 +781,37 @@ struct FollowingListView: View {
         .sheet(item: $showingUserProfile) { profile in
             FriendProfileView(userProfile: profile, store: store)
         }
+        .alert("Network Error", isPresented: $showNetworkError) {
+            Button("Retry") {
+                Task {
+                    await retryLoadFollowing()
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(networkError ?? "An unknown network error occurred")
+        }
+        .overlay(
+            // Offline indicator
+            VStack {
+                if !networkMonitor.isConnected {
+                    HStack {
+                        Image(systemName: "wifi.slash")
+                            .foregroundColor(.white)
+                        Text("No Internet Connection")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.red)
+                    .cornerRadius(8)
+                    .padding(.top, 8)
+                }
+                Spacer()
+            }
+        )
     }
     
     private var loadingView: some View {
@@ -591,6 +859,16 @@ struct FollowingListView: View {
     }
     
     private func loadFollowing() async {
+        // Check network connectivity before making requests
+        guard networkMonitor.isConnected else {
+            await MainActor.run {
+                networkError = "No internet connection. Unable to load following list."
+                showNetworkError = true
+                isLoading = false
+            }
+            return
+        }
+        
         // Check if we have cached data first
         if let cachedData = firestoreService.getCachedFollowing(for: Auth.auth().currentUser?.uid ?? "") {
             print("FollowingListView: Using cached data for current user")
@@ -630,8 +908,38 @@ struct FollowingListView: View {
             }
         } catch {
             print("Error loading following: \(error)")
+            await MainActor.run {
+                networkError = handleFollowingError(error)
+                showNetworkError = true
+            }
         }
         isLoading = false
+    }
+    
+    private func retryLoadFollowing() async {
+        retryCount += 1
+        if retryCount < 3 { // Retry up to 3 times
+            await loadFollowing()
+        } else {
+            networkError = "Failed to load following after multiple retries."
+            showNetworkError = true
+        }
+    }
+    
+    private func handleFollowingError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to load following list. Please try again."
+        }
     }
 }
 
@@ -679,8 +987,15 @@ struct FollowingRow: View {
     let moviesInCommon: Int
     let onTap: () -> Void
     @StateObject private var firestoreService = FirestoreService()
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var isUnfollowing = false
     @State private var isCurrentUser = false
+    @State private var networkError: String?
+    @State private var showNetworkError = false
+    
+    // Race condition prevention
+    @State private var lastOperationId = UUID()
+    @State private var pendingUnfollow = false
     
     var body: some View {
         Button(action: {
@@ -737,7 +1052,7 @@ struct FollowingRow: View {
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .disabled(isUnfollowing)
+                    .disabled(isUnfollowing || pendingUnfollow)
                     .scaleEffect(isUnfollowing ? 0.95 : 1.0)
                     .animation(.easeInOut(duration: 0.1), value: isUnfollowing)
                 }
@@ -756,6 +1071,16 @@ struct FollowingRow: View {
                 await checkIfCurrentUser()
             }
         }
+        .alert("Network Error", isPresented: $showNetworkError) {
+            Button("Retry") {
+                Task {
+                    await retryUnfollowOperation()
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(networkError ?? "An unknown network error occurred")
+        }
     }
     
     private func checkIfCurrentUser() async {
@@ -765,7 +1090,26 @@ struct FollowingRow: View {
     }
     
     private func unfollowUser() async {
+        // Prevent concurrent operations
+        guard !pendingUnfollow else {
+            print("unfollowUser: Operation already in progress, ignoring tap")
+            return
+        }
+        
+        // Check network connectivity before making the request
+        guard networkMonitor.isConnected else {
+            await MainActor.run {
+                networkError = "No internet connection. Please check your network and try again."
+                showNetworkError = true
+            }
+            return
+        }
+        
+        let operationId = UUID()
+        
         await MainActor.run {
+            lastOperationId = operationId
+            pendingUnfollow = true
             isUnfollowing = true
         }
         
@@ -773,18 +1117,47 @@ struct FollowingRow: View {
             try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
             print("FollowingRow: Successfully unfollowed \(user.username)")
             
-            // Keep the button in loading state and let the parent view refresh
-            // Don't reset isUnfollowing here - let the parent view handle the refresh
+            // Success - keep the optimistic state
+            await MainActor.run {
+                if lastOperationId == operationId {
+                    pendingUnfollow = false
+                    // Don't reset isUnfollowing here - let the parent view handle the refresh
+                }
+            }
             
             // Post a notification to refresh the following list
             NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
         } catch {
             print("Error unfollowing user: \(error)")
-            // Only reset on error - keep loading state on success
             await MainActor.run {
-                isUnfollowing = false
+                if lastOperationId == operationId {
+                    networkError = handleUnfollowError(error)
+                    showNetworkError = true
+                    pendingUnfollow = false
+                    isUnfollowing = false
+                }
             }
         }
+    }
+    
+    private func handleUnfollowError(_ error: Error) -> String {
+        let nsError = error as NSError
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection. Please check your network and try again."
+        case NSURLErrorTimedOut:
+            return "Request timed out. Please try again."
+        case NSURLErrorCannotConnectToHost:
+            return "Cannot connect to server. Please try again later."
+        case NSURLErrorNetworkConnectionLost:
+            return "Network connection lost. Please check your connection."
+        default:
+            return "Failed to unfollow user. Please try again."
+        }
+    }
+    
+    private func retryUnfollowOperation() async {
+        await unfollowUser()
     }
 }
 
