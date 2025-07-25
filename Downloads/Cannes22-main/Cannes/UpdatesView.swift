@@ -250,8 +250,8 @@ struct ActivityRowView: View {
                 Spacer()
             }
             
-            // Movie title button to view details
-            if let tmdbId = activity.tmdbId {
+            // Movie title button to view details - only show for movie-related activities
+            if let tmdbId = activity.tmdbId, activity.type != .userFollowed {
                 Button(action: {
                     showingMovieDetail = true
                 }) {

@@ -340,6 +340,7 @@ struct ActivityUpdate: Identifiable, Codable {
         case movieRanked = "movie_ranked"
         case movieCommented = "movie_commented"
         case movieUpdated = "movie_updated"
+        case userFollowed = "user_followed"
     }
     
     var displayText: String {
@@ -350,6 +351,8 @@ struct ActivityUpdate: Identifiable, Codable {
             return "\(username) commented on \"\(movieTitle)\""
         case .movieUpdated:
             return "\(username) updated \"\(movieTitle)\""
+        case .userFollowed:
+            return "\(username) started following you"
         }
     }
     

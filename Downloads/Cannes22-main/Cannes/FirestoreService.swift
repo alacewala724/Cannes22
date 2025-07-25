@@ -1241,6 +1241,19 @@ extension FirestoreService {
         clearFollowingCache(for: currentUserId)
         clearFollowingCache(for: userIdToFollow)
         
+        // Create follow activity for the followed user
+        do {
+            // Get the followed user's username
+            let followedUserDoc = try await db.collection("users").document(userIdToFollow).getDocument()
+            let followedUsername = followedUserDoc.get("username") as? String ?? "Unknown User"
+            
+            // Create the follow activity
+            try await createFollowActivityUpdate(followedUserId: userIdToFollow, followedUsername: followedUsername)
+        } catch {
+            print("followUser: Error creating follow activity: \(error)")
+            // Don't fail the follow operation if activity creation fails
+        }
+        
         print("followUser: Successfully followed user \(userIdToFollow)")
     }
     
@@ -2149,6 +2162,34 @@ extension FirestoreService {
         print("Created activity update: \(type.rawValue) for \(movie.title)")
     }
     
+    func createFollowActivityUpdate(followedUserId: String, followedUsername: String) async throws {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        
+        // Get current user's username
+        let userDoc = try await db.collection("users").document(currentUserId).getDocument()
+        let username = userDoc.get("username") as? String ?? "Unknown User"
+        
+        let activityId = UUID().uuidString
+        let activityData: [String: Any] = [
+            "id": activityId,
+            "userId": currentUserId,
+            "username": username,
+            "type": ActivityUpdate.ActivityType.userFollowed.rawValue,
+            "movieTitle": followedUsername, // Use the followed user's name as the "movie title"
+            "movieId": followedUserId,
+            "tmdbId": nil,
+            "mediaType": AppModels.MediaType.movie.rawValue, // Default value for follow activities
+            "score": nil,
+            "sentiment": nil,
+            "comment": nil,
+            "timestamp": FieldValue.serverTimestamp()
+        ]
+        
+        // Create the activity in the followed user's activities collection
+        try await db.collection("users").document(followedUserId).collection("activities").document(activityId).setData(activityData)
+        print("Created follow activity update: \(username) followed \(followedUsername)")
+    }
+    
     func getFriendActivities(limit: Int = 50) async throws -> [ActivityUpdate] {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return [] }
         
@@ -2220,8 +2261,57 @@ extension FirestoreService {
             allActivities.append(contentsOf: batchActivities)
         }
         
-        // Sort all activities by timestamp and limit
+        // Also get follow activities where the current user is mentioned
+        let followActivitiesSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("activities")
+            .whereField("type", isEqualTo: ActivityUpdate.ActivityType.userFollowed.rawValue)
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
+            .getDocuments()
+        
+        let followActivities = followActivitiesSnapshot.documents.compactMap { doc -> ActivityUpdate? in
+            let data = doc.data()
+            
+            guard let id = data["id"] as? String,
+                  let userId = data["userId"] as? String,
+                  let username = data["username"] as? String,
+                  let typeString = data["type"] as? String,
+                  let type = ActivityUpdate.ActivityType(rawValue: typeString),
+                  let movieTitle = data["movieTitle"] as? String,
+                  let movieId = data["movieId"] as? String,
+                  let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() else {
+                return nil
+            }
+            
+            let tmdbId = data["tmdbId"] as? Int
+            let mediaTypeString = data["mediaType"] as? String
+            let mediaType = mediaTypeString.flatMap { AppModels.MediaType(rawValue: $0) } ?? .movie
+            let score = data["score"] as? Double
+            let sentimentString = data["sentiment"] as? String
+            let sentiment = sentimentString.flatMap { MovieSentiment(rawValue: $0) }
+            let comment = data["comment"] as? String
+            
+            return ActivityUpdate(
+                id: id,
+                userId: userId,
+                username: username,
+                type: type,
+                movieTitle: movieTitle,
+                movieId: movieId,
+                tmdbId: tmdbId,
+                mediaType: mediaType,
+                score: score,
+                sentiment: sentiment,
+                comment: comment,
+                timestamp: timestamp
+            )
+        }
+        
+        // Combine and sort all activities by timestamp
+        allActivities.append(contentsOf: followActivities)
         allActivities.sort { $0.timestamp > $1.timestamp }
+        
         return Array(allActivities.prefix(limit))
     }
     
