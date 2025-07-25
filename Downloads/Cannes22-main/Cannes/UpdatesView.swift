@@ -218,7 +218,6 @@ struct UpdatesView: View {
                     FollowNotificationRow(activity: activity, store: store)
                 }
             }
-            .padding(.horizontal, 4)
         }
         .refreshable {
             await loadFollowNotificationsWithAnimation()
@@ -333,54 +332,41 @@ struct FollowNotificationRow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                // User avatar
-                Button(action: {
-                    showingUserProfile = true
-                }) {
-                    MoviePosterAvatar(
-                        userProfile: UserProfile(
-                            uid: activity.userId,
-                            username: activity.username
-                        ),
-                        size: 40,
-                        refreshID: activity.userId
+        HStack(spacing: 12) {
+            // Simple circular avatar instead of MoviePosterAvatar
+            Button(action: {
+                showingUserProfile = true
+            }) {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.2))
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Text(String(activity.username.prefix(1)).uppercased())
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.accentColor)
                     )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(activity.displayText)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        
-                        Spacer()
-                        
-                        Text(activity.timeAgoText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        followBackButton
-                    }
-                    
-                    if let comment = activity.comment, !comment.isEmpty {
-                        Text(comment)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                    }
-                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            // Main content
+            HStack {
+                Text(activity.displayText)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
                 
                 Spacer()
+                
+                Text(activity.timeAgoText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                followBackButton
             }
             
-            // Empty space to match the movie button height
             Spacer()
-                .frame(height: 0)
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
