@@ -1097,14 +1097,82 @@ extension FirestoreService {
         // Get movie count from user document
         let movieCount = data["movieCount"] as? Int ?? 0
         
+        // Get top movie poster path from user document
+        let topMoviePosterPath = data["topMoviePosterPath"] as? String
+        
         return UserProfile(
             uid: userId,
             username: username,
             email: email,
             phoneNumber: phoneNumber,
             movieCount: movieCount,
-            createdAt: createdAt?.dateValue()
+            createdAt: createdAt?.dateValue(),
+            topMoviePosterPath: topMoviePosterPath
         )
+    }
+    
+    // Get user's top movie and update their profile with the poster path
+    func updateUserTopMoviePoster(userId: String) async throws {
+        print("updateUserTopMoviePoster: Starting for user \(userId)")
+        
+        do {
+            // Get user's rankings ordered by score (highest first)
+            let rankings = try await getUserRankings(userId: userId)
+            
+            guard let topMovie = rankings.first else {
+                print("updateUserTopMoviePoster: No movies found for user \(userId)")
+                return
+            }
+            
+            print("updateUserTopMoviePoster: Top movie for user \(userId) is '\(topMovie.title)'")
+            
+            // Get the poster path for the top movie
+            var posterPath: String?
+            if let tmdbId = topMovie.tmdbId {
+                do {
+                    let tmdbService = TMDBService()
+                    let tmdbMovie: TMDBMovie
+                    
+                    if topMovie.mediaType == .tv {
+                        tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                    } else {
+                        tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                    }
+                    
+                    posterPath = tmdbMovie.posterPath
+                    print("updateUserTopMoviePoster: Got poster path for top movie: \(posterPath ?? "nil")")
+                } catch {
+                    print("updateUserTopMoviePoster: Error getting movie details: \(error)")
+                }
+            }
+            
+            // Update the user's profile with the top movie poster path
+            try await db.collection("users")
+                .document(userId)
+                .updateData([
+                    "topMoviePosterPath": posterPath as Any
+                ])
+            
+            print("updateUserTopMoviePoster: Successfully updated user profile with top movie poster")
+            
+        } catch {
+            print("updateUserTopMoviePoster: Error updating top movie poster: \(error)")
+            throw error
+        }
+    }
+    
+    // Get a user's top movie poster path (cached version)
+    func getUserTopMoviePosterPath(userId: String) async throws -> String? {
+        let document = try await db.collection("users")
+            .document(userId)
+            .getDocument()
+        
+        guard document.exists else {
+            return nil
+        }
+        
+        let data = document.data() ?? [:]
+        return data["topMoviePosterPath"] as? String
     }
     
     // Get a user's public movie list (this will work if the user has made their rankings public)
@@ -2602,6 +2670,53 @@ extension FirestoreService {
             print("preloadUserFollowing: Successfully preloaded following data for user \(userId)")
         } catch {
             print("preloadUserFollowing: Error preloading following data for user \(userId): \(error)")
+        }
+    }
+    
+    // Update all users' top movie posters (background task)
+    func updateAllUsersTopMoviePosters() async {
+        print("updateAllUsersTopMoviePosters: Starting background update for all users")
+        
+        do {
+            // Get all users
+            let snapshot = try await db.collection("users").getDocuments()
+            
+            var updatedCount = 0
+            var errorCount = 0
+            
+            // Process users in batches to avoid overwhelming the system
+            let batchSize = 10
+            let documents = snapshot.documents
+            
+            for i in stride(from: 0, to: documents.count, by: batchSize) {
+                let batch = Array(documents[i..<min(i + batchSize, documents.count)])
+                
+                await withTaskGroup(of: Void.self) { group in
+                    for document in batch {
+                        group.addTask {
+                            do {
+                                try await self.updateUserTopMoviePoster(userId: document.documentID)
+                                await MainActor.run {
+                                    updatedCount += 1
+                                }
+                            } catch {
+                                print("Error updating top movie poster for user \(document.documentID): \(error)")
+                                await MainActor.run {
+                                    errorCount += 1
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Small delay between batches to be respectful to the API
+                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+            
+            print("updateAllUsersTopMoviePosters: Completed. Updated: \(updatedCount), Errors: \(errorCount)")
+            
+        } catch {
+            print("updateAllUsersTopMoviePosters: Error getting users: \(error)")
         }
     }
 } 

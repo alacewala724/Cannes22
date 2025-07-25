@@ -726,6 +726,14 @@ struct ComparisonView: View {
                         
                         print("✅ insertMovie: Completed for '\(finalMovie.title)' with final score: \(finalMovie.score)")
                         
+                        // Update user's top movie poster
+                        do {
+                            try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
+                            print("✅ insertMovie: Updated user's top movie poster")
+                        } catch {
+                            print("⚠️ insertMovie: Failed to update user's top movie poster: \(error)")
+                        }
+                        
                         // Create activity update for friends to see
                         do {
                             try await store.firestoreService.createActivityUpdate(

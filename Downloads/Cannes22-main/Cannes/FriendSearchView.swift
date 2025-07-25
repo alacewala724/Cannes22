@@ -548,6 +548,90 @@ struct FriendSearchView: View {
     }
 }
 
+// MARK: - Movie Poster Avatar Component
+/// A reusable avatar component that displays a user's top movie poster as their profile picture.
+/// Falls back to a letter avatar if no movie poster is available.
+/// 
+/// The component automatically:
+/// 1. Checks the user profile for a cached top movie poster path
+/// 2. Fetches the poster path from Firestore if not cached
+/// 3. Loads the movie poster from TMDB
+/// 4. Falls back to a letter avatar if any step fails
+struct MoviePosterAvatar: View {
+    let userProfile: UserProfile
+    let size: CGFloat
+    @State private var posterPath: String?
+    @State private var isLoadingPoster = false
+    
+    var body: some View {
+        Group {
+            if let posterPath = posterPath, !posterPath.isEmpty {
+                // Show movie poster
+                AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w500\(posterPath)")) { phase in
+                    switch phase {
+                    case .empty:
+                        letterAvatar
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: size, height: size * 1.5) // Rectangular aspect ratio
+                            .clipped()
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(.systemGray5), lineWidth: 1)
+                            )
+                    case .failure:
+                        letterAvatar
+                    @unknown default:
+                        letterAvatar
+                    }
+                }
+            } else {
+                // Show letter avatar as fallback
+                letterAvatar
+            }
+        }
+        .onAppear {
+            loadTopMoviePoster()
+        }
+    }
+    
+    private var letterAvatar: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(Color.accentColor.opacity(0.2))
+            .frame(width: size, height: size * 1.5) // Rectangular aspect ratio
+            .overlay(
+                Text(String(userProfile.username.prefix(1)).uppercased())
+                    .font(.system(size: size * 0.4, weight: .semibold))
+                    .foregroundColor(.accentColor)
+            )
+    }
+    
+    private func loadTopMoviePoster() {
+        // First try to use the poster path from the user profile
+        if let profilePosterPath = userProfile.topMoviePosterPath {
+            posterPath = profilePosterPath
+            return
+        }
+        
+        // If not available in profile, try to fetch it
+        Task {
+            do {
+                let firestoreService = FirestoreService()
+                if let fetchedPosterPath = try await firestoreService.getUserTopMoviePosterPath(userId: userProfile.uid) {
+                    await MainActor.run {
+                        posterPath = fetchedPosterPath
+                    }
+                }
+            } catch {
+                print("Error loading top movie poster for user \(userProfile.username): \(error)")
+            }
+        }
+    }
+}
+
 struct ContactRowSkeleton: View {
     var body: some View {
         HStack(spacing: 12) {
@@ -622,16 +706,8 @@ struct UserSearchRow: View {
             onTap()
         }) {
             HStack(spacing: 12) {
-                // Avatar placeholder
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(user.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: user, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.safeDisplayName)")
@@ -1160,16 +1236,8 @@ struct FollowingRow: View {
             onTap()
         }) {
             HStack(spacing: 12) {
-                // Avatar placeholder
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(user.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: user, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.safeDisplayName)")
@@ -1427,14 +1495,16 @@ struct UserProfile: Identifiable {
     let phoneNumber: String?
     let movieCount: Int?
     let createdAt: Date?
+    let topMoviePosterPath: String? // New property for top movie poster
     
-    init(uid: String, username: String, email: String? = nil, phoneNumber: String? = nil, movieCount: Int? = nil, createdAt: Date? = nil) {
+    init(uid: String, username: String, email: String? = nil, phoneNumber: String? = nil, movieCount: Int? = nil, createdAt: Date? = nil, topMoviePosterPath: String? = nil) {
         self.uid = uid
         self.username = username
         self.email = email
         self.phoneNumber = phoneNumber
         self.movieCount = movieCount
         self.createdAt = createdAt
+        self.topMoviePosterPath = topMoviePosterPath
     }
     
     // MARK: - Validation Methods
@@ -1497,6 +1567,7 @@ struct UserProfile: Identifiable {
         let phoneNumber = document["phoneNumber"] as? String
         let movieCount = document["movieCount"] as? Int
         let createdAt = document["createdAt"] as? Timestamp
+        let topMoviePosterPath = document["topMoviePosterPath"] as? String
         
         // Create profile with validation
         let profile = UserProfile(
@@ -1505,7 +1576,8 @@ struct UserProfile: Identifiable {
             email: email?.trimmingCharacters(in: .whitespacesAndNewlines),
             phoneNumber: phoneNumber?.trimmingCharacters(in: .whitespacesAndNewlines),
             movieCount: movieCount,
-            createdAt: createdAt?.dateValue()
+            createdAt: createdAt?.dateValue(),
+            topMoviePosterPath: topMoviePosterPath
         )
         
         // Additional validation

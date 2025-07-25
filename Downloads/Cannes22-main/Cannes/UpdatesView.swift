@@ -206,15 +206,13 @@ struct ActivityRowView: View {
                 Button(action: {
                     showingUserProfile = true
                 }) {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.2))
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Text(String(activity.username.prefix(1)).uppercased())
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.accentColor)
-                        )
+                    MoviePosterAvatar(
+                        userProfile: UserProfile(
+                            uid: activity.userId,
+                            username: activity.username
+                        ),
+                        size: 40
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
                 

@@ -88,16 +88,8 @@ struct FriendProfileView: View {
     
     private var profileHeader: some View {
         VStack(spacing: 16) {
-            // Avatar
-            Circle()
-                .fill(Color.accentColor.opacity(0.2))
-                .frame(width: 80, height: 80)
-                .overlay(
-                    Text(String(userProfile.username.prefix(1)).uppercased())
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.accentColor)
-                )
+            // Movie poster avatar for friend
+            MoviePosterAvatar(userProfile: userProfile, size: 80)
             
             // Username
             Text("@\(userProfile.username)")

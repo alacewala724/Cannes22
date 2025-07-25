@@ -85,15 +85,14 @@ struct ProfileView: View {
     
     private var profileHeader: some View {
         VStack(spacing: 20) {
-            // Avatar
-            Circle()
-                .fill(Color.accentColor.opacity(0.15))
-                .frame(width: 100, height: 100)
-                .overlay(
-                    Text(String(username.prefix(1)).uppercased())
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(.accentColor)
-                )
+            // Movie poster avatar for current user
+            MoviePosterAvatar(
+                userProfile: UserProfile(
+                    uid: Auth.auth().currentUser?.uid ?? "",
+                    username: username
+                ),
+                size: 100
+            )
             
             VStack(spacing: 8) {
                 // Username
@@ -178,20 +177,15 @@ struct ProfileView: View {
             }) {
                 HStack {
                     Image(systemName: "gear")
-                        .font(.system(size: 18))
                     Text("Settings")
-                        .font(.system(size: 16, weight: .medium))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .background(Color(.systemGray6))
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(Color.accentColor)
                 .cornerRadius(12)
             }
-            .buttonStyle(PlainButtonStyle())
             
             Button(action: {
                 // Sign out
@@ -200,18 +194,15 @@ struct ProfileView: View {
             }) {
                 HStack {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
-                        .font(.system(size: 18))
                     Text("Sign Out")
-                        .font(.system(size: 16, weight: .medium))
-                    Spacer()
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .background(Color.red.opacity(0.1))
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(Color.red)
                 .cornerRadius(12)
-                .foregroundColor(.red)
             }
-            .buttonStyle(PlainButtonStyle())
         }
     }
     
@@ -473,16 +464,8 @@ struct FollowerRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(follower.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: follower, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(follower.username)")
@@ -727,16 +710,8 @@ struct ProfileFollowingRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(user.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: user, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.username)")
@@ -958,16 +933,8 @@ struct UserFollowerRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(follower.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: follower, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(follower.username)")
@@ -1192,16 +1159,8 @@ struct UserFollowingRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Avatar
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(String(user.username.prefix(1)).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
-                    )
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: user, size: 50)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.username)")

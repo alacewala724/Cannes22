@@ -429,6 +429,14 @@ final class MovieStore: ObservableObject {
                 
                 print("✅ insertNewMovie: Completed for '\(finalMovie.title)' with final score: \(finalMovie.score)")
                 
+                // Update user's top movie poster
+                do {
+                    try await firestoreService.updateUserTopMoviePoster(userId: userId)
+                    print("✅ insertNewMovie: Updated user's top movie poster")
+                } catch {
+                    print("⚠️ insertNewMovie: Failed to update user's top movie poster: \(error)")
+                }
+                
                 // Create activity update for friends to see
                 do {
                     try await firestoreService.createActivityUpdate(
@@ -687,6 +695,18 @@ final class MovieStore: ObservableObject {
                     
                     // Update cache after successful deletions
                     self.updateCacheAfterDeletion()
+                    
+                    // Update user's top movie poster if any movies were deleted
+                    if !successfulDeletions.isEmpty {
+                        Task {
+                            do {
+                                try await self.firestoreService.updateUserTopMoviePoster(userId: userId)
+                                print("✅ deleteMovies: Updated user's top movie poster after deletion")
+                            } catch {
+                                print("⚠️ deleteMovies: Failed to update user's top movie poster: \(error)")
+                            }
+                        }
+                    }
                 }
             }
         }
