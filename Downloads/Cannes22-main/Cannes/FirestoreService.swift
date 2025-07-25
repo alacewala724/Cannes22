@@ -2177,11 +2177,11 @@ extension FirestoreService {
             "type": ActivityUpdate.ActivityType.userFollowed.rawValue,
             "movieTitle": followedUsername, // Use the followed user's name as the "movie title"
             "movieId": followedUserId,
-            "tmdbId": nil,
+            "tmdbId": NSNull(),
             "mediaType": AppModels.MediaType.movie.rawValue, // Default value for follow activities
-            "score": nil,
-            "sentiment": nil,
-            "comment": nil,
+            "score": NSNull(),
+            "sentiment": NSNull(),
+            "comment": NSNull(),
             "timestamp": FieldValue.serverTimestamp()
         ]
         
