@@ -195,8 +195,12 @@ struct ActivityRowSkeleton: View {
 struct ActivityRowView: View {
     let activity: ActivityUpdate
     @ObservedObject var store: MovieStore
+    @StateObject private var firestoreService = FirestoreService()
     @State private var showingMovieDetail = false
     @State private var showingUserProfile = false
+    @State private var isFollowing = false
+    @State private var isLoadingFollowState = false
+    @State private var isUpdatingFollowStatus = false
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
@@ -234,9 +238,14 @@ struct ActivityRowView: View {
                         
                         Spacer()
                         
-                        Text(activity.timeAgoText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        // Follow back button for follow notifications
+                        if activity.type == .userFollowed {
+                            followBackButton
+                        } else {
+                            Text(activity.timeAgoText)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     if let comment = activity.comment, !comment.isEmpty {
@@ -244,6 +253,13 @@ struct ActivityRowView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.top, 2)
+                    }
+                    
+                    // Time ago text for follow notifications (moved below for better layout)
+                    if activity.type == .userFollowed {
+                        Text(activity.timeAgoText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -283,6 +299,13 @@ struct ActivityRowView: View {
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
+        .onAppear {
+            if activity.type == .userFollowed {
+                Task {
+                    await checkFollowStatus()
+                }
+            }
+        }
         .sheet(isPresented: $showingMovieDetail) {
             if let tmdbId = activity.tmdbId {
                 // Create a view that fetches the actual community rating
@@ -305,6 +328,68 @@ struct ActivityRowView: View {
         .sheet(isPresented: $showingUserProfile) {
             UserProfileFromIdView(userId: activity.userId, store: store)
         }
+    }
+    
+    private var followBackButton: some View {
+        Group {
+            if isLoadingFollowState {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else if isUpdatingFollowStatus {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .foregroundColor(isFollowing ? .red : .accentColor)
+            } else {
+                Button(action: {
+                    Task {
+                        await toggleFollowStatus()
+                    }
+                }) {
+                    Text(isFollowing ? "Unfollow" : "Follow Back")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(isFollowing ? .red : .accentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isFollowing ? Color.red : Color.accentColor, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isUpdatingFollowStatus)
+            }
+        }
+    }
+    
+    private func checkFollowStatus() async {
+        isLoadingFollowState = true
+        do {
+            isFollowing = try await firestoreService.isFollowing(userId: activity.userId)
+        } catch {
+            print("Error checking follow status: \(error)")
+        }
+        isLoadingFollowState = false
+    }
+    
+    private func toggleFollowStatus() async {
+        isUpdatingFollowStatus = true
+        
+        do {
+            if isFollowing {
+                try await firestoreService.unfollowUser(userIdToUnfollow: activity.userId)
+            } else {
+                try await firestoreService.followUser(userIdToFollow: activity.userId)
+            }
+            
+            // Update the follow state
+            isFollowing.toggle()
+        } catch {
+            print("Error toggling follow status: \(error)")
+            // Don't toggle state on error - keep the original state
+        }
+        
+        isUpdatingFollowStatus = false
     }
 }
 
