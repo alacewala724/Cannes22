@@ -5,9 +5,9 @@ struct UpdatesView: View {
     @StateObject private var firestoreService = FirestoreService()
     @ObservedObject var store: MovieStore
     @State private var activities: [ActivityUpdate] = []
-    @State private var following: [UserProfile] = []
+    @State private var followNotifications: [ActivityUpdate] = []
     @State private var isLoading = true
-    @State private var isLoadingFollowing = true
+    @State private var isLoadingFollows = true
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var selectedTab = 0 // 0 for Activity, 1 for Following
@@ -38,19 +38,19 @@ struct UpdatesView: View {
                 
                 // Content based on selected tab
                 if selectedTab == 0 {
-                    // Activity tab
+                    // Activity tab - movie ratings and comments from people you follow
                     if isLoading {
                         loadingView
                     } else if activities.isEmpty {
-                        emptyStateView
+                        emptyActivityView
                     } else {
                         activityFeedView
                     }
                 } else {
-                    // Following tab
-                    if isLoadingFollowing {
+                    // Following tab - people following you
+                    if isLoadingFollows {
                         followingLoadingView
-                    } else if following.isEmpty {
+                    } else if followNotifications.isEmpty {
                         emptyFollowingView
                     } else {
                         followingListView
@@ -62,13 +62,13 @@ struct UpdatesView: View {
                 if selectedTab == 0 {
                     await loadActivities()
                 } else {
-                    await loadFollowing()
+                    await loadFollowNotifications()
                 }
             }
         }
         .task {
             await loadActivities()
-            await loadFollowing()
+            await loadFollowNotifications()
         }
         .onChange(of: selectedTab) { _, newValue in
             // Load data for the newly selected tab if needed
@@ -76,9 +76,9 @@ struct UpdatesView: View {
                 Task {
                     await loadActivities()
                 }
-            } else if newValue == 1 && following.isEmpty {
+            } else if newValue == 1 && followNotifications.isEmpty {
                 Task {
-                    await loadFollowing()
+                    await loadFollowNotifications()
                 }
             }
         }
@@ -88,7 +88,7 @@ struct UpdatesView: View {
                     if selectedTab == 0 {
                         await loadActivities()
                     } else {
-                        await loadFollowing()
+                        await loadFollowNotifications()
                     }
                 }
             }
@@ -110,13 +110,13 @@ struct UpdatesView: View {
         }
     }
     
-    private var emptyStateView: some View {
+    private var emptyActivityView: some View {
         VStack(spacing: 20) {
             Image(systemName: "bell.circle")
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            Text("No Updates Yet")
+            Text("No Activity Yet")
                 .font(.title2)
                 .fontWeight(.medium)
             
@@ -148,8 +148,10 @@ struct UpdatesView: View {
         isLoading = true
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
+            // Filter out follow notifications, keep only movie-related activities
+            let movieActivities = fetchedActivities.filter { $0.type != .userFollowed }
             await MainActor.run {
-                activities = fetchedActivities
+                activities = movieActivities
                 isLoading = false
             }
         } catch {
@@ -164,9 +166,10 @@ struct UpdatesView: View {
     private func loadActivitiesWithAnimation() async {
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
+            let movieActivities = fetchedActivities.filter { $0.type != .userFollowed }
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.3)) {
-                    activities = fetchedActivities
+                    activities = movieActivities
                 }
             }
         } catch {
@@ -181,7 +184,7 @@ struct UpdatesView: View {
         ScrollView {
             LazyVStack(spacing: 6) {
                 ForEach(0..<8, id: \.self) { _ in
-                    FollowingRowSkeleton()
+                    ActivityRowSkeleton()
                 }
             }
             .padding(.horizontal, 4)
@@ -195,11 +198,11 @@ struct UpdatesView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            Text("No Following Yet")
+            Text("No Followers Yet")
                 .font(.title2)
                 .fontWeight(.medium)
             
-            Text("Follow friends to see their movie rankings and comments here")
+            Text("When people follow you, they'll appear here")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -211,28 +214,50 @@ struct UpdatesView: View {
     private var followingListView: some View {
         ScrollView {
             LazyVStack(spacing: 6) {
-                ForEach(following) { user in
-                    FollowingRowView(user: user, store: store)
+                ForEach(followNotifications) { activity in
+                    ActivityRowView(activity: activity, store: store)
                 }
             }
             .padding(.horizontal, 4)
             .padding(.top, 4)
         }
+        .refreshable {
+            await loadFollowNotificationsWithAnimation()
+        }
     }
     
-    private func loadFollowing() async {
-        isLoadingFollowing = true
+    private func loadFollowNotifications() async {
+        isLoadingFollows = true
         do {
-            let fetchedFollowing = try await firestoreService.getFollowing()
+            let fetchedActivities = try await firestoreService.getFriendActivities()
+            // Filter to only follow notifications
+            let followActivities = fetchedActivities.filter { $0.type == .userFollowed }
             await MainActor.run {
-                following = fetchedFollowing
-                isLoadingFollowing = false
+                followNotifications = followActivities
+                isLoadingFollows = false
             }
         } catch {
             await MainActor.run {
                 errorMessage = store.handleError(error)
                 showError = true
-                isLoadingFollowing = false
+                isLoadingFollows = false
+            }
+        }
+    }
+    
+    private func loadFollowNotificationsWithAnimation() async {
+        do {
+            let fetchedActivities = try await firestoreService.getFriendActivities()
+            let followActivities = fetchedActivities.filter { $0.type == .userFollowed }
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    followNotifications = followActivities
+                }
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = store.handleError(error)
+                showError = true
             }
         }
     }
@@ -652,126 +677,6 @@ struct UserProfileFromIdView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
-    }
-}
-
-struct FollowingRowView: View {
-    let user: UserProfile
-    @ObservedObject var store: MovieStore
-    @StateObject private var firestoreService = FirestoreService()
-    @State private var showingUserProfile = false
-    @State private var isUnfollowing = false
-    @State private var moviesInCommon = 0
-    @State private var isLoadingMoviesInCommon = true
-    
-    var body: some View {
-        Button(action: {
-            showingUserProfile = true
-        }) {
-            HStack(spacing: 12) {
-                // Movie poster avatar
-                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("@\(user.username)")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    if isLoadingMoviesInCommon {
-                        Text("Loading...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    } else {
-                        Text("\(moviesInCommon) movies in common")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                // Unfollow button
-                Button(action: {
-                    Task {
-                        await unfollowUser()
-                    }
-                }) {
-                    HStack(spacing: 4) {
-                        if isUnfollowing {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                        Text("Unfollow")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.red, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(isUnfollowing)
-                .scaleEffect(isUnfollowing ? 0.95 : 1.0)
-                .animation(.easeInOut(duration: 0.1), value: isUnfollowing)
-                
-                Image(systemName: "chevron.right")
-                    .foregroundColor(.secondary)
-                    .font(.caption)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .onAppear {
-            Task {
-                await loadMoviesInCommon()
-            }
-        }
-        .sheet(isPresented: $showingUserProfile) {
-            FriendProfileView(userProfile: user, store: store)
-        }
-    }
-    
-    private func loadMoviesInCommon() async {
-        isLoadingMoviesInCommon = true
-        do {
-            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
-        } catch {
-            print("Error loading movies in common: \(error)")
-            moviesInCommon = 0
-        }
-        isLoadingMoviesInCommon = false
-    }
-    
-    private func unfollowUser() async {
-        await MainActor.run {
-            isUnfollowing = true
-        }
-        
-        do {
-            try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
-            print("FollowingRowView: Successfully unfollowed \(user.username)")
-            
-            // Post a notification to refresh the following list
-            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
-            
-            // Reset the loading state after a short delay to allow the UI to update
-            await MainActor.run {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    isUnfollowing = false
-                }
-            }
-        } catch {
-            print("Error unfollowing user: \(error)")
-            await MainActor.run {
-                isUnfollowing = false
-            }
-        }
     }
 }
 
