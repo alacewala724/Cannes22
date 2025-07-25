@@ -335,88 +335,133 @@ struct ActivityRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: activity.type == .userFollowed ? 0 : 8) {
-            HStack {
-                // User avatar placeholder - now tappable
-                Button(action: {
-                    showingUserProfile = true
-                }) {
-                    MoviePosterAvatar(
-                        userProfile: UserProfile(
-                            uid: activity.userId,
-                            username: activity.username
-                        ),
-                        size: 40,
-                        refreshID: activity.userId
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        if (activity.type == .movieRanked || activity.type == .movieUpdated) && activity.score != nil {
-                            // For rankings and updates, show the text with only the number colored
-                            (Text("\(activity.username) \(activity.type == .movieRanked ? "ranked" : "updated") \"\(activity.movieTitle)\" a ") +
-                            Text(String(format: "%.1f", activity.score!))
-                                .foregroundColor(activity.score != nil ? Color.adaptiveSentiment(for: activity.score!, colorScheme: colorScheme) : .primary))
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        } else {
+        Group {
+            if activity.type == .userFollowed {
+                // Compact layout for follow notifications
+                HStack {
+                    // User avatar placeholder - now tappable
+                    Button(action: {
+                        showingUserProfile = true
+                    }) {
+                        MoviePosterAvatar(
+                            userProfile: UserProfile(
+                                uid: activity.userId,
+                                username: activity.username
+                            ),
+                            size: 40,
+                            refreshID: activity.userId
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
                             Text(activity.displayText)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
+                            
+                            Spacer()
+                            
+                            // Time ago text for all notifications
+                            Text(activity.timeAgoText)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            // Follow back button for follow notifications (on the right)
+                            followBackButton
                         }
                         
-                        Spacer()
-                        
-                        // Time ago text for all notifications
-                        Text(activity.timeAgoText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        // Follow back button for follow notifications (on the right)
-                        if activity.type == .userFollowed {
-                            followBackButton
+                        if let comment = activity.comment, !comment.isEmpty {
+                            Text(comment)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 2)
                         }
                     }
                     
-                    if let comment = activity.comment, !comment.isEmpty {
-                        Text(comment)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                    }
+                    Spacer()
                 }
-                
-                Spacer()
-            }
-            
-            // Movie title button to view details - only show for movie-related activities
-            if let tmdbId = activity.tmdbId, activity.type != .userFollowed {
-                Button(action: {
-                    showingMovieDetail = true
-                }) {
+            } else {
+                // Full layout for movie-related activities
+                VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Image(systemName: "film")
-                            .foregroundColor(.accentColor)
+                        // User avatar placeholder - now tappable
+                        Button(action: {
+                            showingUserProfile = true
+                        }) {
+                            MoviePosterAvatar(
+                                userProfile: UserProfile(
+                                    uid: activity.userId,
+                                    username: activity.username
+                                ),
+                                size: 40,
+                                refreshID: activity.userId
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
                         
-                        Text(activity.movieTitle)
-                            .font(.custom("PlayfairDisplay-Medium", size: 14))
-                            .fontWeight(.medium)
-                            .foregroundColor(.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                if (activity.type == .movieRanked || activity.type == .movieUpdated) && activity.score != nil {
+                                    // For rankings and updates, show the text with only the number colored
+                                    (Text("\(activity.username) \(activity.type == .movieRanked ? "ranked" : "updated") \"\(activity.movieTitle)\" a ") +
+                                    Text(String(format: "%.1f", activity.score!))
+                                        .foregroundColor(activity.score != nil ? Color.adaptiveSentiment(for: activity.score!, colorScheme: colorScheme) : .primary))
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                } else {
+                                    Text(activity.displayText)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+                                
+                                Spacer()
+                                
+                                // Time ago text for all notifications
+                                Text(activity.timeAgoText)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            if let comment = activity.comment, !comment.isEmpty {
+                                Text(comment)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .padding(.top, 2)
+                            }
+                        }
                         
                         Spacer()
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
+                    
+                    // Movie title button to view details - only show for movie-related activities
+                    if let tmdbId = activity.tmdbId {
+                        Button(action: {
+                            showingMovieDetail = true
+                        }) {
+                            HStack {
+                                Image(systemName: "film")
+                                    .foregroundColor(.accentColor)
+                                
+                                Text(activity.movieTitle)
+                                    .font(.custom("PlayfairDisplay-Medium", size: 14))
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.accentColor)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 12)
