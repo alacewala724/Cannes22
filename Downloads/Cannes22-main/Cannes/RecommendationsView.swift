@@ -143,13 +143,7 @@ struct RecommendationsView: View {
     private var futureCannesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             if isLoadingFutureCannes {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading Future Cannes...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
+                futureCannesSkeletonView
             } else if futureCannesList.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "list.bullet.circle")
@@ -175,6 +169,16 @@ struct RecommendationsView: View {
                 }
             }
         }
+    }
+    
+    private var futureCannesSkeletonView: some View {
+        LazyVStack(spacing: UI.vGap) {
+            ForEach(0..<6, id: \.self) { index in
+                FutureCannesSkeletonRow(position: index + 1)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, UI.vGap)
     }
     
     private var futureCannesListView: some View {
@@ -267,6 +271,20 @@ struct RecommendationsView: View {
             isLoadingFutureCannes = true
         }
         
+        // Try to load from cache first
+        if let userId = AuthenticationService.shared.currentUser?.uid {
+            let cacheManager = CacheManager.shared
+            if let cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                await MainActor.run {
+                    print("DEBUG RecommendationsView: Loaded \(cachedItems.count) items from cache")
+                    futureCannesList = cachedItems
+                    isLoadingFutureCannes = false
+                }
+                return
+            }
+        }
+        
+        // Load from Firebase if no cache
         do {
             let firestoreService = FirestoreService()
             print("DEBUG RecommendationsView: About to call getFutureCannesList")
@@ -282,6 +300,11 @@ struct RecommendationsView: View {
                 print("DEBUG RecommendationsView: Setting futureCannesList with \(items.count) items")
                 futureCannesList = items
                 isLoadingFutureCannes = false
+                
+                // Cache the items
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    CacheManager.shared.cacheFutureCannes(items, userId: userId)
+                }
                 
                 // Debug: Print the computed filtered list
                 let filtered = filteredFutureCannesList
@@ -317,6 +340,15 @@ struct RecommendationsView: View {
                         do {
                             try await firestoreService.removeFromFutureCannes(itemId: matchingItem.id)
                             print("DEBUG: Successfully removed ranked movie \(personalMovie.title) from Future Cannes.")
+                            
+                            // Update cache by removing the item
+                            if let userId = AuthenticationService.shared.currentUser?.uid {
+                                let cacheManager = CacheManager.shared
+                                if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                                    cachedItems.removeAll { $0.id == matchingItem.id }
+                                    cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                                }
+                            }
                         } catch {
                             print("ERROR removing ranked movie \(personalMovie.title) from Future Cannes: \(error)")
                         }
@@ -335,6 +367,15 @@ struct RecommendationsView: View {
         do {
             let firestoreService = FirestoreService()
             try await firestoreService.removeFromFutureCannes(itemId: item.id)
+            
+            // Update cache by removing the item
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                let cacheManager = CacheManager.shared
+                if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                    cachedItems.removeAll { $0.id == item.id }
+                    cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                }
+            }
             
             // Reload the list
             await loadFutureCannesList()
@@ -580,22 +621,35 @@ struct SearchView: View {
             }
             
             // Check for duplicates in personal list (already ranked movies)
-            let personalMovies = store.getMovies()
-            print("DEBUG: Checking against \(personalMovies.count) personal movies")
+            let personalMovies = try await firestoreService.getUserRankings(userId: AuthenticationService.shared.currentUser?.uid ?? "")
+            print("DEBUG: Checking against \(personalMovies.count) personal movies from Firebase")
             for personalMovie in personalMovies {
                 print("DEBUG: Personal movie: \(personalMovie.title) with TMDB ID: \(personalMovie.tmdbId ?? -1)")
                 if personalMovie.tmdbId == tmdbMovie.id {
                     await MainActor.run {
                         showingDuplicateAlert = true
-                        duplicateAlertMessage = "You've already ranked this movie! Once you rank a movie, it moves from Future Cannes to your personal list."
+                        duplicateAlertMessage = "This movie is already in your personal list! Once you add a movie to your personal list, it cannot be added to Future Cannes."
                     }
-                    print("DEBUG: Movie already exists in personal rankings.")
+                    print("DEBUG: Movie already exists in personal list.")
                     return
                 }
             }
             
             try await firestoreService.addToFutureCannes(movie: tmdbMovie)
             print("DEBUG: Successfully added to Future Cannes")
+            
+            // Update cache by adding the new item
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                let cacheManager = CacheManager.shared
+                var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) ?? []
+                let newItem = FutureCannesItem(
+                    id: UUID().uuidString, // This should match the ID generated in FirestoreService
+                    movie: tmdbMovie,
+                    dateAdded: Date()
+                )
+                cachedItems.append(newItem)
+                cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+            }
             
             // Clear search and call callback
             await MainActor.run {
@@ -616,12 +670,6 @@ struct SearchView: View {
 }
 
 // MARK: - Future Cannes Components
-
-struct FutureCannesItem: Identifiable, Codable {
-    let id: String
-    let movie: TMDBMovie
-    let dateAdded: Date
-}
 
 struct FutureCannesRow: View {
     let item: FutureCannesItem
@@ -785,6 +833,55 @@ struct FutureCannesGridItem: View {
                 .offset(x: -6, y: 6)
                 .zIndex(2) // Ensure remove button is on top of everything
             }
+        }
+    }
+} 
+
+// MARK: - Skeleton Components
+
+struct FutureCannesSkeletonRow: View {
+    let position: Int
+    @State private var isAnimating = false
+    
+    var body: some View {
+        HStack(spacing: UI.vGap) {
+            // Position number skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 30, height: 18)
+                .opacity(isAnimating ? 0.6 : 0.3)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isAnimating)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                // Title skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(isAnimating ? 0.6 : 0.3)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true).delay(0.1), value: isAnimating)
+                
+                // Subtitle skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(height: 14)
+                    .frame(maxWidth: .infinity * 0.7, alignment: .leading)
+                    .opacity(isAnimating ? 0.6 : 0.3)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true).delay(0.2), value: isAnimating)
+            }
+            
+            Spacer()
+            
+            // Chevron skeleton
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: 44, height: 44)
+                .opacity(isAnimating ? 0.6 : 0.3)
+                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true).delay(0.3), value: isAnimating)
+        }
+        .listItem()
+        .onAppear {
+            isAnimating = true
         }
     }
 } 

@@ -149,6 +149,13 @@ struct MovieComparison: Codable {
     let loserId: UUID
 }
 
+// MARK: - Future Cannes Models
+struct FutureCannesItem: Identifiable, Codable {
+    let id: String
+    let movie: TMDBMovie
+    let dateAdded: Date
+}
+
 // MARK: - Movie Rating State
 enum MovieRatingState: String, Codable {
     case initialSentiment    // When user first selects a sentiment

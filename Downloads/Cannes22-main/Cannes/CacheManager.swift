@@ -16,6 +16,7 @@ class CacheManager: ObservableObject {
         static func globalMovieRatings() -> String { "global_movie_ratings" }
         static func globalTVRatings() -> String { "global_tv_ratings" }
         static func lastSync(userId: String) -> String { "last_sync_\(userId)" }
+        static func futureCannes(userId: String) -> String { "future_cannes_\(userId)" }
     }
     
     // MARK: - Personal Rankings Cache
@@ -61,6 +62,30 @@ class CacheManager: ObservableObject {
             return tvShows
         } catch {
             print("CacheManager: Failed to decode cached personal TV shows: \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - Future Cannes Cache
+    
+    func cacheFutureCannes(_ items: [FutureCannesItem], userId: String) {
+        do {
+            let data = try encoder.encode(items)
+            userDefaults.set(data, forKey: CacheKeys.futureCannes(userId: userId))
+            print("CacheManager: Cached \(items.count) Future Cannes items for user \(userId)")
+        } catch {
+            print("CacheManager: Failed to cache Future Cannes items: \(error)")
+        }
+    }
+    
+    func getCachedFutureCannes(userId: String) -> [FutureCannesItem]? {
+        guard let data = userDefaults.data(forKey: CacheKeys.futureCannes(userId: userId)) else { return nil }
+        do {
+            let items = try decoder.decode([FutureCannesItem].self, from: data)
+            print("CacheManager: Retrieved \(items.count) cached Future Cannes items for user \(userId)")
+            return items
+        } catch {
+            print("CacheManager: Failed to decode cached Future Cannes items: \(error)")
             return nil
         }
     }
@@ -113,6 +138,7 @@ class CacheManager: ObservableObject {
         userDefaults.removeObject(forKey: CacheKeys.personalMovies(userId: userId))
         userDefaults.removeObject(forKey: CacheKeys.personalTVShows(userId: userId))
         userDefaults.removeObject(forKey: CacheKeys.lastSync(userId: userId))
+        userDefaults.removeObject(forKey: CacheKeys.futureCannes(userId: userId))
         print("CacheManager: Cleared cache for user \(userId)")
     }
     
