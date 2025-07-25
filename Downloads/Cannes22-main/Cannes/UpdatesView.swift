@@ -335,7 +335,7 @@ struct ActivityRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: activity.type == .userFollowed ? 4 : 8) {
+        VStack(alignment: .leading, spacing: activity.type == .userFollowed ? 0 : 8) {
             HStack {
                 // User avatar placeholder - now tappable
                 Button(action: {
