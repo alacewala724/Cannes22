@@ -216,6 +216,7 @@ struct UpdatesView: View {
             LazyVStack(spacing: 0) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
+                        .padding(.vertical, 2) // Small padding between cards
                 }
             }
             .padding(.horizontal, 4)
@@ -382,7 +383,6 @@ struct FollowNotificationRow: View {
                 .frame(height: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .onAppear {
