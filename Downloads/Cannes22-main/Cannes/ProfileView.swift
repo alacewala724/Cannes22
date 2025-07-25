@@ -473,7 +473,7 @@ struct FollowerRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: follower, size: 50)
+                MoviePosterAvatar(userProfile: follower, size: 50, refreshID: follower.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(follower.username)")
@@ -719,7 +719,7 @@ struct ProfileFollowingRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: user, size: 50)
+                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.username)")
@@ -942,7 +942,7 @@ struct UserFollowerRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: follower, size: 50)
+                MoviePosterAvatar(userProfile: follower, size: 50, refreshID: follower.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(follower.username)")
@@ -1168,7 +1168,7 @@ struct UserFollowingRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Movie poster avatar
-                MoviePosterAvatar(userProfile: user, size: 50)
+                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(user.username)")
