@@ -102,10 +102,6 @@ struct UpdatesView: View {
         isLoading = true
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
-            print("UpdatesView: Loaded \(fetchedActivities.count) activities")
-            for (index, activity) in fetchedActivities.enumerated() {
-                print("UpdatesView: Activity \(index): \(activity.displayText) - Type: \(activity.type.rawValue)")
-            }
             await MainActor.run {
                 activities = fetchedActivities
                 isLoading = false
@@ -208,7 +204,7 @@ struct ActivityRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: activity.type == .userFollowed ? 4 : 8) {
             HStack {
                 // User avatar placeholder - now tappable
                 Button(action: {
@@ -242,13 +238,14 @@ struct ActivityRowView: View {
                         
                         Spacer()
                         
-                        // Follow back button for follow notifications
+                        // Time ago text for all notifications
+                        Text(activity.timeAgoText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        // Follow back button for follow notifications (on the right)
                         if activity.type == .userFollowed {
                             followBackButton
-                        } else {
-                            Text(activity.timeAgoText)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                     }
                     
@@ -257,13 +254,6 @@ struct ActivityRowView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.top, 2)
-                    }
-                    
-                    // Time ago text for follow notifications (moved below for better layout)
-                    if activity.type == .userFollowed {
-                        Text(activity.timeAgoText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
