@@ -213,7 +213,7 @@ struct UpdatesView: View {
     
     private var followingListView: some View {
         ScrollView {
-            LazyVStack(spacing: 2) {
+            LazyVStack(spacing: 0) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
                 }
@@ -379,7 +379,6 @@ struct FollowNotificationRow: View {
         .padding(.vertical, 4) // Reduced from 8 to 4 to make more compact
         .background(Color(.systemBackground))
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .onAppear {
             Task {
                 await checkFollowStatus()
