@@ -175,74 +175,117 @@ struct PersonalMovieGridItem: View {
     let position: Int
     let onTap: () -> Void
     @ObservedObject var store: MovieStore
+    let isEditing: Bool
     @Environment(\.colorScheme) private var colorScheme
     @State private var calculatingScore = false
     @State private var displayScore: Double = 0.0
     @State private var posterPath: String?
     @State private var isLoadingPoster = true
+    @State private var isRemoving = false
     
     var body: some View {
-        Button(action: onTap) {
-            ZStack(alignment: .topLeading) {
-                // Movie poster
-                AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
-                    switch phase {
-                    case .empty:
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(.systemGray5))
-                            .opacity(0.6)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure:
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(.systemGray5))
-                            .opacity(0.6)
-                    @unknown default:
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(.systemGray5))
-                            .opacity(0.6)
-                    }
+        ZStack(alignment: .topTrailing) {
+            // Main button for tapping
+            Button(action: {
+                if !isEditing {
+                    onTap()
                 }
-                .frame(height: 200)
-                .clipped()
-                .cornerRadius(0)
-                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-                
-                // Score bubble or goat
-                ZStack {
-                    // Aura effect for golden bubbles
-                    if position <= 5 && movie.score >= 9.0 {
+            }) {
+                ZStack(alignment: .topLeading) {
+                    // Movie poster
+                    AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
+                        switch phase {
+                        case .empty:
+                            RoundedRectangle(cornerRadius: 0)
+                                .fill(Color(.systemGray5))
+                                .opacity(0.6)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 0)
+                                .fill(Color(.systemGray5))
+                                .opacity(0.6)
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 0)
+                                .fill(Color(.systemGray5))
+                                .opacity(0.6)
+                        }
+                    }
+                    .frame(height: 200)
+                    .clipped()
+                    .cornerRadius(0)
+                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    
+                    // Score bubble or goat
+                    ZStack {
+                        // Aura effect for golden bubbles
+                        if position <= 5 && movie.score >= 9.0 {
+                            Circle()
+                                .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
+                                .frame(width: 40, height: 40)
+                                .blur(radius: 2)
+                        }
+                        
                         Circle()
-                            .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
-                            .frame(width: 40, height: 40)
-                            .blur(radius: 2)
+                            .fill(position <= 5 && movie.score >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
+                            .frame(width: 32, height: 32)
+                            .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                        
+                        if position == 1 {
+                            Text("🐐")
+                                .font(.title3)
+                        } else {
+                            Text(String(format: "%.1f", displayScore))
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(position <= 5 && movie.score >= 9.0 ? .black : .white)
+                        }
                     }
-                    
-                    Circle()
-                        .fill(position <= 5 && movie.score >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
-                        .frame(width: 32, height: 32)
-                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                    
-                    if position == 1 {
-                        Text("🐐")
-                            .font(.title3)
-                    } else {
-                        Text(String(format: "%.1f", displayScore))
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(position <= 5 && movie.score >= 9.0 ? .black : .white)
+                    .offset(x: 8, y: 8)
+                    .onAppear {
+                        startScoreAnimation()
+                        loadPosterPath()
                     }
-                }
-                .offset(x: 8, y: 8)
-                .onAppear {
-                    startScoreAnimation()
-                    loadPosterPath()
                 }
             }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(isEditing) // Disable main tap when editing
+            
+            // Delete button (only show in edit mode) - outside main button
+            if isEditing {
+                Button(action: {
+                    isRemoving = true
+                    // Delete this specific movie
+                    if let index = store.getMovies().firstIndex(where: { $0.id == movie.id }) {
+                        store.deleteMovies(at: IndexSet([index]))
+                    }
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 24, height: 24)
+                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        
+                        if isRemoving {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .foregroundColor(.white)
+                        } else {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isRemoving)
+                .offset(x: -6, y: 6) // Move to top-right corner
+                .zIndex(2) // Ensure delete button is on top of everything
+            }
         }
-        .buttonStyle(PlainButtonStyle())
     }
     
     private func loadPosterPath() {
@@ -306,6 +349,7 @@ struct PersonalMovieGridView: View {
     let movies: [Movie]
     let onTap: (Movie) -> Void
     @ObservedObject var store: MovieStore
+    let isEditing: Bool
     
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
@@ -316,7 +360,8 @@ struct PersonalMovieGridView: View {
                     onTap: {
                         onTap(movie)
                     },
-                    store: store
+                    store: store,
+                    isEditing: isEditing
                 )
             }
         }

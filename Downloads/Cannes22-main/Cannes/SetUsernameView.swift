@@ -85,6 +85,10 @@ struct SetUsernameView: View {
             
             await MainActor.run {
                 authService.username = username
+                // Cache the username locally
+                let userDefaults = UserDefaults.standard
+                userDefaults.set(username, forKey: "cached_username")
+                userDefaults.set(userId, forKey: "cached_user_id")
                 dismiss()
             }
         } catch {

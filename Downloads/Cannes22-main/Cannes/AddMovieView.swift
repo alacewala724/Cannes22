@@ -327,7 +327,7 @@ struct AddMovieView: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(Color.adaptiveSentiment(for: sentiment.midpoint, colorScheme: colorScheme).opacity(0.15))
+                        .background(sentiment.color.opacity(0.5))
                         .cornerRadius(12)
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -467,10 +467,36 @@ struct ComparisonView: View {
         let targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
         let sameSentimentMovies = targetList.filter { $0.sentiment == newMovie.sentiment }
         
+        print("DEBUG ComparisonView: Total movies in \(newMovie.mediaType == .movie ? "movies" : "tvShows") list: \(targetList.count)")
+        print("DEBUG ComparisonView: Movies with same sentiment (\(newMovie.sentiment.rawValue)): \(sameSentimentMovies.count)")
+        
         // If we're re-ranking, exclude the existing movie from comparisons
         if let existing = existingMovie {
-            return sameSentimentMovies.filter { $0.id != existing.id }
+            print("DEBUG ComparisonView: Re-ranking movie '\(existing.title)' with ID: \(existing.id)")
+            print("DEBUG ComparisonView: Existing movie TMDB ID: \(existing.tmdbId ?? -1)")
+            
+            let filteredMovies = sameSentimentMovies.filter { movie in
+                // Exclude by both UUID and TMDB ID to be safe
+                let differentId = movie.id != existing.id
+                let differentTmdbId = movie.tmdbId != existing.tmdbId
+                
+                // If either ID is different, include the movie
+                return differentId && (differentTmdbId || existing.tmdbId == nil || movie.tmdbId == nil)
+            }
+            
+            print("DEBUG ComparisonView: After filtering out existing movie: \(filteredMovies.count) movies")
+            
+            // Double-check that the existing movie is not in the list
+            let stillContainsExisting = filteredMovies.contains { movie in
+                movie.id == existing.id || movie.tmdbId == existing.tmdbId
+            }
+            if stillContainsExisting {
+                print("ERROR ComparisonView: Existing movie is still in the comparison list!")
+            }
+            
+            return filteredMovies
         } else {
+            print("DEBUG ComparisonView: New movie ranking, no existing movie to exclude")
             return sameSentimentMovies
         }
     }
@@ -526,7 +552,7 @@ struct ComparisonView: View {
             if let existing = existingMovie {
                 print("insertMovie: Re-ranking movie '\(existing.title)', deleting old rating first")
                 
-                // Remove the existing movie from the list
+                // Remove the existing movie from the list immediately
                 if existing.mediaType == .movie {
                     store.movies.removeAll { $0.id == existing.id }
                 } else {
@@ -551,6 +577,16 @@ struct ComparisonView: View {
                 let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
                 if existingMovie != nil {
                     print("insertMovie: Movie already exists with TMDB ID \(tmdbId), skipping completely")
+                    continuation.resume()
+                    return
+                }
+            }
+            
+            // For re-ranking, also check if the new movie would create a duplicate
+            if existingMovie != nil, let tmdbId = newMovie.tmdbId {
+                let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
+                if existingMovie != nil {
+                    print("insertMovie: Movie already exists with TMDB ID \(tmdbId) during re-ranking, skipping insertion")
                     continuation.resume()
                     return
                 }

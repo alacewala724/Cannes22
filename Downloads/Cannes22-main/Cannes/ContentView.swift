@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var showingFriendSearch = false
     @State private var selectedTab = 0
     @State private var showingGrid = false
+    @State private var showingMovieDetail: Movie?
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -61,19 +62,19 @@ struct ContentView: View {
                 }
                 .tag(1)
             
-            // Profile Tab
-            ProfileView()
-                .tabItem {
-                    Image(systemName: "person.circle")
-                    Text("Profile")
-                }
-                .tag(2)
-            
             // Recommendations Tab
             RecommendationsView(store: store)
                 .tabItem {
                     Image(systemName: "magnifyingglass")
                     Text("Recommendations")
+                }
+                .tag(2)
+            
+            // Profile Tab
+            ProfileView()
+                .tabItem {
+                    Image(systemName: "person.circle")
+                    Text("Profile")
                 }
                 .tag(3)
         }
@@ -89,6 +90,11 @@ struct ContentView: View {
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
                 UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: nil)
+            }
+        }
+        .sheet(item: $showingMovieDetail) { movie in
+            NavigationView {
+                UnifiedMovieDetailView(movie: movie, store: store)
             }
         }
         .alert("Error", isPresented: $store.showError) {
@@ -391,12 +397,10 @@ struct ContentView: View {
             movies: store.getMovies(),
             onTap: { movie in
                 // Handle movie tap - show detail view
-                if movie.tmdbId != nil {
-                    // For now, just print the movie title
-                    print("Tapped movie: \(movie.title)")
-                }
+                showingMovieDetail = movie
             },
-            store: store
+            store: store,
+            isEditing: isEditing
         )
     }
     

@@ -111,7 +111,7 @@ struct AddMovieFromGlobalView: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(Color.adaptiveSentiment(for: sentiment.midpoint, colorScheme: colorScheme).opacity(0.15))
+                        .background(sentiment.color.opacity(0.5))
                         .cornerRadius(12)
                     }
                     .buttonStyle(PlainButtonStyle())

@@ -22,6 +22,10 @@ class AuthenticationService: ObservableObject {
     // reCAPTCHA delegate
     private var recaptchaDelegate: PhoneAuthProviderDelegate?
     
+    // UserDefaults keys for username caching
+    private let usernameKey = "cached_username"
+    private let userIdKey = "cached_user_id"
+    
     private init() {
         // Firebase is now configured in AppDelegate
         
@@ -38,6 +42,9 @@ class AuthenticationService: ObservableObject {
         
         // Restore verification ID if app was terminated during phone auth
         restoreVerificationID()
+        
+        // Load cached username
+        loadCachedUsername()
         
         // Add a timeout for the auth state listener
         _ = Task {
@@ -80,6 +87,33 @@ class AuthenticationService: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Username Caching
+    
+    private func loadCachedUsername() {
+        let userDefaults = UserDefaults.standard
+        if let cachedUserId = userDefaults.string(forKey: userIdKey),
+           let cachedUsername = userDefaults.string(forKey: usernameKey),
+           let currentUser = auth.currentUser,
+           cachedUserId == currentUser.uid {
+            self.username = cachedUsername
+            print("AuthenticationService: Loaded cached username: \(cachedUsername)")
+        }
+    }
+    
+    private func cacheUsername(_ username: String, for userId: String) {
+        let userDefaults = UserDefaults.standard
+        userDefaults.set(username, forKey: usernameKey)
+        userDefaults.set(userId, forKey: userIdKey)
+        print("AuthenticationService: Cached username: \(username) for user: \(userId)")
+    }
+    
+    private func clearCachedUsername() {
+        let userDefaults = UserDefaults.standard
+        userDefaults.removeObject(forKey: usernameKey)
+        userDefaults.removeObject(forKey: userIdKey)
+        print("AuthenticationService: Cleared cached username")
     }
     
     // Helper method to determine if user is properly authenticated
@@ -158,14 +192,37 @@ class AuthenticationService: ObservableObject {
             if let username = document.data()?["username"] as? String {
                 await MainActor.run {
                     self.username = username
+                    // Cache the username locally
+                    self.cacheUsername(username, for: user.uid)
                 }
             } else {
-                await MainActor.run {
-                    self.username = nil
+                // If no username in Firestore, try to use cached username
+                let userDefaults = UserDefaults.standard
+                if let cachedUserId = userDefaults.string(forKey: userIdKey),
+                   let cachedUsername = userDefaults.string(forKey: usernameKey),
+                   cachedUserId == user.uid {
+                    await MainActor.run {
+                        self.username = cachedUsername
+                        print("AuthenticationService: Using cached username due to network issues")
+                    }
+                } else {
+                    await MainActor.run {
+                        self.username = nil
+                    }
                 }
             }
         } catch {
             print("Error ensuring user document: \(error.localizedDescription)")
+            // If Firestore fails, try to use cached username
+            let userDefaults = UserDefaults.standard
+            if let cachedUserId = userDefaults.string(forKey: userIdKey),
+               let cachedUsername = userDefaults.string(forKey: usernameKey),
+               cachedUserId == user.uid {
+                await MainActor.run {
+                    self.username = cachedUsername
+                    print("AuthenticationService: Using cached username due to Firestore error")
+                }
+            }
         }
     }
     
@@ -235,6 +292,7 @@ class AuthenticationService: ObservableObject {
         try Auth.auth().signOut()
         self.currentUser = nil
         self.isAuthenticated = false
+        clearCachedUsername()
     }
     
     func sendPasswordReset(email: String) async throws {
