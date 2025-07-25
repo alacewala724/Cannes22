@@ -213,10 +213,9 @@ struct UpdatesView: View {
     
     private var followingListView: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            LazyVStack(spacing: 2) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
-                        .padding(.vertical, 2) // Small padding between cards
                 }
             }
             .padding(.horizontal, 4)
@@ -335,56 +334,51 @@ struct FollowNotificationRow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                // User avatar
-                Button(action: {
-                    showingUserProfile = true
-                }) {
-                    MoviePosterAvatar(
-                        userProfile: UserProfile(
-                            uid: activity.userId,
-                            username: activity.username
-                        ),
-                        size: 40,
-                        refreshID: activity.userId
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(activity.displayText)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        
-                        Spacer()
-                        
-                        Text(activity.timeAgoText)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        followBackButton
-                    }
+        HStack(spacing: 12) {
+            // User avatar
+            Button(action: {
+                showingUserProfile = true
+            }) {
+                MoviePosterAvatar(
+                    userProfile: UserProfile(
+                        uid: activity.userId,
+                        username: activity.username
+                    ),
+                    size: 40,
+                    refreshID: activity.userId
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(activity.displayText)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                     
-                    if let comment = activity.comment, !comment.isEmpty {
-                        Text(comment)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                    }
+                    Spacer()
+                    
+                    Text(activity.timeAgoText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    followBackButton
                 }
                 
-                Spacer()
+                if let comment = activity.comment, !comment.isEmpty {
+                    Text(comment)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                }
             }
             
-            // Empty space to match the movie button height
             Spacer()
-                .frame(height: 0)
         }
         .padding(.horizontal, 12)
         .background(Color(.systemBackground))
         .cornerRadius(16)
+        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .onAppear {
             Task {
                 await checkFollowStatus()
