@@ -171,10 +171,4 @@ class ContactsService: ObservableObject {
             return digitsOnly
         }
     }
-    
-    func inviteContact(_ contact: ContactUser) {
-        // This would integrate with your existing follow system
-        // For now, we'll just show a success message
-        print("Inviting contact: \(contact.name)")
-    }
 } 

@@ -534,9 +534,6 @@ struct FriendSearchView: View {
                         onFollow: {
                             // This is now handled directly in ContactRow
                         },
-                        onInvite: {
-                            contactsService.inviteContact(contactUser)
-                        },
                         onTapProfile: {
                             if let userProfile = contactUser.userProfile {
                                 showingFriendProfile = userProfile

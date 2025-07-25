@@ -142,9 +142,6 @@ struct ContactsView: View {
                         onFollow: {
                             // This is now handled directly in ContactRow
                         },
-                        onInvite: {
-                            contactsService.inviteContact(contactUser)
-                        },
                         onTapProfile: {
                             if let userProfile = contactUser.userProfile {
                                 showingFriendProfile = userProfile
@@ -184,7 +181,6 @@ struct ContactsView: View {
 struct ContactRow: View {
     let contactUser: ContactUser
     let onFollow: () -> Void
-    let onInvite: () -> Void
     let onTapProfile: () -> Void
     @State private var isFollowing = false
     @State private var isLoadingFollowState = false
@@ -260,20 +256,8 @@ struct ContactRow: View {
                             onTapProfile()
                         }
                     }
-                } else {
-                    Button(action: onInvite) {
-                        Text("Invite")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.accentColor)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.accentColor, lineWidth: 1)
-                            )
-                    }
                 }
+                // Invite button removed - non-app users will just show contact info without action button
             }
         }
         .padding(.horizontal, 16)
