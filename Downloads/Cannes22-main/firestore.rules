@@ -61,7 +61,7 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
     
-    // �� Add this block for takes
+    // Add this block for takes
     match /takes/{movieId} {
       allow read, write: if request.auth != null;
       
@@ -71,16 +71,6 @@ service cloud.firestore {
         allow write, delete: if request.auth != null && 
           (resource == null || resource.data.userId == request.auth.uid);
       }
-    }
-    
-    // Activities collection for friend updates
-    match /activities/{activityId} {
-      // Users can read all activities (for following feed)
-      allow read: if request.auth != null;
-      
-      // Users can only create/update/delete their own activities
-      allow write, delete: if request.auth != null && 
-        (resource == null || resource.data.userId == request.auth.uid);
     }
   }
 } 
