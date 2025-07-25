@@ -368,8 +368,6 @@ struct FollowNotificationRow: View {
                 
                 followBackButton
             }
-            
-            Spacer()
         }
         .onAppear {
             Task {
