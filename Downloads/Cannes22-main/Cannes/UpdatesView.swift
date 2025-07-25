@@ -333,46 +333,52 @@ struct FollowNotificationRow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        HStack(spacing: 12) {
-            // User avatar
-            Button(action: {
-                showingUserProfile = true
-            }) {
-                MoviePosterAvatar(
-                    userProfile: UserProfile(
-                        uid: activity.userId,
-                        username: activity.username
-                    ),
-                    size: 40,
-                    refreshID: activity.userId
-                )
-            }
-            .buttonStyle(PlainButtonStyle())
-            
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(activity.displayText)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                // User avatar
+                Button(action: {
+                    showingUserProfile = true
+                }) {
+                    MoviePosterAvatar(
+                        userProfile: UserProfile(
+                            uid: activity.userId,
+                            username: activity.username
+                        ),
+                        size: 40,
+                        refreshID: activity.userId
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(activity.displayText)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Spacer()
+                        
+                        Text(activity.timeAgoText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        followBackButton
+                    }
                     
-                    Spacer()
-                    
-                    Text(activity.timeAgoText)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    followBackButton
+                    if let comment = activity.comment, !comment.isEmpty {
+                        Text(comment)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                    }
                 }
                 
-                if let comment = activity.comment, !comment.isEmpty {
-                    Text(comment)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                }
+                Spacer()
             }
             
+            // Empty space to match the movie button height
             Spacer()
+                .frame(height: 0)
         }
         .padding(.horizontal, 12)
         .background(Color(.systemBackground))
