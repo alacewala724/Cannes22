@@ -5,14 +5,17 @@ struct UpdatesView: View {
     @StateObject private var firestoreService = FirestoreService()
     @ObservedObject var store: MovieStore
     @State private var activities: [ActivityUpdate] = []
+    @State private var following: [UserProfile] = []
     @State private var isLoading = true
+    @State private var isLoadingFollowing = true
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var selectedTab = 0 // 0 for Activity, 1 for Following
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         NavigationView {
-            VStack {
+            VStack(spacing: 0) {
                 // Custom header with Playfair Display
                 HStack {
                     Text("Updates")
@@ -24,26 +27,69 @@ struct UpdatesView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 
-                if isLoading {
-                    loadingView
-                } else if activities.isEmpty {
-                    emptyStateView
+                // Segmented control for Activity/Following
+                Picker("View", selection: $selectedTab) {
+                    Text("Activity").tag(0)
+                    Text("Following").tag(1)
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                
+                // Content based on selected tab
+                if selectedTab == 0 {
+                    // Activity tab
+                    if isLoading {
+                        loadingView
+                    } else if activities.isEmpty {
+                        emptyStateView
+                    } else {
+                        activityFeedView
+                    }
                 } else {
-                    activityFeedView
+                    // Following tab
+                    if isLoadingFollowing {
+                        followingLoadingView
+                    } else if following.isEmpty {
+                        emptyFollowingView
+                    } else {
+                        followingListView
+                    }
                 }
             }
             .navigationBarHidden(true)
             .refreshable {
-                await loadActivities()
+                if selectedTab == 0 {
+                    await loadActivities()
+                } else {
+                    await loadFollowing()
+                }
             }
         }
         .task {
             await loadActivities()
+            await loadFollowing()
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            // Load data for the newly selected tab if needed
+            if newValue == 0 && activities.isEmpty {
+                Task {
+                    await loadActivities()
+                }
+            } else if newValue == 1 && following.isEmpty {
+                Task {
+                    await loadFollowing()
+                }
+            }
         }
         .alert("Error", isPresented: $showError) {
             Button("Retry") {
                 Task {
-                    await loadActivities()
+                    if selectedTab == 0 {
+                        await loadActivities()
+                    } else {
+                        await loadFollowing()
+                    }
                 }
             }
             Button("OK", role: .cancel) { }
@@ -127,6 +173,66 @@ struct UpdatesView: View {
             await MainActor.run {
                 errorMessage = store.handleError(error)
                 showError = true
+            }
+        }
+    }
+    
+    private var followingLoadingView: some View {
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                ForEach(0..<8, id: \.self) { _ in
+                    FollowingRowSkeleton()
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+        }
+    }
+    
+    private var emptyFollowingView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "person.2.slash")
+                .font(.system(size: 60))
+                .foregroundColor(.secondary)
+            
+            Text("No Following Yet")
+                .font(.title2)
+                .fontWeight(.medium)
+            
+            Text("Follow friends to see their movie rankings and comments here")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var followingListView: some View {
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                ForEach(following) { user in
+                    FollowingRowView(user: user, store: store)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+        }
+    }
+    
+    private func loadFollowing() async {
+        isLoadingFollowing = true
+        do {
+            let fetchedFollowing = try await firestoreService.getFollowing()
+            await MainActor.run {
+                following = fetchedFollowing
+                isLoadingFollowing = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = store.handleError(error)
+                showError = true
+                isLoadingFollowing = false
             }
         }
     }
@@ -546,6 +652,165 @@ struct UserProfileFromIdView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+}
+
+struct FollowingRowView: View {
+    let user: UserProfile
+    @ObservedObject var store: MovieStore
+    @StateObject private var firestoreService = FirestoreService()
+    @State private var showingUserProfile = false
+    @State private var isUnfollowing = false
+    @State private var moviesInCommon = 0
+    @State private var isLoadingMoviesInCommon = true
+    
+    var body: some View {
+        Button(action: {
+            showingUserProfile = true
+        }) {
+            HStack(spacing: 12) {
+                // Movie poster avatar
+                MoviePosterAvatar(userProfile: user, size: 50, refreshID: user.id.uuidString)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("@\(user.username)")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    if isLoadingMoviesInCommon {
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(moviesInCommon) movies in common")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                // Unfollow button
+                Button(action: {
+                    Task {
+                        await unfollowUser()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        if isUnfollowing {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                        Text("Unfollow")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.red, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isUnfollowing)
+                .scaleEffect(isUnfollowing ? 0.95 : 1.0)
+                .animation(.easeInOut(duration: 0.1), value: isUnfollowing)
+                
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            Task {
+                await loadMoviesInCommon()
+            }
+        }
+        .sheet(isPresented: $showingUserProfile) {
+            FriendProfileView(userProfile: user, store: store)
+        }
+    }
+    
+    private func loadMoviesInCommon() async {
+        isLoadingMoviesInCommon = true
+        do {
+            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+        } catch {
+            print("Error loading movies in common: \(error)")
+            moviesInCommon = 0
+        }
+        isLoadingMoviesInCommon = false
+    }
+    
+    private func unfollowUser() async {
+        await MainActor.run {
+            isUnfollowing = true
+        }
+        
+        do {
+            try await firestoreService.unfollowUser(userIdToUnfollow: user.uid)
+            print("FollowingRowView: Successfully unfollowed \(user.username)")
+            
+            // Post a notification to refresh the following list
+            NotificationCenter.default.post(name: .refreshFollowingList, object: nil)
+            
+            // Reset the loading state after a short delay to allow the UI to update
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isUnfollowing = false
+                }
+            }
+        } catch {
+            print("Error unfollowing user: \(error)")
+            await MainActor.run {
+                isUnfollowing = false
+            }
+        }
+    }
+}
+
+struct FollowingRowSkeleton: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar skeleton
+            Circle()
+                .fill(Color(.systemGray5))
+                .frame(width: 50, height: 50)
+                .opacity(0.6)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                // Username skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 120, height: 16)
+                    .opacity(0.6)
+                
+                // Movies in common skeleton
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 100, height: 12)
+                    .opacity(0.6)
+            }
+            
+            Spacer()
+            
+            // Unfollow button skeleton
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(.systemGray5))
+                .frame(width: 60, height: 32)
+                .opacity(0.6)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
     }
 }
 
