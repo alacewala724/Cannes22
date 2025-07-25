@@ -2355,9 +2355,26 @@ extension FirestoreService {
         allActivities.append(contentsOf: followActivities)
         allActivities.sort { $0.timestamp > $1.timestamp }
         
-        print("FirestoreService: Returning \(allActivities.count) total activities (\(allActivities.count - followActivities.count) friend activities + \(followActivities.count) follow activities)")
+        // Deduplicate follow notifications - keep only the most recent follow from each user
+        var deduplicatedActivities: [ActivityUpdate] = []
+        var seenFollowUsers: Set<String> = []
         
-        return Array(allActivities.prefix(limit))
+        for activity in allActivities {
+            if activity.type == .userFollowed {
+                // For follow notifications, only keep the most recent one from each user
+                if !seenFollowUsers.contains(activity.userId) {
+                    deduplicatedActivities.append(activity)
+                    seenFollowUsers.insert(activity.userId)
+                }
+            } else {
+                // For non-follow activities, keep all of them
+                deduplicatedActivities.append(activity)
+            }
+        }
+        
+        print("FirestoreService: Returning \(deduplicatedActivities.count) total activities (deduplicated from \(allActivities.count) total)")
+        
+        return Array(deduplicatedActivities.prefix(limit))
     }
     
     // Get community rating for a specific movie
