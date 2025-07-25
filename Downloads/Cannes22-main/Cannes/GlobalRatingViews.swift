@@ -797,16 +797,25 @@ struct UnifiedMovieDetailView: View {
         .sheet(isPresented: $showingReRankSheet) {
             if let tmdbId = displayTmdbId,
                let userScore = store.getUserPersonalScore(for: tmdbId) {
-                // Create a Movie object from the user's existing rating for re-ranking
-                let existingMovie = Movie(
-                    id: UUID(), // This will be replaced during the re-ranking process
-                    title: displayTitle,
-                    sentiment: sentimentFromScore(userScore),
-                    tmdbId: displayTmdbId,
-                    mediaType: displayMediaType,
-                    score: userScore
-                )
-                AddMovieView(store: store, existingMovie: existingMovie)
+                // Find the actual existing movie to get its real ID
+                let allMovies = store.getMovies()
+                let existingMovie = allMovies.first { $0.tmdbId == tmdbId }
+                
+                if let existingMovie = existingMovie {
+                    // Use the actual existing movie for re-ranking
+                    AddMovieView(store: store, existingMovie: existingMovie)
+                } else {
+                    // Fallback: create a new movie object if we can't find the existing one
+                    let fallbackMovie = Movie(
+                        id: UUID(), // This will be replaced during the re-ranking process
+                        title: displayTitle,
+                        sentiment: sentimentFromScore(userScore),
+                        tmdbId: displayTmdbId,
+                        mediaType: displayMediaType,
+                        score: userScore
+                    )
+                    AddMovieView(store: store, existingMovie: fallbackMovie)
+                }
             }
         }
     }

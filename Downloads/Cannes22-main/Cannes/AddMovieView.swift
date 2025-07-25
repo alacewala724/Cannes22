@@ -584,12 +584,9 @@ struct ComparisonView: View {
             
             // For re-ranking, also check if the new movie would create a duplicate
             if existingMovie != nil, let tmdbId = newMovie.tmdbId {
-                let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
-                if existingMovie != nil {
-                    print("insertMovie: Movie already exists with TMDB ID \(tmdbId) during re-ranking, skipping insertion")
-                    continuation.resume()
-                    return
-                }
+                // During re-ranking, we need to allow the movie to be re-inserted
+                // The old movie will be deleted first, so we don't need this duplicate check
+                print("insertMovie: Re-ranking movie with TMDB ID \(tmdbId), skipping duplicate check")
             }
             
             // Find the appropriate section for this sentiment
