@@ -64,6 +64,8 @@ struct ProfileView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
             Task {
+                // Clear the cache to force fresh data
+                firestoreService.clearCurrentUserFollowingCache()
                 await loadProfileData()
             }
         }
@@ -606,6 +608,10 @@ struct ProfileFollowingListView: View {
             currentFollowing = following
             isLoading = false
         }
+        .onChange(of: following) { _, newFollowing in
+            // Update currentFollowing when parent data changes
+            currentFollowing = newFollowing
+        }
         .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
             Task {
                 await reloadFollowingData()
@@ -673,6 +679,8 @@ struct ProfileFollowingListView: View {
     private func reloadFollowingData() async {
         isLoading = true
         do {
+            // Clear the cache to force fresh data
+            firestoreService.clearCurrentUserFollowingCache()
             // Reload the following data from Firestore
             let updatedFollowing = try await firestoreService.getFollowing()
             await MainActor.run {
