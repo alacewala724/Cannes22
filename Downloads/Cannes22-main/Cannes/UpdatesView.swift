@@ -221,6 +221,7 @@ struct UpdatesView: View {
                         }
                 }
             }
+            .padding(.horizontal, 0)
         }
         .refreshable {
             await loadFollowNotificationsWithAnimation()
@@ -369,6 +370,11 @@ struct FollowNotificationRow: View {
                 followBackButton
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 0)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .onAppear {
             Task {
                 await checkFollowStatus()
