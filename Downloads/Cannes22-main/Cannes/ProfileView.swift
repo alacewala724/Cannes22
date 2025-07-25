@@ -22,6 +22,7 @@ struct ProfileView: View {
     @State private var showingUserFollowing: UserProfile?
     @State private var showingSettings = false
     @State private var posterRefreshID = UUID().uuidString
+    @State private var followingRefreshID = UUID().uuidString
     
     var body: some View {
         NavigationView {
@@ -67,6 +68,8 @@ struct ProfileView: View {
                 // Clear the cache to force fresh data
                 firestoreService.clearCurrentUserFollowingCache()
                 await loadProfileData()
+                // Update the refresh ID to trigger child view updates
+                followingRefreshID = UUID().uuidString
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("refreshProfile"))) { _ in
@@ -79,7 +82,7 @@ struct ProfileView: View {
             FollowersListView(followers: followers)
         }
         .sheet(isPresented: $showingFollowing) {
-            ProfileFollowingListView(following: following)
+            ProfileFollowingListView(following: following, refreshID: followingRefreshID)
         }
         .sheet(item: $showingUserFollowers) { user in
             UserFollowersListView(user: user)
@@ -574,6 +577,7 @@ struct FollowerRow: View {
 
 struct ProfileFollowingListView: View {
     let following: [UserProfile]
+    let refreshID: String
     @Environment(\.dismiss) private var dismiss
     @StateObject private var firestoreService = FirestoreService()
     @State private var showingUserProfile: UserProfile?
@@ -608,9 +612,9 @@ struct ProfileFollowingListView: View {
             currentFollowing = following
             isLoading = false
         }
-        .onChange(of: following) { _, newFollowing in
-            // Update currentFollowing when parent data changes
-            currentFollowing = newFollowing
+        .onChange(of: refreshID) { _, _ in
+            // Update currentFollowing when parent data changes (triggered by refreshID change)
+            currentFollowing = following
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshFollowingList)) { _ in
             Task {
