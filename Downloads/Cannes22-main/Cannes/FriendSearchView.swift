@@ -58,7 +58,30 @@ struct FriendSearchView: View {
             .navigationBarBackButtonHidden(true)
         }
         .sheet(item: $showingFriendProfile) { profile in
-            FriendProfileView(userProfile: profile, store: store)
+            // Validate profile before showing
+            if profile.isValid {
+                FriendProfileView(userProfile: profile, store: store)
+            } else {
+                // Show error view for invalid profile
+                VStack {
+                    Text("Invalid User Data")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.red)
+                    
+                    Text("This user's profile contains invalid data and cannot be displayed.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    
+                    Button("OK") {
+                        showingFriendProfile = nil
+                    }
+                    .padding()
+                }
+                .padding()
+            }
         }
         .sheet(isPresented: $showingContacts) {
             ContactsView(store: store)
@@ -212,8 +235,25 @@ struct FriendSearchView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(searchResults, id: \.uid) { user in
-                    UserSearchRow(user: user) {
-                        showingFriendProfile = user
+                    // Additional safety check for display
+                    if user.isValid {
+                        UserSearchRow(user: user) {
+                            showingFriendProfile = user
+                        }
+                    } else {
+                        // Fallback for invalid users
+                        HStack {
+                            Text("@Unknown User")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("Invalid Data")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
                 }
             }
@@ -274,8 +314,17 @@ struct FriendSearchView: View {
                 try await firestoreService.searchUsersByUsername(query: query)
             }
             
+            // Validate and filter results
+            let validatedResults = results.compactMap { (user: UserProfile) -> UserProfile? in
+                guard user.isValid else {
+                    print("FriendSearchView: Filtering out invalid user profile: \(user.uid)")
+                    return nil
+                }
+                return user
+            }
+            
             await MainActor.run {
-                searchResults = results
+                searchResults = validatedResults
                 isSearching = false
                 retryCount = 0
                 networkError = nil
@@ -299,6 +348,29 @@ struct FriendSearchView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - User Data Validation Helpers
+    
+    /// Safely creates a UserProfile from Firestore data with validation
+    private func createValidatedUserProfile(from document: [String: Any], documentId: String) -> UserProfile? {
+        return UserProfile.fromFirestoreDocument(document, documentId: documentId)
+    }
+    
+    /// Filters and validates a list of user profiles
+    private func validateUserProfiles(_ profiles: [UserProfile]) -> [UserProfile] {
+        return profiles.compactMap { (user: UserProfile) -> UserProfile? in
+            guard user.isValid else {
+                print("FriendSearchView: Invalid user profile filtered out: \(user.uid)")
+                return nil
+            }
+            return user
+        }
+    }
+    
+    /// Creates a safe fallback user profile
+    private func createFallbackUserProfile(uid: String) -> UserProfile {
+        return UserProfile.createSafeProfile(uid: uid, username: "Unknown User")
     }
     
     private func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async throws -> T) async throws -> T {
@@ -562,7 +634,7 @@ struct UserSearchRow: View {
                     )
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("@\(user.username)")
+                    Text("@\(user.safeDisplayName)")
                         .font(.headline)
                         .foregroundColor(.primary)
                 }
@@ -644,6 +716,15 @@ struct UserSearchRow: View {
             return
         }
         
+        // Validate user profile before proceeding
+        guard user.validateForOperation("follow/unfollow") else {
+            await MainActor.run {
+                networkError = "Invalid user data. Please try again."
+                showNetworkError = true
+            }
+            return
+        }
+        
         // Check network connectivity before making the request
         guard networkMonitor.isConnected else {
             await MainActor.run {
@@ -711,22 +792,6 @@ struct UserSearchRow: View {
         }
     }
     
-    private func handleSearchError(_ error: Error) -> String {
-        let nsError = error as NSError
-        switch nsError.code {
-        case NSURLErrorNotConnectedToInternet:
-            return "No internet connection. Please check your network and try again."
-        case NSURLErrorTimedOut:
-            return "Request timed out. Please try again."
-        case NSURLErrorCannotConnectToHost:
-            return "Cannot connect to server. Please try again later."
-        case NSURLErrorNetworkConnectionLost:
-            return "Network connection lost. Please check your connection."
-        default:
-            return "Failed to search users. Please try again."
-        }
-    }
-    
     private func retryFollowOperation() async {
         await toggleFollowStatus()
     }
@@ -745,6 +810,29 @@ struct UserSearchRow: View {
         default:
             return "Failed to update follow status. Please try again."
         }
+    }
+    
+    // MARK: - User Data Validation Helpers
+    
+    /// Safely creates a UserProfile from Firestore data with validation
+    private func createValidatedUserProfile(from document: [String: Any], documentId: String) -> UserProfile? {
+        return UserProfile.fromFirestoreDocument(document, documentId: documentId)
+    }
+    
+    /// Filters and validates a list of user profiles
+    private func validateUserProfiles(_ profiles: [UserProfile]) -> [UserProfile] {
+        return profiles.compactMap { (user: UserProfile) -> UserProfile? in
+            guard user.isValid else {
+                print("FriendSearchView: Invalid user profile filtered out: \(user.uid)")
+                return nil
+            }
+            return user
+        }
+    }
+    
+    /// Creates a safe fallback user profile
+    private func createFallbackUserProfile(uid: String) -> UserProfile {
+        return UserProfile.createSafeProfile(uid: uid, username: "Unknown User")
     }
 }
 
@@ -779,7 +867,30 @@ struct FollowingListView: View {
             }
         }
         .sheet(item: $showingUserProfile) { profile in
-            FriendProfileView(userProfile: profile, store: store)
+            // Validate profile before showing
+            if profile.isValid {
+                FriendProfileView(userProfile: profile, store: store)
+            } else {
+                // Show error view for invalid profile
+                VStack {
+                    Text("Invalid User Data")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.red)
+                    
+                    Text("This user's profile contains invalid data and cannot be displayed.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    
+                    Button("OK") {
+                        showingUserProfile = nil
+                    }
+                    .padding()
+                }
+                .padding()
+            }
         }
         .alert("Network Error", isPresented: $showNetworkError) {
             Button("Retry") {
@@ -848,8 +959,30 @@ struct FollowingListView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(following, id: \.uid) { user in
-                    FollowingRow(user: user, moviesInCommon: moviesInCommon[user.uid] ?? 0) {
-                        showingUserProfile = user
+                    // Additional safety check for display
+                    if user.isValid {
+                        FollowingRow(user: user, moviesInCommon: moviesInCommon[user.uid] ?? 0) {
+                            showingUserProfile = user
+                        }
+                    } else {
+                        // Fallback for invalid users
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("@Unknown User")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                Text("0 movies in common")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text("Invalid Data")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
                 }
             }
@@ -872,7 +1005,17 @@ struct FollowingListView: View {
         // Check if we have cached data first
         if let cachedData = firestoreService.getCachedFollowing(for: Auth.auth().currentUser?.uid ?? "") {
             print("FollowingListView: Using cached data for current user")
-            following = cachedData
+            
+            // Validate cached data
+            let validatedFollowing = cachedData.compactMap { (user: UserProfile) -> UserProfile? in
+                guard user.isValid else {
+                    print("FollowingListView: Filtering out invalid cached user: \(user.uid)")
+                    return nil
+                }
+                return user
+            }
+            
+            following = validatedFollowing
             
             // Calculate movies in common for each followed user
             for user in following {
@@ -893,7 +1036,18 @@ struct FollowingListView: View {
         // Only show loading if we need to fetch fresh data
         isLoading = true
         do {
-            following = try await firestoreService.getFollowing()
+            let rawFollowing = try await firestoreService.getFollowing()
+            
+            // Validate fetched data
+            let validatedFollowing = rawFollowing.compactMap { (user: UserProfile) -> UserProfile? in
+                guard user.isValid else {
+                    print("FollowingListView: Filtering out invalid user from server: \(user.uid)")
+                    return nil
+                }
+                return user
+            }
+            
+            following = validatedFollowing
             
             // Calculate movies in common for each followed user
             for user in following {
@@ -1018,7 +1172,7 @@ struct FollowingRow: View {
                     )
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("@\(user.username)")
+                    Text("@\(user.safeDisplayName)")
                         .font(.headline)
                         .foregroundColor(.primary)
                     
@@ -1100,6 +1254,15 @@ struct FollowingRow: View {
         // Prevent concurrent operations
         guard !pendingUnfollow else {
             print("unfollowUser: Operation already in progress, ignoring tap")
+            return
+        }
+        
+        // Validate user profile before proceeding
+        guard user.validateForOperation("unfollow") else {
+            await MainActor.run {
+                networkError = "Invalid user data. Please try again."
+                showNetworkError = true
+            }
             return
         }
         
@@ -1197,7 +1360,16 @@ struct FollowingRow: View {
             print("followUser: Operation already in progress, ignoring tap")
             return
         }
-
+        
+        // Validate user profile before proceeding
+        guard user.validateForOperation("follow") else {
+            await MainActor.run {
+                networkError = "Invalid user data. Please try again."
+                showNetworkError = true
+            }
+            return
+        }
+        
         // Check network connectivity before making the request
         guard networkMonitor.isConnected else {
             await MainActor.run {
@@ -1263,6 +1435,109 @@ struct UserProfile: Identifiable {
         self.phoneNumber = phoneNumber
         self.movieCount = movieCount
         self.createdAt = createdAt
+    }
+    
+    // MARK: - Validation Methods
+    
+    /// Validates if the user profile has required fields
+    var isValid: Bool {
+        return !uid.isEmpty && !username.isEmpty
+    }
+    
+    /// Validates if the username is properly formatted
+    var hasValidUsername: Bool {
+        let usernameRegex = "^[a-zA-Z0-9_]{3,20}$"
+        return username.range(of: usernameRegex, options: .regularExpression) != nil
+    }
+    
+    /// Validates if the email is properly formatted (if present)
+    var hasValidEmail: Bool {
+        guard let email = email, !email.isEmpty else { return true }
+        let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+        return email.range(of: emailRegex, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+    
+    /// Validates if the phone number is properly formatted (if present)
+    var hasValidPhoneNumber: Bool {
+        guard let phoneNumber = phoneNumber, !phoneNumber.isEmpty else { return true }
+        let phoneRegex = "^\\+?[1-9]\\d{1,14}$"
+        return phoneNumber.range(of: phoneRegex, options: .regularExpression) != nil
+    }
+    
+    /// Returns a sanitized username for display
+    var displayUsername: String {
+        let sanitized = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitized.isEmpty ? "Unknown User" : sanitized
+    }
+    
+    /// Returns a safe display name with fallback
+    var safeDisplayName: String {
+        if !isValid {
+            return "Unknown User"
+        }
+        return displayUsername
+    }
+    
+    /// Returns a safe movie count with fallback
+    var safeMovieCount: Int {
+        return movieCount ?? 0
+    }
+    
+    /// Creates a UserProfile from Firestore document with validation
+    static func fromFirestoreDocument(_ document: [String: Any], documentId: String) -> UserProfile? {
+        // Validate required fields
+        guard let username = document["username"] as? String,
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("UserProfile validation failed: Invalid or missing username for document \(documentId)")
+            return nil
+        }
+        
+        // Extract and validate optional fields
+        let email = document["email"] as? String
+        let phoneNumber = document["phoneNumber"] as? String
+        let movieCount = document["movieCount"] as? Int
+        let createdAt = document["createdAt"] as? Timestamp
+        
+        // Create profile with validation
+        let profile = UserProfile(
+            uid: documentId,
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+            email: email?.trimmingCharacters(in: .whitespacesAndNewlines),
+            phoneNumber: phoneNumber?.trimmingCharacters(in: .whitespacesAndNewlines),
+            movieCount: movieCount,
+            createdAt: createdAt?.dateValue()
+        )
+        
+        // Additional validation
+        guard profile.isValid else {
+            print("UserProfile validation failed: Invalid profile data for document \(documentId)")
+            return nil
+        }
+        
+        return profile
+    }
+    
+    /// Creates a safe UserProfile with fallback values
+    static func createSafeProfile(uid: String, username: String) -> UserProfile {
+        return UserProfile(
+            uid: uid.isEmpty ? "unknown" : uid,
+            username: username.isEmpty ? "Unknown User" : username
+        )
+    }
+    
+    /// Validates user data before performing operations
+    func validateForOperation(_ operation: String) -> Bool {
+        guard isValid else {
+            print("UserProfile: Cannot perform \(operation) - invalid user profile: \(uid)")
+            return false
+        }
+        
+        guard hasValidUsername else {
+            print("UserProfile: Cannot perform \(operation) - invalid username format: \(username)")
+            return false
+        }
+        
+        return true
     }
 }
 
