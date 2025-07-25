@@ -583,15 +583,12 @@ struct ProfileFollowingListView: View {
     @State private var showingUserProfile: UserProfile?
     @State private var showingUserFollowers: UserProfile?
     @State private var showingUserFollowing: UserProfile?
-    @State private var isLoading = true
     @State private var currentFollowing: [UserProfile] = []
     
     var body: some View {
         NavigationView {
             VStack {
-                if isLoading {
-                    loadingView
-                } else if currentFollowing.isEmpty {
+                if currentFollowing.isEmpty {
                     emptyStateView
                 } else {
                     followingList
@@ -610,7 +607,6 @@ struct ProfileFollowingListView: View {
         .task {
             // Initialize with the passed data
             currentFollowing = following
-            isLoading = false
         }
         .onChange(of: refreshID) { _, _ in
             // Update currentFollowing when parent data changes (triggered by refreshID change)
@@ -629,18 +625,6 @@ struct ProfileFollowingListView: View {
         }
         .sheet(item: $showingUserFollowing) { user in
             UserFollowingListView(user: user)
-        }
-    }
-    
-    private var loadingView: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                ForEach(0..<6, id: \.self) { _ in
-                    ProfileFollowingRowSkeleton()
-                }
-            }
-            .padding(.horizontal)
-            .padding(.top)
         }
     }
     
