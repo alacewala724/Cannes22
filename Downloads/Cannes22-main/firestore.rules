@@ -72,5 +72,15 @@ service cloud.firestore {
           (resource == null || resource.data.userId == request.auth.uid);
       }
     }
+    
+    // Global activities collection for friend updates and follow notifications
+    match /activities/{activityId} {
+      // Users can read all activities (for following feed and follow notifications)
+      allow read: if request.auth != null;
+      
+      // Users can only create/update/delete their own activities
+      allow write, delete: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid);
+    }
   }
 } 
