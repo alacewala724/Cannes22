@@ -211,7 +211,8 @@ struct ActivityRowView: View {
                             uid: activity.userId,
                             username: activity.username
                         ),
-                        size: 40
+                        size: 40,
+                        refreshID: activity.userId
                     )
                 }
                 .buttonStyle(PlainButtonStyle())

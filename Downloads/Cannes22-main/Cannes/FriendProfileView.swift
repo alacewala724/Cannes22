@@ -89,7 +89,7 @@ struct FriendProfileView: View {
     private var profileHeader: some View {
         VStack(spacing: 16) {
             // Movie poster avatar for friend
-            MoviePosterAvatar(userProfile: userProfile, size: 80)
+            MoviePosterAvatar(userProfile: userProfile, size: 80, refreshID: userProfile.id.uuidString)
             
             // Username
             Text("@\(userProfile.username)")
