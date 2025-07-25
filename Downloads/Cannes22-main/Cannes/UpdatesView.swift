@@ -213,7 +213,7 @@ struct UpdatesView: View {
     
     private var followingListView: some View {
         ScrollView {
-            VStack(spacing: 0) {
+            VStack(spacing: 4) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
                         .onAppear {
@@ -339,19 +339,19 @@ struct FollowNotificationRow: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        HStack(spacing: 0) {
-            // Simple circular avatar instead of MoviePosterAvatar
+        HStack(spacing: 8) {
+            // Movie poster avatar
             Button(action: {
                 showingUserProfile = true
             }) {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.2))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(String(activity.username.prefix(1)).uppercased())
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.accentColor)
-                    )
+                MoviePosterAvatar(
+                    userProfile: UserProfile(
+                        uid: activity.userId,
+                        username: activity.username
+                    ),
+                    size: 40,
+                    refreshID: activity.userId
+                )
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -371,7 +371,7 @@ struct FollowNotificationRow: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 0)
+        .padding(.vertical, 8)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
