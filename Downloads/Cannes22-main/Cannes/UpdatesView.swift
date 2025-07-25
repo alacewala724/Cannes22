@@ -349,7 +349,7 @@ struct FollowNotificationRow: View {
             }
             .buttonStyle(PlainButtonStyle())
             
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text(activity.displayText)
                         .font(.subheadline)
