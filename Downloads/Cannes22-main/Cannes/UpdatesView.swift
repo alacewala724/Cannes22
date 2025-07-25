@@ -215,7 +215,7 @@ struct UpdatesView: View {
         ScrollView {
             LazyVStack(spacing: 2) {
                 ForEach(followNotifications) { activity in
-                    ActivityRowView(activity: activity, store: store)
+                    FollowNotificationRow(activity: activity, store: store)
                 }
             }
             .padding(.horizontal, 4)
@@ -320,6 +320,139 @@ struct ActivityRowSkeleton: View {
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
         .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: true)
+    }
+}
+
+struct FollowNotificationRow: View {
+    let activity: ActivityUpdate
+    @ObservedObject var store: MovieStore
+    @StateObject private var firestoreService = FirestoreService()
+    @State private var showingUserProfile = false
+    @State private var isFollowing = false
+    @State private var isLoadingFollowState = false
+    @State private var isUpdatingFollowStatus = false
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // User avatar
+            Button(action: {
+                showingUserProfile = true
+            }) {
+                MoviePosterAvatar(
+                    userProfile: UserProfile(
+                        uid: activity.userId,
+                        username: activity.username
+                    ),
+                    size: 40,
+                    refreshID: activity.userId
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(activity.displayText)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Text(activity.timeAgoText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    followBackButton
+                }
+                
+                if let comment = activity.comment, !comment.isEmpty {
+                    Text(comment)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
+        .onAppear {
+            Task {
+                await checkFollowStatus()
+            }
+        }
+        .sheet(isPresented: $showingUserProfile) {
+            UserProfileFromIdView(userId: activity.userId, store: store)
+        }
+    }
+    
+    private var followBackButton: some View {
+        Group {
+            if isLoadingFollowState {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .foregroundColor(.red)
+            } else if isUpdatingFollowStatus {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .foregroundColor(isFollowing ? .red : .accentColor)
+            } else {
+                Button(action: {
+                    Task {
+                        await toggleFollowStatus()
+                    }
+                }) {
+                    Text(isFollowing ? "Unfollow" : "Follow Back")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(isFollowing ? .red : .accentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isFollowing ? Color.red : Color.accentColor, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isUpdatingFollowStatus)
+                .opacity(isUpdatingFollowStatus ? 0.7 : 1.0)
+                .animation(.easeInOut(duration: 0.2), value: isUpdatingFollowStatus)
+            }
+        }
+    }
+    
+    private func checkFollowStatus() async {
+        isLoadingFollowState = true
+        do {
+            isFollowing = try await firestoreService.isFollowing(userId: activity.userId)
+        } catch {
+            print("Error checking follow status: \(error)")
+        }
+        isLoadingFollowState = false
+    }
+    
+    private func toggleFollowStatus() async {
+        isUpdatingFollowStatus = true
+        
+        do {
+            if isFollowing {
+                try await firestoreService.unfollowUser(userIdToUnfollow: activity.userId)
+            } else {
+                try await firestoreService.followUser(userIdToFollow: activity.userId)
+            }
+            
+            // Update the follow state
+            isFollowing.toggle()
+        } catch {
+            print("Error toggling follow status: \(error)")
+            // Don't toggle state on error - keep the original state
+        }
+        
+        isUpdatingFollowStatus = false
     }
 }
 
