@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authService: AuthenticationService
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var firestoreService = FirestoreService()
     
     @State private var currentPassword = ""
     @State private var newPassword = ""
@@ -45,6 +46,9 @@ struct SettingsView: View {
     @State private var selectedCountry = CountryCode.popular[0]
     @State private var showingCountryPicker = false
     @State private var isWaitingForPhoneSMS = false
+    
+    @State private var isUpdatingMyPoster = false
+    @State private var posterUpdateMessage: String?
     
     var body: some View {
         NavigationView {
@@ -445,6 +449,38 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(isChangingUsername || newUsername.isEmpty || isCheckingUsername)
+                        
+                        Divider()
+                        
+                        // Update current user's movie poster
+                        VStack(spacing: 8) {
+                            Text("Update My Movie Poster")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            
+                            Text("Refresh your profile's movie poster based on your current top movie")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                            
+                            Button(action: updateMyMoviePoster) {
+                                HStack {
+                                    if isUpdatingMyPoster {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                    }
+                                    Text("Update Poster")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isUpdatingMyPoster)
+                            
+                            if let posterUpdateMessage = posterUpdateMessage {
+                                Text(posterUpdateMessage)
+                                    .font(.caption)
+                                    .foregroundColor(posterUpdateMessage.contains("Error") ? .red : .green)
+                            }
+                        }
                     }
                     .padding(.vertical, 8)
                 }
@@ -758,6 +794,28 @@ struct SettingsView: View {
                 await MainActor.run {
                     phoneLinkErrorMessage = error.localizedDescription
                     isUnlinkingPhone = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Profile Functions
+    
+    private func updateMyMoviePoster() {
+        isUpdatingMyPoster = true
+        posterUpdateMessage = nil
+        
+        Task {
+            do {
+                try await firestoreService.updateCurrentUserTopMoviePoster()
+                await MainActor.run {
+                    posterUpdateMessage = "Your movie poster updated successfully!"
+                    isUpdatingMyPoster = false
+                }
+            } catch {
+                await MainActor.run {
+                    posterUpdateMessage = "Error updating poster: \(error.localizedDescription)"
+                    isUpdatingMyPoster = false
                 }
             }
         }

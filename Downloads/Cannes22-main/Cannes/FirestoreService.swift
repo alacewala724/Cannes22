@@ -1147,11 +1147,16 @@ extension FirestoreService {
             }
             
             // Update the user's profile with the top movie poster path
+            var data: [String: Any]
+            if let posterPath = posterPath {
+                data = ["topMoviePosterPath": posterPath]
+            } else {
+                // Remove the field if no poster path exists
+                data = ["topMoviePosterPath": FieldValue.delete()]
+            }
             try await db.collection("users")
                 .document(userId)
-                .updateData([
-                    "topMoviePosterPath": posterPath as Any
-                ])
+                .updateData(data)
             
             print("updateUserTopMoviePoster: Successfully updated user profile with top movie poster")
             
@@ -2718,5 +2723,16 @@ extension FirestoreService {
         } catch {
             print("updateAllUsersTopMoviePosters: Error getting users: \(error)")
         }
+    }
+    
+    // Update current user's top movie poster (safe for regular users)
+    func updateCurrentUserTopMoviePoster() async throws {
+        guard let currentUser = Auth.auth().currentUser else {
+            throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        print("updateCurrentUserTopMoviePoster: Starting for current user \(currentUser.uid)")
+        try await updateUserTopMoviePoster(userId: currentUser.uid)
+        print("updateCurrentUserTopMoviePoster: Completed successfully")
     }
 } 
