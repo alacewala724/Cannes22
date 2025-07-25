@@ -213,7 +213,7 @@ struct UpdatesView: View {
     
     private var followingListView: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            VStack(spacing: 0) {
                 ForEach(followNotifications) { activity in
                     FollowNotificationRow(activity: activity, store: store)
                         .onAppear {
