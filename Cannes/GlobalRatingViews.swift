@@ -630,7 +630,7 @@ struct UnifiedMovieDetailView: View {
     
     private var displayAverageRating: Double? {
         if let rating = initialRating {
-            return rating.confidenceAdjustedScore
+            return rating.averageRating
         } else if let communityRating = communityRating {
             return communityRating
         }
@@ -647,7 +647,7 @@ struct UnifiedMovieDetailView: View {
     
     private var displaySentimentColor: Color {
         if let rating = initialRating {
-            return Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme)
+            return Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme)
         } else if let averageRating = displayAverageRating {
             return Color.adaptiveSentiment(for: averageRating, colorScheme: colorScheme)
         }
