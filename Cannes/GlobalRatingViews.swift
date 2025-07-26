@@ -74,7 +74,7 @@ struct GlobalRatingGridItem: View {
                         Text("🐐")
                             .font(.title3)
                     } else {
-                        Text(String(format: "%.1f", displayScore))
+                        Text(String(format: "%.1f", roundToTenths(displayScore)))
                             .font(.caption)
                             .fontWeight(.bold)
                             .foregroundColor(position <= 5 && rating.confidenceAdjustedScore >= 9.0 ? .black : .white)
@@ -237,7 +237,7 @@ struct PersonalMovieGridItem: View {
                             Text("🐐")
                                 .font(.title3)
                         } else {
-                            Text(String(format: "%.1f", displayScore))
+                            Text(String(format: "%.1f", roundToTenths(displayScore)))
                                 .font(.caption)
                                 .fontWeight(.bold)
                                 .foregroundColor(position <= 5 && movie.score >= 9.0 ? .black : .white)
@@ -461,7 +461,7 @@ struct GlobalRatingRow: View {
                                 .fill(Color.adaptiveGolden(for: colorScheme))
                                 .frame(width: 44, height: 44)
                                 .overlay(
-                                    Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
+                                    Text(position == 1 ? "🐐" : String(format: "%.1f", roundToTenths(displayScore)))
                                         .font(position == 1 ? .title : .headline).bold()
                                         .foregroundColor(.black)
                                 )
@@ -469,7 +469,7 @@ struct GlobalRatingRow: View {
                         }
                         .frame(width: 52, height: 52)
                     } else {
-                        Text(position == 1 ? "🐐" : String(format: "%.1f", displayScore))
+                        Text(position == 1 ? "🐐" : String(format: "%.1f", roundToTenths(displayScore)))
                             .font(position == 1 ? .title : .headline).bold()
                             .foregroundColor(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
                             .frame(width: 44, height: 44)
@@ -1496,7 +1496,7 @@ struct UnifiedMovieDetailView: View {
                                             .frame(width: 56, height: 56)
                                             
                                         
-                                        Text(String(format: "%.1f", friendRating.score))
+                                        Text(String(format: "%.1f", roundToTenths(friendRating.score)))
                                             .font(.title3)
                                             .fontWeight(.bold)
                                             .foregroundColor(Color.adaptiveSentiment(for: friendRating.score, colorScheme: colorScheme))
@@ -1868,7 +1868,7 @@ struct UnifiedMovieDetailView: View {
                 .frame(width: size, height: size)
             
             if let value = value {
-                Text(String(format: "%.1f", value))
+                Text(String(format: "%.1f", roundToTenths(value)))
                     .font(.title2).bold()
                     .foregroundColor(color)
             } else {
@@ -1896,7 +1896,7 @@ struct UnifiedMovieDetailView: View {
                         .font(.title).bold()
                         .foregroundColor(color)
 
-                    Text(String(format: "%.1f", abs(value)))
+                    Text(String(format: "%.1f", roundToTenths(abs(value))))
                         .font(.title2).bold()
                         .foregroundColor(color)
                 }
