@@ -1868,7 +1868,7 @@ struct UnifiedMovieDetailView: View {
                 .frame(width: size, height: size)
             
             if let value = value {
-                Text(String(format: "%.1f", roundToTenths(value)))
+                Text(String(format: "%.1f", value))
                     .font(.title2).bold()
                     .foregroundColor(color)
             } else {
@@ -1896,7 +1896,7 @@ struct UnifiedMovieDetailView: View {
                         .font(.title).bold()
                         .foregroundColor(color)
 
-                    Text(String(format: "%.1f", roundToTenths(abs(value))))
+                    Text(String(format: "%.1f", abs(value)))
                         .font(.title2).bold()
                         .foregroundColor(color)
                 }
