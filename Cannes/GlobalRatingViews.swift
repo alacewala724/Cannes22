@@ -554,7 +554,7 @@ struct UnifiedMovieDetailView: View {
     @State private var showingReRankSheet = false
     
     // Community rating data
-    @State private var communityRating: Double?
+    @State private var communityRating: GlobalRating?
     @State private var numberOfRatings: Int = 0
     
     // Takes state variables
@@ -632,18 +632,7 @@ struct UnifiedMovieDetailView: View {
         if let rating = initialRating {
             return rating.confidenceAdjustedScore
         } else if let communityRating = communityRating {
-            // Create a temporary GlobalRating to calculate the adjusted score
-            let tempRating = GlobalRating(
-                id: tmdbId?.description ?? "",
-                title: displayTitle,
-                mediaType: displayMediaType,
-                averageRating: communityRating,
-                numberOfRatings: numberOfRatings,
-                tmdbId: tmdbId ?? 0,
-                totalRatings: 100, // Default values for calculation
-                totalMovies: 50
-            )
-            return tempRating.confidenceAdjustedScore
+            return communityRating.confidenceAdjustedScore
         }
         return nil
     }
@@ -869,7 +858,16 @@ struct UnifiedMovieDetailView: View {
                 
                 // Update community rating
                 if let rating = communityRatingResult {
-                    communityRating = rating.averageRating
+                    communityRating = GlobalRating(
+                        id: tmdbId?.description ?? "",
+                        title: displayTitle,
+                        mediaType: displayMediaType,
+                        averageRating: rating.averageRating,
+                        numberOfRatings: rating.numberOfRatings,
+                        tmdbId: tmdbId ?? 0,
+                        totalRatings: 100, // Default values for calculation
+                        totalMovies: 50
+                    )
                     numberOfRatings = rating.numberOfRatings
                 }
                 
