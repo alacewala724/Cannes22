@@ -630,9 +630,20 @@ struct UnifiedMovieDetailView: View {
     
     private var displayAverageRating: Double? {
         if let rating = initialRating {
-            return rating.averageRating
+            return rating.confidenceAdjustedScore
         } else if let communityRating = communityRating {
-            return communityRating
+            // Create a temporary GlobalRating to calculate the adjusted score
+            let tempRating = GlobalRating(
+                id: tmdbId?.description ?? "",
+                title: displayTitle,
+                mediaType: displayMediaType,
+                averageRating: communityRating,
+                numberOfRatings: numberOfRatings,
+                tmdbId: tmdbId ?? 0,
+                totalRatings: 100, // Default values for calculation
+                totalMovies: 50
+            )
+            return tempRating.confidenceAdjustedScore
         }
         return nil
     }
@@ -647,7 +658,7 @@ struct UnifiedMovieDetailView: View {
     
     private var displaySentimentColor: Color {
         if let rating = initialRating {
-            return Color.adaptiveSentiment(for: rating.averageRating, colorScheme: colorScheme)
+            return Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme)
         } else if let averageRating = displayAverageRating {
             return Color.adaptiveSentiment(for: averageRating, colorScheme: colorScheme)
         }
