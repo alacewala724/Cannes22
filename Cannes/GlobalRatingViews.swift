@@ -858,6 +858,11 @@ struct UnifiedMovieDetailView: View {
                 
                 // Update community rating
                 if let rating = communityRatingResult {
+                    // Get actual global statistics for accurate confidence calculation
+                    let globalStats = try? await firestoreService.getGlobalRatingsStatistics()
+                    let totalRatings = globalStats?.totalRatings ?? 100
+                    let totalMovies = globalStats?.totalMovies ?? 50
+                    
                     communityRating = GlobalRating(
                         id: tmdbId?.description ?? "",
                         title: displayTitle,
@@ -865,8 +870,8 @@ struct UnifiedMovieDetailView: View {
                         averageRating: rating.averageRating,
                         numberOfRatings: rating.numberOfRatings,
                         tmdbId: tmdbId ?? 0,
-                        totalRatings: 100, // Default values for calculation
-                        totalMovies: 50
+                        totalRatings: totalRatings,
+                        totalMovies: totalMovies
                     )
                     numberOfRatings = rating.numberOfRatings
                 }
