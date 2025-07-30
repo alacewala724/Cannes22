@@ -8,7 +8,7 @@ struct RecommendationsView: View {
     @State private var searchType: SearchType = .movie
     @State private var futureCannesList: [FutureCannesItem] = []
     @State private var isLoadingFutureCannes = true
-    @State private var showingGrid = false
+    @State private var showingGrid = true
     @State private var isEditing = false
     @State private var selectedMediaType: AppModels.MediaType = .movie
     @State private var showingMovieDetail: FutureCannesItem?

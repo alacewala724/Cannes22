@@ -22,7 +22,7 @@ struct ContentView: View {
     @State private var isEditing = false
     @State private var showingFriendSearch = false
     @State private var selectedTab = 0
-    @State private var showingGrid = false
+    @State private var showingGrid = true
     @State private var showingMovieDetail: Movie?
     
     var body: some View {
