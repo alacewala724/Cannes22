@@ -9,6 +9,7 @@ import SwiftUI
 import Firebase
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseMessaging
 import UserNotifications
 
 // MARK: - App Delegate for Firebase Push Notifications
@@ -146,6 +147,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         AppDelegate.isAPNsTokenSet = true
         print("🔵 APNs token verification: Firebase Auth should now be ready for phone authentication")
         print("✅ APNs token flag set: Phone verification can now proceed")
+        
+        // Forward to FCM for push notifications
+        Messaging.messaging().apnsToken = deviceToken
+        print("📱 Forwarded APNs token to FCM")
     }
     
     func application(_ application: UIApplication,
@@ -199,6 +204,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
 struct CannesApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var authService = AuthenticationService.shared
+    @StateObject private var notificationService = NotificationService.shared
     @State private var showUsernamePrompt = false
     
     var body: some Scene {
@@ -206,17 +212,36 @@ struct CannesApp: App {
             if !authService.isReady {
                 ProgressView("Loading...")
             } else if authService.isAuthenticated {
-                if authService.username == nil {
+                if authService.isUsernameLoading {
+                    // Show loading while username is being retrieved
+                    ProgressView("Loading profile...")
+                } else if authService.username == nil {
+                    // Only show username creation if username loading is complete and username is nil
                     SetUsernameView()
                         .environmentObject(authService)
                 } else {
                     ContentView()
                         .environmentObject(authService)
+                        .environmentObject(notificationService)
+                        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                            // Clear notification badges when app becomes active
+                            clearNotificationBadges()
+                        }
                 }
             } else {
                 AuthView()
                     .environmentObject(authService)
             }
         }
+    }
+    
+    private func clearNotificationBadges() {
+        // Clear the app badge count
+        UIApplication.shared.applicationIconBadgeNumber = 0
+        
+        // Clear all delivered notifications from notification center
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        
+        print("✅ Cleared notification badges and delivered notifications")
     }
 }

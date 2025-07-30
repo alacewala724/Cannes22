@@ -1249,6 +1249,13 @@ extension FirestoreService {
             
             // Create the follow activity
             try await createFollowActivityUpdate(followedUserId: userIdToFollow, followedUsername: followedUsername)
+            
+            // Send push notification to the followed user
+            print("📱 Sending follow notification to \(userIdToFollow)")
+            await NotificationService.shared.sendFollowNotification(
+                to: userIdToFollow,
+                from: followedUsername
+            )
         } catch {
             print("followUser: Error creating follow activity: \(error)")
             // Don't fail the follow operation if activity creation fails
@@ -1665,7 +1672,7 @@ extension FirestoreService {
         
         // Create activity update for the comment
         if let tmdbId = tmdbId {
-            // Get movie title for the activity
+            
             let movieTitle = try await getMovieTitleFromTake(movieId: movieId, tmdbId: tmdbId)
             
             // Create a temporary movie object for the activity
@@ -1685,6 +1692,14 @@ extension FirestoreService {
             )
             
             print("addTake: Created activity update for comment on \(movieTitle)")
+            
+            // Send push notifications for movie comments
+            print("📱 Checking for followers who have rated the movie: \(movieTitle)")
+            await NotificationService.shared.checkAndNotifyFollowersForMovieComment(
+                movieTitle: movieTitle,
+                comment: text,
+                tmdbId: tmdbId
+            )
         }
     }
     
@@ -2039,6 +2054,7 @@ extension FirestoreService {
                 "tmdbId": tmdbId
             ])
             
+            
             recreatedCount += 1
         }
         
@@ -2160,6 +2176,16 @@ extension FirestoreService {
         
         try await db.collection("activities").document(activityId).setData(activityData)
         print("Created activity update: \(type.rawValue) for \(movie.title)")
+        
+        // Send push notifications for movie ratings
+        if (type == .movieRanked || type == .movieUpdated) && movie.tmdbId != nil {
+            print("📱 Checking for followers who have rated the same movie: \(movie.title)")
+            await NotificationService.shared.checkAndNotifyFollowersForMovie(
+                movieTitle: movie.title,
+                score: movie.score,
+                tmdbId: movie.tmdbId!
+            )
+        }
     }
     
     func createFollowActivityUpdate(followedUserId: String, followedUsername: String) async throws {

@@ -7,6 +7,7 @@ import UIKit
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authService: AuthenticationService
+    @EnvironmentObject var notificationService: NotificationService
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var firestoreService = FirestoreService()
     
@@ -480,6 +481,52 @@ struct SettingsView: View {
                                     .font(.caption)
                                     .foregroundColor(posterUpdateMessage.contains("Error") ? .red : .green)
                             }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                // Notification Settings Section
+                Section("Notifications") {
+                    VStack(spacing: 12) {
+                        Text("Push Notifications")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        Text("Get notified when someone you follow rates a movie you've also rated")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                        
+                        HStack {
+                            Text("Permission Status")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(notificationService.notificationPermissionGranted ? "Granted" : "Not Granted")
+                                .foregroundColor(notificationService.notificationPermissionGranted ? .green : .red)
+                        }
+                        
+                        HStack {
+                            Text("FCM Token")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(notificationService.isTokenRefreshed ? "Ready" : "Not Ready")
+                                .foregroundColor(notificationService.isTokenRefreshed ? .green : .orange)
+                        }
+                        
+                        Button(action: {
+                            notificationService.refreshFCMToken()
+                        }) {
+                            HStack {
+                                Text("Refresh Token")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        if notificationService.fcmToken != nil {
+                            Text("Token: \(String(notificationService.fcmToken!.prefix(20)))...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
                     .padding(.vertical, 8)

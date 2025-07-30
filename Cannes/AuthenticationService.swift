@@ -13,6 +13,7 @@ class AuthenticationService: ObservableObject {
     @Published var errorMessage: String?
     @Published var username: String?
     @Published var isReady = false
+    @Published var isUsernameLoading = false  // Add loading state for username
     
     // Phone authentication properties
     @Published var verificationID: String?
@@ -43,8 +44,8 @@ class AuthenticationService: ObservableObject {
         // Restore verification ID if app was terminated during phone auth
         restoreVerificationID()
         
-        // Load cached username
-        loadCachedUsername()
+        // Don't load cached username here - wait for user authentication
+        // loadCachedUsername()  // REMOVED
         
         // Add a timeout for the auth state listener
         _ = Task {
@@ -67,6 +68,9 @@ class AuthenticationService: ObservableObject {
                 }
 
                 if let user = user {
+                    // Clear any old cached data when a new user signs in
+                    await self.clearOldUserCache(for: user)
+                    
                     await self.ensureUserDocument(for: user)
 
                     // Only check email verification for email users
@@ -79,6 +83,13 @@ class AuthenticationService: ObservableObject {
                                 self.errorMessage = "Authentication required"
                             }
                         }
+                    }
+                } else {
+                    // User signed out - clear all cached data
+                    await MainActor.run {
+                        self.clearCachedUsername()
+                        self.username = nil
+                        self.isUsernameLoading = false
                     }
                 }
 
@@ -95,10 +106,21 @@ class AuthenticationService: ObservableObject {
         let userDefaults = UserDefaults.standard
         if let cachedUserId = userDefaults.string(forKey: userIdKey),
            let cachedUsername = userDefaults.string(forKey: usernameKey),
-           let currentUser = auth.currentUser,
-           cachedUserId == currentUser.uid {
-            self.username = cachedUsername
-            print("AuthenticationService: Loaded cached username: \(cachedUsername)")
+           let currentUser = auth.currentUser {
+            
+            print("🔵 USERNAME DEBUG: Found cached username: \(cachedUsername)")
+            print("🔵 USERNAME DEBUG: Cached user ID: \(cachedUserId)")
+            print("🔵 USERNAME DEBUG: Current user ID: \(currentUser.uid)")
+            
+            if cachedUserId == currentUser.uid {
+                self.username = cachedUsername
+                print("🔵 USERNAME DEBUG: User IDs match - loaded cached username: \(cachedUsername)")
+            } else {
+                print("🔵 USERNAME DEBUG: User ID mismatch - clearing cached username")
+                clearCachedUsername()
+            }
+        } else {
+            print("🔵 USERNAME DEBUG: No cached username found or missing data")
         }
     }
     
@@ -106,14 +128,41 @@ class AuthenticationService: ObservableObject {
         let userDefaults = UserDefaults.standard
         userDefaults.set(username, forKey: usernameKey)
         userDefaults.set(userId, forKey: userIdKey)
-        print("AuthenticationService: Cached username: \(username) for user: \(userId)")
+        print("🔵 USERNAME DEBUG: Caching username: \(username) for user: \(userId)")
     }
     
     private func clearCachedUsername() {
         let userDefaults = UserDefaults.standard
         userDefaults.removeObject(forKey: usernameKey)
         userDefaults.removeObject(forKey: userIdKey)
-        print("AuthenticationService: Cleared cached username")
+        print("🔵 USERNAME DEBUG: Cleared cached username")
+    }
+    
+    // Debug function to manually clear username cache
+    func clearUsernameCache() {
+        clearCachedUsername()
+        self.username = nil
+        self.isUsernameLoading = false
+        print("🔵 USERNAME DEBUG: Manually cleared username cache")
+    }
+    
+    // Clear old user cache when a new user signs in
+    private func clearOldUserCache(for user: User) async {
+        let userDefaults = UserDefaults.standard
+        if let cachedUserId = userDefaults.string(forKey: userIdKey),
+           cachedUserId != user.uid {
+            print("🔵 USERNAME DEBUG: Different user signed in - clearing old cache")
+            print("🔵 USERNAME DEBUG: Old cached user ID: \(cachedUserId)")
+            print("🔵 USERNAME DEBUG: New user ID: \(user.uid)")
+            
+            await MainActor.run {
+                self.clearCachedUsername()
+                self.username = nil
+                self.isUsernameLoading = false
+            }
+        } else {
+            print("🔵 USERNAME DEBUG: Same user or no cached data")
+        }
     }
     
     // Helper method to determine if user is properly authenticated
@@ -137,6 +186,16 @@ class AuthenticationService: ObservableObject {
     private func ensureUserDocument(for user: User) async {
         let userDocRef = firestore.collection("users").document(user.uid)
         
+        // Set username loading state only if we don't already have a username
+        if self.username == nil {
+            await MainActor.run {
+                self.isUsernameLoading = true
+                print("🔵 USERNAME DEBUG: Starting username loading for user: \(user.uid)")
+            }
+        } else {
+            print("🔵 USERNAME DEBUG: Username already set, skipping loading for user: \(user.uid)")
+        }
+        
         do {
             let document = try await userDocRef.getDocument()
             
@@ -159,6 +218,13 @@ class AuthenticationService: ObservableObject {
                 
                 try await userDocRef.setData(userData)
                 print("ensureUserDocument: Created new user document with movieCount: 0")
+                
+                // For new users, username will be nil (they need to set it)
+                await MainActor.run {
+                    self.username = nil
+                    self.isUsernameLoading = false
+                    print("🔵 USERNAME DEBUG: New user - no username set")
+                }
             } else {
                 // Update existing document with new auth methods if needed
                 var updateData: [String: Any] = [:]
@@ -187,28 +253,46 @@ class AuthenticationService: ObservableObject {
                 
                 // Sync movie count for existing users
                 await syncMovieCount(for: user.uid)
-            }
-
-            if let username = document.data()?["username"] as? String {
-                await MainActor.run {
-                    self.username = username
-                    // Cache the username locally
-                    self.cacheUsername(username, for: user.uid)
-                }
-            } else {
-                // If no username in Firestore, try to use cached username
-                let userDefaults = UserDefaults.standard
-                if let cachedUserId = userDefaults.string(forKey: userIdKey),
-                   let cachedUsername = userDefaults.string(forKey: usernameKey),
-                   cachedUserId == user.uid {
-                    await MainActor.run {
-                        self.username = cachedUsername
-                        print("AuthenticationService: Using cached username due to network issues")
+                
+                // Only retrieve username if we don't already have one
+                if self.username == nil {
+                    // Retrieve username from existing document
+                    if let username = existingData["username"] as? String {
+                        await MainActor.run {
+                            self.username = username
+                            self.isUsernameLoading = false
+                            // Cache the username locally
+                            self.cacheUsername(username, for: user.uid)
+                        }
+                        print("🔵 USERNAME DEBUG: Retrieved existing username: \(username)")
+                        print("🔵 USERNAME DEBUG: Username source: Firestore document")
+                    } else {
+                        // If no username in Firestore, try to use cached username ONLY if it matches current user
+                        let userDefaults = UserDefaults.standard
+                        if let cachedUserId = userDefaults.string(forKey: userIdKey),
+                           let cachedUsername = userDefaults.string(forKey: usernameKey),
+                           cachedUserId == user.uid {
+                            await MainActor.run {
+                                self.username = cachedUsername
+                                self.isUsernameLoading = false
+                                print("🔵 USERNAME DEBUG: Using cached username: \(cachedUsername)")
+                            }
+                            print("🔵 USERNAME DEBUG: Username source: UserDefaults cache")
+                        } else {
+                            await MainActor.run {
+                                self.username = nil
+                                self.isUsernameLoading = false
+                            }
+                            print("🔵 USERNAME DEBUG: No username found for existing user")
+                        }
                     }
                 } else {
+                    // Username already set from existing account check
                     await MainActor.run {
-                        self.username = nil
+                        self.isUsernameLoading = false
                     }
+                    print("🔵 USERNAME DEBUG: Username already set from existing account check")
+                    print("🔵 USERNAME DEBUG: Current username value: \(self.username ?? "nil")")
                 }
             }
         } catch {
@@ -220,7 +304,13 @@ class AuthenticationService: ObservableObject {
                cachedUserId == user.uid {
                 await MainActor.run {
                     self.username = cachedUsername
-                    print("AuthenticationService: Using cached username due to Firestore error")
+                    self.isUsernameLoading = false
+                    print("🔵 USERNAME DEBUG: Using cached username due to Firestore error")
+                }
+            } else {
+                await MainActor.run {
+                    self.username = nil
+                    self.isUsernameLoading = false
                 }
             }
         }
@@ -310,7 +400,10 @@ class AuthenticationService: ObservableObject {
         try Auth.auth().signOut()
         self.currentUser = nil
         self.isAuthenticated = false
-        clearCachedUsername()
+        self.username = nil  // Clear the username
+        self.isUsernameLoading = false  // Reset loading state
+        clearCachedUsername()  // Clear cached username
+        print("🔵 USERNAME DEBUG: Cleared username on sign out")
     }
     
     func sendPasswordReset(email: String) async throws {
@@ -385,6 +478,7 @@ class AuthenticationService: ObservableObject {
             // Update local username
             await MainActor.run {
                 self.username = sanitizedUsername
+                self.isUsernameLoading = false
             }
         } catch {
             throw AuthError.custom("Failed to update username: \(error.localizedDescription)")
@@ -497,7 +591,7 @@ class AuthenticationService: ObservableObject {
             print("⚠️ NOTE: This is a test number. For production, configure APNs in Firebase Console.")
         } else {
             print("🔵 PHONE AUTH DEBUG: Using real phone number: \(formattedPhoneNumber)")
-            print("💡 TIP: Using reCAPTCHA for real phone numbers")
+            print("💡 TIP: Using APNs-based verification for real phone numbers")
         }
         
         // Check if running on simulator and provide helpful guidance
@@ -536,34 +630,45 @@ class AuthenticationService: ObservableObject {
         }
         
         print("🔵 PHONE AUTH DEBUG: Attempting to verify phone number: \(formattedPhoneNumber)")
-        print("🔵 PHONE AUTH DEBUG: Starting PhoneAuthProvider.verifyPhoneNumber call with reCAPTCHA...")
+        print("🔵 PHONE AUTH DEBUG: Starting PhoneAuthProvider.verifyPhoneNumber call...")
         
         // Create reCAPTCHA delegate for real phone numbers to bypass APNs requirement
         var delegate: PhoneAuthProviderDelegate? = nil
-        if !isTestNumber {
+        
+        // Check if APNs is properly configured for real phone numbers
+        let shouldUseRecaptcha = !isTestNumber && !isAPNsTokenSet
+        
+        if shouldUseRecaptcha {
             delegate = PhoneAuthProviderDelegate()
             self.recaptchaDelegate = delegate
-            print("🔵 PHONE AUTH DEBUG: Using reCAPTCHA delegate for real phone number")
+            print("🔵 PHONE AUTH DEBUG: Using reCAPTCHA delegate for real phone number (APNs not configured)")
+            print("🔵 PHONE AUTH DEBUG: reCAPTCHA delegate created: \(delegate)")
+        } else if !isTestNumber {
+            print("🔵 PHONE AUTH DEBUG: Using APNs-based verification for real phone number")
         } else {
             print("🔵 PHONE AUTH DEBUG: Using test number - no delegate needed")
         }
         
-        // Use reCAPTCHA delegate for real phone numbers to bypass APNs requirement
+        // Use reCAPTCHA delegate only when APNs is not available
         let provider = PhoneAuthProvider.provider()
         
         do {
+            print("🔵 PHONE AUTH DEBUG: Calling verifyPhoneNumber with uiDelegate: \(shouldUseRecaptcha ? "YES" : "NO")")
             let verificationID = try await provider.verifyPhoneNumber(
                 formattedPhoneNumber,
-                uiDelegate: isTestNumber ? nil : (delegate as? AuthUIDelegate)
+                uiDelegate: shouldUseRecaptcha ? (delegate as? AuthUIDelegate) : nil
             )
             
             print("✅ PHONE AUTH SUCCESS: Received verification ID: \(verificationID)")
             if isTestNumber {
                 print("✅ Test SMS should be sent to: \(formattedPhoneNumber)")
                 print("💡 Test numbers use Firebase's built-in verification system")
+            } else if shouldUseRecaptcha {
+                print("✅ Real SMS should be sent to: \(formattedPhoneNumber)")
+                print("💡 Real numbers using reCAPTCHA verification (APNs not configured)")
             } else {
                 print("✅ Real SMS should be sent to: \(formattedPhoneNumber)")
-                print("💡 Real numbers use reCAPTCHA verification")
+                print("💡 Real numbers using APNs-based verification")
             }
             
             await MainActor.run {
@@ -584,7 +689,8 @@ class AuthenticationService: ObservableObject {
                 print("❌ SOLUTION: Go to Firebase Console → Project Settings → Cloud Messaging → iOS app configuration")
                 print("❌ You need to upload your APNs authentication key or certificate.")
                 if !isTestNumber {
-                    print("💡 For real phone numbers, you MUST configure APNs in Firebase Console.")
+                    print("💡 For real phone numbers, you MUST configure APNs in Firebase Console for direct SMS delivery.")
+                    print("💡 Without APNs, real numbers will use reCAPTCHA verification.")
                     print("💡 Test numbers like +16505551234 will work without APNs configuration.")
                     print("💡 Try using test numbers for development: +16505551234, +16505550000")
                 }
@@ -592,6 +698,11 @@ class AuthenticationService: ObservableObject {
                 print("❌ CRITICAL: App not authorized for phone authentication. Check Firebase Console APNs configuration.")
             case 17046: // FIRAuthErrorCodeCaptchaCheckFailed
                 print("❌ CRITICAL: reCAPTCHA verification failed. This often indicates APNs issues.")
+                if !isTestNumber {
+                    print("💡 TIP: Configure APNs in Firebase Console to avoid reCAPTCHA for real phone numbers.")
+                }
+                print("🔵 reCAPTCHA DEBUG: This error suggests the reCAPTCHA web view didn't load properly")
+                print("🔵 reCAPTCHA DEBUG: Check if the reCAPTCHA delegate was called")
             case 17052: // FIRAuthErrorCodeInvalidPhoneNumber
                 print("❌ Phone number format issue: \(formattedPhoneNumber)")
             case 17054: // FIRAuthErrorCodeQuotaExceeded
@@ -626,6 +737,9 @@ class AuthenticationService: ObservableObject {
             throw AuthError.custom("No verification ID available. Please request a new code.")
         }
         
+        print("🔵 PHONE AUTH DEBUG: Starting signInWithPhoneNumber")
+        print("🔵 PHONE AUTH DEBUG: Current phone number: \(phoneNumber)")
+        
         let credential = PhoneAuthProvider.provider().credential(
             withVerificationID: verificationID,
             verificationCode: verificationCode
@@ -634,8 +748,22 @@ class AuthenticationService: ObservableObject {
         do {
             let result = try await auth.signIn(with: credential)
             let user = result.user
+            let isNewUser = result.additionalUserInfo?.isNewUser ?? false
             
-            await ensureUserDocument(for: user)
+            print("🔵 PHONE AUTH DEBUG: Sign-in successful for user: \(user.uid)")
+            print("🔵 PHONE AUTH DEBUG: User phone number from Firebase: \(user.phoneNumber ?? "nil")")
+            print("🔵 PHONE AUTH DEBUG: Is new user: \(isNewUser)")
+            
+            if isNewUser {
+                print("🔵 PHONE AUTH DEBUG: New user - will create Firestore doc and prompt for username")
+                // First-time signup → create Firestore doc, ask for username, etc.
+                await ensureUserDocument(for: user)  // will create brand-new doc
+            } else {
+                print("🔵 PHONE AUTH DEBUG: Existing user - will sync existing Firestore doc")
+                // Returning user → Firestore doc already exists
+                await ensureUserDocument(for: user)  // will just sync fields
+            }
+            
             await MainActor.run {
                 self.currentUser = user
                 self.isAuthenticated = true
@@ -664,18 +792,18 @@ class AuthenticationService: ObservableObject {
         )
         
         do {
-            // Check if this phone number is already associated with an account
-            // We need to do this before attempting to create a new account
-            let isExistingAccount = await checkIfPhoneNumberExists(phoneNumber)
+            let result = try await auth.signIn(with: credential)
+            let user = result.user
+            let isNewUser = result.additionalUserInfo?.isNewUser ?? false
             
-            if isExistingAccount {
+            print("🔵 PHONE AUTH DEBUG: Sign-up attempt for user: \(user.uid)")
+            print("🔵 PHONE AUTH DEBUG: Is new user: \(isNewUser)")
+            
+            if !isNewUser {
                 throw AuthError.custom("An account already exists with this phone number. Please sign in instead.")
             }
             
-            // For phone authentication, Firebase will either sign in to existing account or create new one
-            // We can't easily distinguish between sign-up and sign-in with phone numbers
-            let result = try await auth.signIn(with: credential)
-            let user = result.user
+            print("🔵 PHONE AUTH DEBUG: Creating new account for phone number")
             
             await ensureUserDocument(for: user)
             await MainActor.run {
@@ -696,25 +824,34 @@ class AuthenticationService: ObservableObject {
     
     // Check if a phone number is already associated with an account
     private func checkIfPhoneNumberExists(_ phoneNumber: String) async -> Bool {
+        let formattedPhoneNumber = formatPhoneNumber(phoneNumber)
+        
+        // Extract last 10 digits for matching
+        let digits = formattedPhoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        let lastTenDigits = digits.suffix(10)
+        
+        print("🔵 PHONE AUTH DEBUG: Checking if phone number exists - last 10 digits: \(lastTenDigits)")
+        
         // Query Firestore to check if any user document has this phone number
         do {
-            let snapshot = try await firestore.collection("users")
-                .whereField("phoneNumber", isEqualTo: phoneNumber)
-                .limit(to: 1)
+            let allUsersSnapshot = try await firestore.collection("users")
+                .whereField("phoneNumber", isGreaterThan: "")
                 .getDocuments()
             
-            let hasExistingAccount = !snapshot.documents.isEmpty
-            
-            // Also check if the current user already has this phone number (to allow re-linking)
-            if let currentUser = currentUser {
-                let currentUserPhone = currentUser.phoneNumber
-                if currentUserPhone == phoneNumber {
-                    // Current user already has this phone number, so it's not a duplicate
-                    return false
+            // Search through all users to find one with matching last 10 digits
+            for document in allUsersSnapshot.documents {
+                let storedPhoneNumber = document.data()["phoneNumber"] as? String ?? ""
+                let storedDigits = storedPhoneNumber.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+                let storedLastTen = storedDigits.suffix(10)
+                
+                if storedLastTen == lastTenDigits {
+                    print("🔵 PHONE AUTH DEBUG: Found existing phone number: \(storedPhoneNumber)")
+                    return true
                 }
             }
             
-            return hasExistingAccount
+            print("🔵 PHONE AUTH DEBUG: No existing phone number found")
+            return false
         } catch {
             print("Error checking if phone number exists: \(error)")
             // If we can't check, assume it exists to prevent potential security issues
@@ -1049,25 +1186,41 @@ class AuthenticationService: ObservableObject {
 }
 
 // MARK: - PhoneAuthProviderDelegate for reCAPTCHA
-class PhoneAuthProviderDelegate: NSObject {
+class PhoneAuthProviderDelegate: NSObject, AuthUIDelegate {
+    
+    private var currentViewController: UIViewController?
+    
     func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)?) {
         print("🔵 reCAPTCHA DEBUG: Presenting reCAPTCHA view controller")
+        print("🔵 reCAPTCHA DEBUG: View controller type: \(type(of: viewControllerToPresent))")
+        
+        // Store reference to the view controller being presented
+        currentViewController = viewControllerToPresent
         
         // Get the top view controller to present the reCAPTCHA view
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-            
-            // Find the topmost view controller
-            var topViewController = rootViewController
-            while let presentedViewController = topViewController.presentedViewController {
-                topViewController = presentedViewController
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            print("❌ reCAPTCHA ERROR: Could not find window or root view controller")
+            completion?()
+            return
+        }
+        
+        // Find the topmost view controller
+        var topViewController = rootViewController
+        while let presentedViewController = topViewController.presentedViewController {
+            topViewController = presentedViewController
+        }
+        
+        print("🔵 reCAPTCHA DEBUG: Presenting to top view controller: \(type(of: topViewController))")
+        
+        // Ensure we're on the main thread
+        DispatchQueue.main.async {
+            // Present the reCAPTCHA view controller
+            topViewController.present(viewControllerToPresent, animated: flag) {
+                print("🔵 reCAPTCHA DEBUG: reCAPTCHA view controller presented successfully")
+                completion?()
             }
-            
-            print("🔵 reCAPTCHA DEBUG: Presenting to top view controller: \(type(of: topViewController))")
-            topViewController.present(viewControllerToPresent, animated: flag, completion: completion)
-        } else {
-            print("❌ reCAPTCHA ERROR: Could not find top view controller to present reCAPTCHA")
         }
     }
     
@@ -1075,20 +1228,30 @@ class PhoneAuthProviderDelegate: NSObject {
         print("🔵 reCAPTCHA DEBUG: Dismissing reCAPTCHA view controller")
         
         // Get the top view controller to dismiss the reCAPTCHA view
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-            
-            // Find the topmost view controller
-            var topViewController = rootViewController
-            while let presentedViewController = topViewController.presentedViewController {
-                topViewController = presentedViewController
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            print("❌ reCAPTCHA ERROR: Could not find window or root view controller")
+            completion?()
+            return
+        }
+        
+        // Find the topmost view controller
+        var topViewController = rootViewController
+        while let presentedViewController = topViewController.presentedViewController {
+            topViewController = presentedViewController
+        }
+        
+        print("🔵 reCAPTCHA DEBUG: Dismissing from top view controller: \(type(of: topViewController))")
+        
+        // Ensure we're on the main thread
+        DispatchQueue.main.async {
+            // Dismiss the reCAPTCHA view controller
+            topViewController.dismiss(animated: flag) {
+                print("🔵 reCAPTCHA DEBUG: reCAPTCHA view controller dismissed successfully")
+                self.currentViewController = nil
+                completion?()
             }
-            
-            print("🔵 reCAPTCHA DEBUG: Dismissing from top view controller: \(type(of: topViewController))")
-            topViewController.dismiss(animated: flag, completion: completion)
-        } else {
-            print("❌ reCAPTCHA ERROR: Could not find top view controller to dismiss reCAPTCHA")
         }
     }
 }

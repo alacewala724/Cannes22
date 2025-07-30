@@ -54,6 +54,12 @@ service cloud.firestore {
         // Users can write to any user's activities (for creating follow notifications)
         allow write, delete: if request.auth != null;
       }
+      
+      // Nested rule for tokens - users can manage their own FCM tokens
+      match /tokens/{tokenId} {
+        // Users can read and write their own FCM tokens
+        allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // 🔥 Add this block for ratings

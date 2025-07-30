@@ -43,6 +43,7 @@ A sophisticated iOS app for ranking and discovering movies and TV shows with fri
 - **Comparison System**: Compare movies to refine your rankings
 - **Caching**: Offline support with intelligent data caching
 - **Real-time Updates**: Live synchronization with Firebase
+- **Push Notifications**: Get notified when friends rate movies you've also rated or when someone follows you
 
 ## 🚀 Getting Started
 
@@ -92,7 +93,12 @@ A sophisticated iOS app for ranking and discovering movies and TV shows with fri
    - Go to Google Cloud Console → APIs & Services → Library
    - Enable: Identity Toolkit API, Cloud IAM API, Firebase Management API
 
-6. **Build and Run**
+6. **Configure Push Notifications (Optional)**
+   - Follow the detailed setup guide in `NOTIFICATION_SETUP.md`
+   - Deploy Firebase Functions for notification delivery
+   - Test on physical devices for best results
+
+7. **Build and Run**
    ```bash
    open Cannes.xcodeproj
    ```
@@ -124,6 +130,7 @@ A sophisticated iOS app for ranking and discovering movies and TV shows with fri
 - `TMDBService`: External API integration
 - `MovieStore`: App state management and business logic
 - `CacheManager`: Local data caching
+- `NotificationService`: Push notification management and FCM token handling
 
 #### 📊 Models
 - `Movie`: Core movie/TV show data model
