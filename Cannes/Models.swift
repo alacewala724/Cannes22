@@ -196,25 +196,35 @@ struct GlobalRating: Identifiable, Codable, Hashable {
         }
     }
     
-    // MARK: - Confidence Calculation
-    
-    /// Calculate the confidence-adjusted score for ranking
+    /// Calculate the confidence-adjusted score for ranking using Bayesian methods
     var confidenceAdjustedScore: Double {
-        // Dynamic confidence based on total ratings in the system
-        let baseConfidence = calculateBaseConfidence()
-        let ratingConfidence = calculateRatingConfidence()
-        let combinedConfidence = (baseConfidence + ratingConfidence) / 2.0
-        
-        // Calculate average ratings per movie and normalize
+        // Bayesian prior: 7.7 with strength based on average ratings per movie
+        let priorMean = 7.7
         let averageRatingsPerMovie = Double(totalRatings) / max(1.0, Double(totalMovies))
-        let ratingRatio = Double(numberOfRatings) / averageRatingsPerMovie
-        let normalizedConfidence = min(1.0, ratingRatio)
         
-        // Apply stronger confidence penalty, but normalize it
-        let confidencePenalty = (1.0 - combinedConfidence) * 0.3 * (1.0 - normalizedConfidence)
-        let adjustedScore = averageRating * (1.0 - confidencePenalty)
+        // Prior strength: stronger when average ratings per movie is lower (more uncertainty)
+        // But reduce strength for high-rated movies with many ratings
+        let basePriorStrength = max(0.5, min(3.0, 10.0 / max(1.0, averageRatingsPerMovie)))
         
-        return adjustedScore
+        // Adjust prior strength based on rating quality
+        // High-rated movies with many ratings should have weaker prior pull
+        let ratingQuality = averageRating >= 8.0 ? 0.7 : 1.0 // Reduce prior strength for high-rated movies
+        let priorStrength = basePriorStrength * ratingQuality
+        
+        // User's rating (the observed data)
+        let userRating = averageRating
+        let userStrength = Double(numberOfRatings) // Each rating has equal weight
+        
+        // For high-rated movies with many ratings, boost their strength
+        let qualityMultiplier = averageRating >= 8.0 && numberOfRatings >= 10 ? 1.5 : 1.0
+        let adjustedUserStrength = userStrength * qualityMultiplier
+        
+        // Bayesian combination: (prior * priorStrength + userRating * adjustedUserStrength) / (priorStrength + adjustedUserStrength)
+        let totalStrength = priorStrength + adjustedUserStrength
+        let bayesianScore = (priorMean * priorStrength + userRating * adjustedUserStrength) / totalStrength
+        
+        // Round to 1 decimal place for consistency
+        return (bayesianScore * 10).rounded() / 10
     }
     
     /// Calculate base confidence based on total ratings in system

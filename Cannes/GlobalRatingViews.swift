@@ -529,6 +529,11 @@ struct UnifiedMovieDetailView: View {
     @State private var wishlistItemId: String?
     @State private var isLoadingWishlistStatus = false
     
+    // Smooth transition states
+    @State private var showContent = false
+    @State private var contentSections: [String: Bool] = [:]
+    @State private var animationProgress: Double = 0.0
+    
     @EnvironmentObject var authService: AuthenticationService
     
     private let tmdbService = TMDBService()
@@ -671,13 +676,22 @@ struct UnifiedMovieDetailView: View {
                 if isLoading {
                     // Only block on main movie details loading
                     loadingView
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if let error = errorMessage {
                     errorView(message: error)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else if let details = movieDetails {
                     detailView(details: details)
+                        .opacity(showContent ? 1 : 0)
+                        .scaleEffect(showContent ? 1 : 0.95)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .move(edge: .bottom)),
+                            removal: .opacity.combined(with: .scale(scale: 1.05))
+                        ))
                 } else {
                     // Fallback view when no TMDB details available
                     fallbackView
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
             .padding(.horizontal, Design.gutter)
@@ -827,6 +841,25 @@ struct UnifiedMovieDetailView: View {
                     movieDetails = details
                 }
                 isLoading = false // Allow UI to render with movie details
+                
+                // Start smooth content reveal animation
+                withAnimation(.easeOut(duration: 0.5).delay(0.2)) {
+                    showContent = true
+                }
+                
+                // Initialize content sections
+                contentSections = [
+                    "poster": false,
+                    "title": false,
+                    "rating": false,
+                    "friends": false,
+                    "runtime": false,
+                    "overview": false,
+                    "takes": false
+                ]
+                
+                // Stagger section appearances
+                staggerContentSections()
             }
             
             // Start loading secondary data in background (non-blocking)
@@ -866,7 +899,7 @@ struct UnifiedMovieDetailView: View {
                 takes = takesResult
                 seasons = seasonsResult
                 
-                // Update community rating
+                // Update community rating with smooth transition
                 if let rating = communityRatingResult {
                     communityRating = GlobalRating(
                         id: tmdbId?.description ?? "",
@@ -885,12 +918,49 @@ struct UnifiedMovieDetailView: View {
                 isInWishlist = wishlistResult.isInWishlist
                 wishlistItemId = wishlistResult.itemId
                 
-                // Set secondary loading states to false
-                isLoadingFriendsRatings = false
-                isLoadingTakes = false
-                isLoadingSeasons = false
-                isLoadingCommunityRating = false
-                isLoadingWishlistStatus = false
+                // Set loading states to false with smooth transitions
+                withAnimation(.easeOut(duration: 0.3)) {
+                    isLoadingCommunityRating = false
+                    isLoadingWishlistStatus = false
+                }
+                
+                // Delay friends ratings and takes loading state changes for smoother transitions
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isLoadingFriendsRatings = false
+                        isLoadingTakes = false
+                        isLoadingSeasons = false
+                    }
+                }
+                
+                // Refresh content sections that might have new data with delays
+                if !friendsRatingsResult.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            contentSections["friends"] = true
+                        }
+                    }
+                }
+                if !takesResult.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            contentSections["takes"] = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func staggerContentSections() {
+        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes"]
+        
+        for (index, section) in sections.enumerated() {
+            let delay = Double(index) * 0.1 + 0.3 // Start after 0.3s, then 0.1s between each
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeOut(duration: 0.4).delay(0)) {
+                    contentSections[section] = true
+                }
             }
         }
     }
@@ -1183,7 +1253,6 @@ struct UnifiedMovieDetailView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 6)
             }
             .card()
             
@@ -1514,7 +1583,7 @@ struct UnifiedMovieDetailView: View {
             let actualCommunityScore = roundToTenths(communityScore!)
             let difference = userScore - actualCommunityScore
             let isHigher = difference > 0
-            let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? .green : .red)
+            let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
             let arrow = isHigher ? "arrow.up" : "arrow.down"
             return (difference, color, arrow)
         }
@@ -1560,6 +1629,9 @@ struct UnifiedMovieDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .opacity(contentSections["poster"] ?? false ? 1 : 0)
+            .scaleEffect(contentSections["poster"] ?? false ? 1 : 0.95)
+            .animation(.easeOut(duration: 0.4), value: contentSections["poster"])
             
             // Title and Release Date with improved typography
             VStack(alignment: .leading, spacing: 8) {
@@ -1586,11 +1658,17 @@ struct UnifiedMovieDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Design.gutter)
+            .opacity(contentSections["title"] ?? false ? 1 : 0)
+            .offset(y: contentSections["title"] ?? false ? 0 : 20)
+            .animation(.easeOut(duration: 0.4), value: contentSections["title"])
             
             // User rating comparison or "Rank This" button (enhanced design)
             userRatingSection
                 .card()
                 .layoutPriority(1)
+                .opacity(contentSections["rating"] ?? false ? 1 : 0)
+                .scaleEffect(contentSections["rating"] ?? false ? 1 : 0.95)
+                .animation(.easeOut(duration: 0.4), value: contentSections["rating"])
             
             // Followings' Ratings with improved grid
             if !friendsRatings.isEmpty {
@@ -1613,7 +1691,7 @@ struct UnifiedMovieDetailView: View {
                     }
                     
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 16) {
-                        ForEach(friendsRatings.sorted { $0.score > $1.score }) { friendRating in
+                        ForEach(Array(friendsRatings.sorted { $0.score > $1.score }.enumerated()), id: \.element.friend.uid) { index, friendRating in
                             Button(action: {
                                 selectedFriendUserId = friendRating.friend.uid
                                 showingFriendProfile = true
@@ -1638,6 +1716,9 @@ struct UnifiedMovieDetailView: View {
                                             .foregroundColor(Color.adaptiveSentiment(for: friendRating.score, colorScheme: colorScheme))
                                     }
                                 }
+                                .opacity(isLoadingFriendsRatings ? 0 : 1)
+                                .scaleEffect(isLoadingFriendsRatings ? 0.8 : 1)
+                                .animation(.easeOut(duration: 0.3).delay(Double(index) * 0.05), value: isLoadingFriendsRatings)
                                 .onAppear {
                                     print("UnifiedMovieDetailView: Displaying friend rating for \(friendRating.friend.username): \(friendRating.score)")
                                 }
@@ -1651,6 +1732,9 @@ struct UnifiedMovieDetailView: View {
                 .onAppear {
                     print("UnifiedMovieDetailView: Followings' ratings section is visible with \(friendsRatings.count) ratings")
                 }
+                .opacity(contentSections["friends"] ?? false ? 1 : 0)
+                .offset(y: contentSections["friends"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["friends"])
             } else if isLoadingFriendsRatings {
                 // Enhanced loading state for friends ratings
                 VStack(alignment: .leading, spacing: 8) {
@@ -1670,6 +1754,7 @@ struct UnifiedMovieDetailView: View {
                     .padding(.horizontal, 18)
                 }
                 .card()
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
             
             // Runtime with improved styling
@@ -1707,6 +1792,9 @@ struct UnifiedMovieDetailView: View {
                         .lineSpacing(4)
                 }
                 .card()
+                .opacity(contentSections["overview"] ?? false ? 1 : 0)
+                .offset(y: contentSections["overview"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["overview"])
             }
             
             // Takes Section with enhanced design
@@ -1776,6 +1864,9 @@ struct UnifiedMovieDetailView: View {
                 }
             }
             .card()
+            .opacity(contentSections["takes"] ?? false ? 1 : 0)
+            .scaleEffect(contentSections["takes"] ?? false ? 1 : 0.95)
+            .animation(.easeOut(duration: 0.4), value: contentSections["takes"])
             
             // Seasons and Episodes Section (TV Shows only)
             if displayMediaType == .tv && !seasons.isEmpty {
@@ -2026,17 +2117,23 @@ struct UnifiedMovieDetailView: View {
                 ProgressView()
                     .scaleEffect(0.8)
                     .foregroundColor(color)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
             } else if let value = value {
                 Text(String(format: "%.1f", value))
                     .font(.title2).bold()
                     .foregroundColor(color)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .id("community-rating-\(value)") // Force transition on value change
             } else {
                 Text("—")
                     .font(.title2).bold()
                     .foregroundColor(.secondary)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
         .padding(2)
+        .animation(.easeOut(duration: 0.3), value: isLoading)
+        .animation(.easeOut(duration: 0.3), value: value)
     }
 
     private func diffCircle(value: Double, arrow: String, color: Color, size: CGFloat) -> some View {
@@ -2049,6 +2146,8 @@ struct UnifiedMovieDetailView: View {
                 Text("—")
                     .font(.title2).bold()
                     .foregroundColor(color)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .id("diff-neutral-\(value)")
             } else {
                 HStack(spacing: 2) { // 2 pt arrow gap
                     Image(systemName: arrow)
@@ -2059,9 +2158,14 @@ struct UnifiedMovieDetailView: View {
                         .font(.title2).bold()
                         .foregroundColor(color)
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                .id("diff-value-\(value)-\(arrow)")
             }
         }
         .padding(2)
+        .animation(.easeOut(duration: 0.3), value: value)
+        .animation(.easeOut(duration: 0.3), value: arrow)
+        .animation(.easeOut(duration: 0.3), value: color)
     }
     
     private func addToWishlist() async {

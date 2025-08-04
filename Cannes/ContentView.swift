@@ -33,25 +33,35 @@ struct ContentView: View {
             // Global Tab (new separate tab)
             NavigationView {
                 ZStack {
-                    // Starry background for global mode
-                    StarryBackgroundView()
+                    // Dark background for global mode
+                    Color.black
+                        .ignoresSafeArea()
                     
-                    // Global content view
+                    // Starry background for global mode (behind content)
+                    StarryBackgroundView()
+                        .zIndex(0)
+                    
+                    // Global content view (above starry background)
                     globalContentView
+                        .zIndex(1)
                         .animation(.easeInOut(duration: 0.3), value: store.selectedMediaType)
                 }
                 .navigationBarHidden(true)
             }
+            .preferredColorScheme(.dark) // Only Global tab uses dark mode
             .tabItem {
                 Image(systemName: "globe")
                 Text("Global")
             }
             .tag(0)
-            .preferredColorScheme(.dark) // Always dark for global
             
             // Rankings Tab (personal content only)
             NavigationView {
                 ZStack {
+                    // Force light background for Rankings tab
+                    Color(.systemBackground)
+                        .ignoresSafeArea()
+                    
                     // Personal content view
                     personalContentView
                         .animation(.easeInOut(duration: 0.3), value: store.selectedMediaType)
@@ -66,6 +76,7 @@ struct ContentView: View {
             
             // Updates Tab
             UpdatesView(store: store)
+                .background(Color(.systemBackground))
                 .tabItem {
                     Image(systemName: "bell")
                     Text("Updates")
@@ -74,12 +85,15 @@ struct ContentView: View {
             
             // Profile Tab
             ProfileView()
+                .background(Color(.systemBackground))
                 .tabItem {
                     Image(systemName: "person.circle")
                     Text("Profile")
                 }
                 .tag(3)
         }
+        .preferredColorScheme(.light) // Force entire app to light mode
+        .background(Color(.systemBackground)) // Default light background for entire TabView
         .sheet(isPresented: $showingAddMovie) {
             AddMovieView(store: store, existingMovie: nil)
         }
@@ -325,7 +339,7 @@ struct ContentView: View {
                         
                         Text("Grid")
                             .font(.caption)
-                            .foregroundColor(showingGrid ? .primary : .secondary)
+                            .foregroundColor(showingGrid ? Color.gold : Color.gold.opacity(0.7))
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -355,7 +369,17 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: store.selectedMediaType)
         }
         .padding(.vertical, 8)
-        .background(Color.clear)
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color.black.opacity(0.7),
+                    Color.black.opacity(0.3),
+                    Color.clear
+                ]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
     
     private var personalHeaderView: some View {
