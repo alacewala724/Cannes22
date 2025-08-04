@@ -21,6 +21,7 @@ struct AddMovieView: View {
     @State private var searchType: SearchType = .movie
     @State private var searchErrorMessage: String?
     @State private var showSearchError = false
+    @State private var showingMovieDetail: AppModels.Movie?
     
     private let tmdbService = TMDBService()
     
@@ -87,6 +88,16 @@ struct AddMovieView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(searchErrorMessage ?? "Failed to search for movies")
+            }
+            .sheet(item: $showingMovieDetail) { movie in
+                NavigationView {
+                    UnifiedMovieDetailView(
+                        tmdbId: movie.id,
+                        movieTitle: movie.displayTitle,
+                        mediaType: movie.mediaType,
+                        store: store
+                    )
+                }
             }
             .onAppear {
                 // If we have an existing movie, start at sentiment step
@@ -174,19 +185,8 @@ struct AddMovieView: View {
                         selectedMovie = movie
                         searchText = movie.displayTitle
                         
-                        // Check if this movie is already ranked
-                        let allMovies = store.movies + store.tvShows
-                        if let existingMovie = allMovies.first(where: { $0.tmdbId == movie.id }) {
-                            // Movie is already ranked - set up for re-ranking
-                            self.existingMovie = existingMovie
-                            self.sentiment = existingMovie.sentiment
-                            self.searchType = existingMovie.mediaType == .movie ? .movie : .tvShow
-                        } else {
-                            // New movie - clear any existing movie data
-                            self.existingMovie = nil
-                        }
-                        
-                        withAnimation { currentStep = 2 }
+                        // Show the movie detail view instead of going to sentiment step
+                        showingMovieDetail = movie
                     }
                 }
             }
@@ -539,231 +539,213 @@ struct ComparisonView: View {
     private func insertMovieAndComplete(at rank: Int) async {
         // Wait for the movie insertion to complete
         await insertMovie(at: rank)
-        
-        // Only call onComplete after everything is done
-        await MainActor.run {
-            onComplete()
-        }
     }
     
     private func insertMovie(at rank: Int) async {
-        return await withCheckedContinuation { continuation in
-            // If we're re-ranking, delete the existing movie first
-            if let existing = existingMovie {
-                print("insertMovie: Re-ranking movie '\(existing.title)', deleting old rating first")
-                
-                // Remove the existing movie from the list immediately
-                if existing.mediaType == .movie {
-                    store.movies.removeAll { $0.id == existing.id }
-                } else {
-                    store.tvShows.removeAll { $0.id == existing.id }
-                }
-                
-                // Delete from Firebase
-                if let userId = AuthenticationService.shared.currentUser?.uid {
-                    Task {
-                        do {
-                            try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
-                            print("insertMovie: Successfully deleted old rating for '\(existing.title)'")
-                        } catch {
-                            print("insertMovie: Error deleting old rating: \(error)")
-                        }
-                    }
-                }
-            }
+        // If we're re-ranking, delete the existing movie first
+        if let existing = existingMovie {
+            print("insertMovie: Re-ranking movie '\(existing.title)', deleting old rating first")
             
-            // Check if movie already exists to prevent duplicates (skip this check for re-ranking)
-            if existingMovie == nil, let tmdbId = newMovie.tmdbId {
-                let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
-                if existingMovie != nil {
-                    print("insertMovie: Movie already exists with TMDB ID \(tmdbId), skipping completely")
-                    continuation.resume()
-                    return
-                }
-            }
-            
-            // For re-ranking, also check if the new movie would create a duplicate
-            if existingMovie != nil, let tmdbId = newMovie.tmdbId {
-                // During re-ranking, we need to allow the movie to be re-inserted
-                // The old movie will be deleted first, so we don't need this duplicate check
-                print("insertMovie: Re-ranking movie with TMDB ID \(tmdbId), skipping duplicate check")
-            }
-            
-            // Find the appropriate section for this sentiment
-            let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
-            guard let sentimentIndex = sentimentSections.firstIndex(of: newMovie.sentiment) else { 
-                continuation.resume()
-                return 
-            }
-            
-            // Get the appropriate list based on media type (after deletion if re-ranking)
-            var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
-            
-            // Find the start and end indices for this sentiment section
-            let sectionStart = targetList.firstIndex { $0.sentiment == newMovie.sentiment } ?? targetList.count
-            let sectionEnd: Int
-            if sentimentIndex < sentimentSections.count - 1 {
-                sectionEnd = targetList.firstIndex { $0.sentiment == sentimentSections[sentimentIndex + 1] } ?? targetList.count
+            // Remove the existing movie from the list immediately
+            if existing.mediaType == .movie {
+                store.movies.removeAll { $0.id == existing.id }
             } else {
-                sectionEnd = targetList.count
+                store.tvShows.removeAll { $0.id == existing.id }
             }
             
-            // Calculate the actual insertion index within the section
-            let sectionLength = sectionEnd - sectionStart
-            let insertionIndex = sectionStart + min(rank - 1, sectionLength)
-            
-            print("insertMovie: Inserting '\(newMovie.title)' at rank \(rank), section \(sectionStart)-\(sectionEnd), index \(insertionIndex)")
-            
-            // Insert the movie with its original score first
-            targetList.insert(newMovie, at: insertionIndex)
-            
-            // Update the appropriate list
-            if newMovie.mediaType == .movie {
-                store.movies = targetList
-            } else {
-                store.tvShows = targetList
-            }
-            
-            // Save to Firebase and wait for completion
+            // Delete from Firebase
             if let userId = AuthenticationService.shared.currentUser?.uid {
                 Task {
                     do {
-                        print("insertMovie: Starting for movie: \(newMovie.title) with initial score: \(newMovie.score)")
+                        try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
+                        print("insertMovie: Successfully deleted old rating for '\(existing.title)'")
+                    } catch {
+                        print("insertMovie: Error deleting old rating: \(error)")
+                    }
+                }
+            }
+        }
+        
+        // Check if movie already exists to prevent duplicates (skip this check for re-ranking)
+        if existingMovie == nil, let tmdbId = newMovie.tmdbId {
+            let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
+            if existingMovie != nil {
+                print("insertMovie: Movie already exists with TMDB ID \(tmdbId), skipping completely")
+                return
+            }
+        }
+        
+        // For re-ranking, also check if the new movie would create a duplicate
+        if existingMovie != nil, let tmdbId = newMovie.tmdbId {
+            // During re-ranking, we need to allow the movie to be re-inserted
+            // The old movie will be deleted first, so we don't need this duplicate check
+            print("insertMovie: Re-ranking movie with TMDB ID \(tmdbId)")
+        }
+        
+        // Find the appropriate section for this sentiment
+        let sentimentSections: [MovieSentiment] = [.likedIt, .itWasFine, .didntLikeIt]
+        guard let sentimentIndex = sentimentSections.firstIndex(of: newMovie.sentiment) else { 
+            return
+        }
+        
+        // Get the appropriate list based on media type (after deletion if re-ranking)
+        var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
+        
+        // Find the start and end indices for this sentiment section
+        let sectionStart = targetList.firstIndex { $0.sentiment == newMovie.sentiment } ?? targetList.count
+        let sectionEnd: Int
+        if sentimentIndex < sentimentSections.count - 1 {
+            let nextSentiment = sentimentSections[sentimentIndex + 1]
+            sectionEnd = targetList.firstIndex { $0.sentiment == nextSentiment } ?? targetList.count
+        } else {
+            sectionEnd = targetList.count
+        }
+        
+        let sectionLength = sectionEnd - sectionStart
+        let insertionIndex = sectionStart + min(rank - 1, sectionLength)
+        
+        print("insertMovie: Inserting '\(newMovie.title)' at rank \(rank), section \(sectionStart)-\(sectionEnd), index \(insertionIndex)")
+        
+        // Calculate the proper score for this position BEFORE inserting
+        let properScore = store.calculateScoreForMovie(at: insertionIndex, in: targetList, sentiment: newMovie.sentiment)
+        
+        // Create a new movie with the proper score
+        var movieWithProperScore = newMovie
+        movieWithProperScore.score = properScore
+        
+        print("insertMovie: Movie '\(newMovie.title)' score updated from \(newMovie.score) to \(properScore)")
+        
+        // Insert the movie with the proper score
+        targetList.insert(movieWithProperScore, at: insertionIndex)
+        
+        // Update the appropriate list immediately (optimistic update with correct score)
+        if movieWithProperScore.mediaType == .movie {
+            store.movies = targetList
+        } else {
+            store.tvShows = targetList
+        }
+        
+        // Trigger completion immediately for fast UI response
+        await MainActor.run {
+            onComplete()
+        }
+
+        // Do all heavy calculations and Firebase operations in background
+        if let userId = AuthenticationService.shared.currentUser?.uid {
+            Task.detached(priority: .background) {
+                do {
+                    print("insertMovie: Starting background processing for movie: \(movieWithProperScore.title) with score: \(movieWithProperScore.score)")
+                    
+                    // Capture scores before insertion for community rating updates
+                    let beforeScores: [UUID: Double] = await MainActor.run {
+                        return (movieWithProperScore.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
+                            result[movie.id] = movie.score
+                        }
+                    }
+                    
+                    // First save the movie with initial sentiment state (no community update)
+                    try await store.firestoreService.updateMovieRanking(
+                        userId: userId, 
+                        movie: movieWithProperScore,
+                        state: .initialSentiment
+                    )
+                    
+                    // Get the current list that includes the newly inserted movie
+                    let currentListWithNewMovie = await MainActor.run {
+                        return movieWithProperScore.mediaType == .movie ? store.movies : store.tvShows
+                    }
+                    
+                    // Recalculate scores for the list that includes the new movie (heavy operation)
+                    let (updatedList, personalUpdates) = await store.calculateScoreUpdatesForList(currentListWithNewMovie)
+                    
+                    // Update the UI with the recalculated scores
+                    await MainActor.run {
+                        if movieWithProperScore.mediaType == .movie {
+                            store.movies = updatedList
+                        } else {
+                            store.tvShows = updatedList
+                        }
+                    }
+                    
+                    // Update personal rankings in Firebase
+                    if !personalUpdates.isEmpty {
+                        try await store.firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                    }
+                    
+                    // Small delay to ensure UI updates are processed
+                    try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                    
+                    // Get the updated movie with its final recalculated score
+                    let finalMovie = updatedList.first { $0.id == movieWithProperScore.id } ?? movieWithProperScore
+                    
+                    // Always update community rating for new movies, or if score changed significantly for re-ranking
+                    let shouldUpdateCommunityRating = existingMovie == nil || abs(finalMovie.score - movieWithProperScore.score) > 0.01
+                    
+                    if shouldUpdateCommunityRating {
+                        print("insertMovie: Updating community rating for '\(finalMovie.title)' (score: \(movieWithProperScore.score) → \(finalMovie.score)), isNewMovie: \(existingMovie == nil)")
                         
-                        // Capture scores before insertion for community rating updates
-                        let beforeScores: [UUID: Double] = (newMovie.mediaType == .movie ? store.movies : store.tvShows).reduce(into: [:]) { result, movie in
+                        // Capture scores after final recalculation for community rating updates
+                        let afterScores: [UUID: Double] = updatedList.reduce(into: [:]) { result, movie in
                             result[movie.id] = movie.score
                         }
                         
-                        // First save the movie with initial sentiment state (no community update)
-                        try await store.firestoreService.updateMovieRanking(
-                            userId: userId, 
-                            movie: newMovie,
-                            state: .initialSentiment
-                        )
-                        
-                        // Get the current list that includes the newly inserted movie
-                        let currentListWithNewMovie = newMovie.mediaType == .movie ? store.movies : store.tvShows
-                        
-                        // Directly recalculate scores for the list that includes the new movie
-                        let (updatedList, personalUpdates) = await store.calculateScoreUpdatesForList(currentListWithNewMovie)
-                        
-                        // Update the UI with the recalculated scores
-                        await MainActor.run {
-                            if newMovie.mediaType == .movie {
-                                store.movies = updatedList
-                            } else {
-                                store.tvShows = updatedList
-                            }
-                            print("insertMovie: Updated UI with recalculated scores")
+                        // Update community ratings only for movies that had score changes
+                        for movie in updatedList {
+                            let beforeScore = beforeScores[movie.id] ?? 0.0
+                            let afterScore = afterScores[movie.id] ?? 0.0
                             
-                            // Force UI refresh to ensure the updated scores are displayed
-                            let tempMovies = store.movies
-                            let tempTVShows = store.tvShows
+                            // For new movies, always update the newly added movie's community rating
+                            // For re-ranking, only update if score changed significantly
+                            let shouldUpdateThisMovie = (existingMovie == nil && movie.id == movieWithProperScore.id) || 
+                                                       (existingMovie != nil && abs(afterScore - beforeScore) > 0.01)
                             
-                            // Temporarily clear and restore to force SwiftUI to re-render
-                            store.movies = []
-                            store.tvShows = []
-                            
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                store.movies = tempMovies
-                                store.tvShows = tempTVShows
-                            }
-                        }
-                        
-                        // Update personal rankings in Firebase
-                        if !personalUpdates.isEmpty {
-                            print("insertMovie: Updating \(personalUpdates.count) personal rankings")
-                            try await store.firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
-                        }
-                        
-                        // Small delay to ensure UI updates are processed
-                        try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds (reduced from 0.2)
-                        
-                        // Get the updated movie with its final recalculated score
-                        let finalMovie = updatedList.first { $0.id == newMovie.id } ?? newMovie
-                        
-                        print("insertMovie: Final movie '\(finalMovie.title)' score: \(finalMovie.score)")
-                        
-                        // Ensure we're using the recalculated score, not the original
-                        if finalMovie.score == newMovie.score {
-                            print("⚠️ WARNING: Final movie still has original score, recalculation may have failed")
-                        }
-                        
-                        // Update community rating for the NEW movie (add new user rating)
-                        try await store.firestoreService.updateMovieRanking(
-                            userId: userId, 
-                            movie: finalMovie,
-                            state: .finalInsertion
-                        )
-                        
-                        // Update community ratings for existing movies that had score changes
-                        var existingMovieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)] = []
-                        
-                        for existingMovie in updatedList {
-                            // Skip the newly inserted movie (already handled above)
-                            if existingMovie.id == newMovie.id { continue }
-                            
-                            let oldScore = beforeScores[existingMovie.id] ?? existingMovie.score
-                            let newScore = existingMovie.score
-                            
-                            // Only update if score actually changed
-                            if abs(oldScore - newScore) > 0.001 {
-                                existingMovieUpdates.append((
-                                    movie: existingMovie,
-                                    newScore: newScore,
-                                    oldScore: oldScore,
-                                    isNewRating: false // This is updating an existing user's rating
-                                ))
+                            if shouldUpdateThisMovie {
+                                if let tmdbId = movie.tmdbId {
+                                    print("insertMovie: Updating community rating for '\(movie.title)' (score: \(beforeScore) → \(afterScore))")
+                                    
+                                    // Remove from wishlist after ranking
+                                    try await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
+                                    
+                                    // Update community rating using finalInsertion for new movies or scoreUpdate for re-ranking
+                                    try await store.firestoreService.updateMovieRanking(
+                                        userId: userId,
+                                        movie: movie,
+                                        state: existingMovie == nil ? .finalInsertion : .scoreUpdate
+                                    )
+                                    
+                                    // Add activity
+                                    try await store.firestoreService.createActivityUpdate(
+                                        type: existingMovie != nil ? .movieUpdated : .movieRanked,
+                                        movie: movie
+                                    )
+                                    
+                                    // Update user's top movie poster if this is a high-rated movie
+                                    try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
+                                }
                             }
                         }
                         
-                        // Batch update community ratings for affected existing movies
-                        if !existingMovieUpdates.isEmpty {
-                            print("insertMovie: Updating community ratings for \(existingMovieUpdates.count) existing movies")
-                            try await store.firestoreService.batchUpdateRatingsWithMovies(movieUpdates: existingMovieUpdates)
+                        // Refresh global ratings to show the newly added movie
+                        await store.loadGlobalRatings(forceRefresh: true)
+                    }
+                    
+                    print("insertMovie: Background processing completed successfully")
+                    
+                } catch {
+                    print("insertMovie: Background processing error: \(error)")
+                    // On error, try to revert the optimistic update
+                    await MainActor.run {
+                        if movieWithProperScore.mediaType == .movie {
+                            store.movies.removeAll { $0.id == movieWithProperScore.id }
+                        } else {
+                            store.tvShows.removeAll { $0.id == movieWithProperScore.id }
                         }
-                        
-                        print("✅ insertMovie: Completed for '\(finalMovie.title)' with final score: \(finalMovie.score)")
-                        
-                        // Update user's top movie poster
-                        do {
-                            try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
-                            print("✅ insertMovie: Updated user's top movie poster")
-                        } catch {
-                            print("⚠️ insertMovie: Failed to update user's top movie poster: \(error)")
-                        }
-                        
-                        // Create activity update for friends to see
-                        do {
-                            try await store.firestoreService.createActivityUpdate(
-                                type: .movieRanked,
-                                movie: finalMovie
-                            )
-                        } catch {
-                            print("Failed to create activity update: \(error)")
-                            // Don't fail the whole operation if activity update fails
-                        }
-                        
-                        // Remove from Future Cannes if it was there
-                        if let tmdbId = finalMovie.tmdbId {
-                            await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
-                        }
-                        
-                        // Resume continuation after all operations complete
-                        continuation.resume()
-                    } catch {
-                        print("Error saving movie: \(error)")
+                        print("insertMovie: Reverted optimistic update due to error")
                         // Show error to user
-                        await MainActor.run {
-                            store.errorMessage = store.handleError(error)
-                            store.showError = true
-                        }
-                        continuation.resume()
+                        store.errorMessage = store.handleError(error)
+                        store.showError = true
                     }
                 }
-            } else {
-                continuation.resume()
             }
         }
     }
@@ -834,20 +816,129 @@ struct ComparisonView: View {
             let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
             if existingMovie != nil {
                 print("Too close to call: Movie already exists with TMDB ID \(tmdbId), skipping completely")
-                await MainActor.run {
-                    onComplete()
-                }
                 return
             }
         }
         
-        // Insert at mid+2 position using the existing insertMovie function
-        let finalRank = mid + 2
-        await insertMovie(at: finalRank)
+        // Add to middle of appropriate sentiment section immediately (optimistic update)
+        var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
         
-        // Call onComplete after all Firebase operations are done
+        // Find the middle of the appropriate sentiment section
+        let insertionIndex: Int
+        if let sectionStart = targetList.firstIndex(where: { $0.sentiment == newMovie.sentiment }) {
+            let sectionEnd = targetList.lastIndex(where: { $0.sentiment == newMovie.sentiment }) ?? sectionStart
+            insertionIndex = (sectionStart + sectionEnd) / 2 + 1
+            print("Too close to call: Will insert '\(newMovie.title)' at middle of section (index \(insertionIndex))")
+        } else {
+            // No existing movies with this sentiment, add at the end
+            insertionIndex = targetList.count
+            print("Too close to call: Will append '\(newMovie.title)' to end of list")
+        }
+        
+        // Calculate the proper score for this position BEFORE inserting
+        let properScore = store.calculateScoreForMovie(at: insertionIndex, in: targetList, sentiment: newMovie.sentiment)
+        
+        // Create a new movie with the proper score
+        var movieWithProperScore = newMovie
+        movieWithProperScore.score = properScore
+        
+        print("Too close to call: Movie '\(newMovie.title)' score updated from \(newMovie.score) to \(properScore)")
+        
+        // Insert the movie with the proper score
+        targetList.insert(movieWithProperScore, at: insertionIndex)
+        
+        // Update the UI immediately
+        if movieWithProperScore.mediaType == .movie {
+            store.movies = targetList
+        } else {
+            store.tvShows = targetList
+        }
+        
+        // Trigger completion immediately for fast UI response
         await MainActor.run {
             onComplete()
+        }
+        
+        // Do heavy processing in background
+        if let userId = AuthenticationService.shared.currentUser?.uid {
+            Task.detached(priority: .background) {
+                do {
+                    print("Too close to call: Starting background processing for '\(movieWithProperScore.title)'")
+                    
+                    // Save to Firebase and update community ratings in background
+                    try await store.firestoreService.updateMovieRanking(
+                        userId: userId,
+                        movie: movieWithProperScore,
+                        state: .initialSentiment
+                    )
+                    
+                    // Recalculate scores in background
+                    let currentList = await MainActor.run {
+                        return movieWithProperScore.mediaType == .movie ? store.movies : store.tvShows
+                    }
+                    
+                    let (updatedList, personalUpdates) = await store.calculateScoreUpdatesForList(currentList)
+                    
+                    // Update UI with recalculated scores
+                    await MainActor.run {
+                        if movieWithProperScore.mediaType == .movie {
+                            store.movies = updatedList
+                        } else {
+                            store.tvShows = updatedList
+                        }
+                        print("Too close to call: Updated UI with recalculated scores (background)")
+                    }
+                    
+                    // Update Firebase with final data
+                    if !personalUpdates.isEmpty {
+                        try await store.firestoreService.updatePersonalRankings(userId: userId, movieUpdates: personalUpdates)
+                    }
+                    
+                    // Get the final movie after recalculation
+                    let finalMovie = updatedList.first { $0.id == movieWithProperScore.id } ?? movieWithProperScore
+                    
+                    // Community rating and activity updates
+                    try await store.firestoreService.updateMovieRanking(
+                        userId: userId,
+                        movie: finalMovie,
+                        state: .finalInsertion
+                    )
+                    
+                    // Add activity update
+                    try await store.firestoreService.createActivityUpdate(
+                        type: .movieRanked,
+                        movie: finalMovie
+                    )
+                    
+                    // Update user's top movie poster
+                    try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
+                    
+                    // Remove from Future Cannes if it was there
+                    if let tmdbId = finalMovie.tmdbId {
+                        await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
+                    }
+                    
+                    // Refresh global ratings to show the newly added movie
+                    await store.loadGlobalRatings(forceRefresh: true)
+                    
+                    print("✅ Too close to call: All background operations completed for '\(finalMovie.title)'")
+                    
+                } catch {
+                    print("Too close to call: Background processing error: \(error)")
+                    // On error, try to revert the optimistic update
+                    await MainActor.run {
+                        if movieWithProperScore.mediaType == .movie {
+                            store.movies.removeAll { $0.id == movieWithProperScore.id }
+                        } else {
+                            store.tvShows.removeAll { $0.id == movieWithProperScore.id }
+                        }
+                        print("Too close to call: Reverted optimistic update due to error")
+                        // Show error to user
+                        store.errorMessage = store.handleError(error)
+                        store.showError = true
+                    }
+                }
+            }
         }
     }
 

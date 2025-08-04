@@ -413,73 +413,16 @@ struct GlobalRatingRow: View {
 
                 Spacer()
 
-                HStack(spacing: 4) {
-                    // Show user's rating difference if they have rated this movie
-                    if let tmdbId = rating.tmdbId,
-                       let userScore = store.getUserPersonalScore(for: tmdbId) {
-                        // Round both scores consistently before calculating difference
-                        let roundedUserScore = roundToTenths(userScore)
-                        let roundedCommunityScore = roundToTenths(rating.confidenceAdjustedScore)
-                        let difference = roundedUserScore - roundedCommunityScore
-                        let isHigher = difference > 0
-                        let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
-                        let arrow = isHigher ? "arrow.up" : "arrow.down"
-                        
-                        VStack(spacing: 1) {
-                            if abs(difference) < 0.1 {
-                                // Show dash for very small differences (essentially zero)
-                                Text("—")
-                                    .font(.caption2)
-                                    .foregroundColor(.gray)
-                            } else {
-                                Image(systemName: arrow)
-                                    .foregroundColor(color)
-                                    .font(.caption2)
-                                Text(String(format: "%.1f", abs(difference)))
-                                    .font(.caption2)
-                                    .foregroundColor(color)
-                            }
-                        }
-                        .frame(width: 20)
-                    } else {
-                        // Empty space to maintain alignment when user hasn't rated
-                        Spacer()
-                            .frame(width: 20)
-                    }
-                    
-                    // Golden circle for high scores in top 5
-                    if position <= 5 && rating.confidenceAdjustedScore >= 9.0 {
-                        ZStack {
-                            // Halo effect
-                            Circle()
-                                .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
-                                .frame(width: 52, height: 52)
-                                .blur(radius: 2)
-                            
-                            // Main golden circle
-                            Circle()
-                                .fill(Color.adaptiveGolden(for: colorScheme))
-                                .frame(width: 44, height: 44)
-                                .overlay(
-                                    Text(position == 1 ? "🐐" : String(format: "%.1f", roundToTenths(displayScore)))
-                                        .font(position == 1 ? .title : .headline).bold()
-                                        .foregroundColor(.black)
-                                )
-                                .shadow(color: Color.adaptiveGolden(for: colorScheme).opacity(0.5), radius: 4, x: 0, y: 0)
-                        }
-                        .frame(width: 52, height: 52)
-                    } else {
-                        Text(position == 1 ? "🐐" : String(format: "%.1f", roundToTenths(displayScore)))
-                            .font(position == 1 ? .title : .headline).bold()
-                            .foregroundColor(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
-                            .frame(width: 44, height: 44)
-                            .background(
-                                Circle()
-                                    .stroke(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme), lineWidth: 2)
-                            )
-                            .frame(width: 52, height: 52)
-                    }
-                }
+                // Simple community rating display
+                Text(String(format: "%.1f", displayScore))
+                    .font(.headline).bold()
+                    .foregroundColor(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme))
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .stroke(Color.adaptiveSentiment(for: rating.confidenceAdjustedScore, colorScheme: colorScheme), lineWidth: 2)
+                    )
+                    .frame(width: 52, height: 52)
 
                 Image(systemName: "chevron.right")
                     .foregroundColor(.gray)
@@ -556,6 +499,7 @@ struct UnifiedMovieDetailView: View {
     // Community rating data
     @State private var communityRating: GlobalRating?
     @State private var numberOfRatings: Int = 0
+    @State private var isLoadingCommunityRating = false
     
     // Takes state variables
     @State private var takes: [Take] = []
@@ -578,6 +522,12 @@ struct UnifiedMovieDetailView: View {
     // Friends' Ratings state variables
     @State private var selectedFriendUserId: String?
     @State private var showingFriendProfile = false
+    
+    // Wishlist state variables
+    @State private var isAddingToWishlist = false
+    @State private var isInWishlist = false
+    @State private var wishlistItemId: String?
+    @State private var isLoadingWishlistStatus = false
     
     @EnvironmentObject var authService: AuthenticationService
     
@@ -677,12 +627,29 @@ struct UnifiedMovieDetailView: View {
     }
     
     // Initialize with Movie (for personal view)
-    init(movie: Movie, store: MovieStore) {
+    init(movie: Movie, store: MovieStore, isFromWishlist: Bool = false) {
         self.tmdbId = movie.tmdbId
         self.movieTitle = movie.title
         self.mediaType = movie.mediaType
         self.initialRating = nil
         self.initialMovie = movie
+        self.store = store
+        self.notificationSenderRating = nil
+        
+        // If coming from wishlist, set initial state
+        if isFromWishlist {
+            self._isInWishlist = State(initialValue: true)
+            self._isLoadingWishlistStatus = State(initialValue: false)
+        }
+    }
+    
+    // Initialize with TMDB ID, title, and media type (for search results)
+    init(tmdbId: Int, movieTitle: String, mediaType: AppModels.MediaType, store: MovieStore) {
+        self.tmdbId = tmdbId
+        self.movieTitle = movieTitle
+        self.mediaType = mediaType
+        self.initialRating = nil
+        self.initialMovie = nil
         self.store = store
         self.notificationSenderRating = nil
     }
@@ -701,7 +668,8 @@ struct UnifiedMovieDetailView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 20)
                 
-                if isLoading || isLoadingFriendsRatings || isLoadingTakes || isLoadingSeasons {
+                if isLoading {
+                    // Only block on main movie details loading
                     loadingView
                 } else if let error = errorMessage {
                     errorView(message: error)
@@ -720,7 +688,7 @@ struct UnifiedMovieDetailView: View {
             withAnimation(.easeOut(duration: 0.3)) {
                 isAppearing = true
             }
-            loadAllData()
+            loadAllDataOptimized()
         }
         .sheet(isPresented: $showingAddMovie) {
             if let movieDetails = movieDetails {
@@ -728,10 +696,18 @@ struct UnifiedMovieDetailView: View {
                     tmdbMovie: movieDetails,
                     store: store,
                     onComplete: { 
+                        // Don't dismiss the entire detail view, just close the add movie sheet
+                        showingAddMovie = false
+                        
+                        // Remove from wishlist if it exists there
                         Task {
+                            await removeFromWishlistAfterRanking(tmdbId: movieDetails.id)
+                            
+                            // Reload the movie data to reflect the new ranking
                             await store.loadGlobalRatings()
+                            // Refresh this movie's details to show it's now ranked
+                            await loadAllDataOptimized()
                         }
-                        dismiss() 
                     }
                 )
                 .onAppear {
@@ -804,6 +780,14 @@ struct UnifiedMovieDetailView: View {
                 if let existingMovie = existingMovie {
                     // Use the actual existing movie for re-ranking
                     AddMovieView(store: store, existingMovie: existingMovie)
+                        .onDisappear {
+                            // Remove from wishlist after re-ranking (in case it was added there)
+                            Task {
+                                await removeFromWishlistAfterRanking(tmdbId: tmdbId)
+                                // Refresh the movie details
+                                await loadAllDataOptimized()
+                            }
+                        }
                 } else {
                     // Fallback: create a new movie object if we can't find the existing one
                     let fallbackMovie = Movie(
@@ -812,54 +796,75 @@ struct UnifiedMovieDetailView: View {
                         sentiment: sentimentFromScore(userScore),
                         tmdbId: displayTmdbId,
                         mediaType: displayMediaType,
+                        genres: [],
                         score: userScore
                     )
                     AddMovieView(store: store, existingMovie: fallbackMovie)
+                        .onDisappear {
+                            // Remove from wishlist after re-ranking (in case it was added there)
+                            Task {
+                                await removeFromWishlistAfterRanking(tmdbId: tmdbId)
+                                // Refresh the movie details
+                                await loadAllDataOptimized()
+                            }
+                        }
                 }
             }
         }
     }
     
-    private func loadAllData() {
-        // Set all loading states to true
+    private func loadAllDataOptimized() {
+        // Set main loading state
         isLoading = true
-        isLoadingFriendsRatings = true
-        isLoadingTakes = true
-        isLoadingSeasons = true
         
         Task {
-            // Load all data concurrently
-            async let movieDetailsTask = loadMovieDetailsAsync()
+            // Load movie details first (highest priority)
+            let movieDetailsResult = await loadMovieDetailsAsync()
+            
+            // Show movie details immediately
+            await MainActor.run {
+                if let details = movieDetailsResult {
+                    movieDetails = details
+                }
+                isLoading = false // Allow UI to render with movie details
+            }
+            
+            // Start loading secondary data in background (non-blocking)
+            isLoadingFriendsRatings = true
+            isLoadingTakes = true
+            isLoadingSeasons = true
+            isLoadingCommunityRating = true
+            // Only show loading state if we don't already know the wishlist status
+            if !isInWishlist {
+                isLoadingWishlistStatus = true
+            }
+            
+            // Load secondary data concurrently in background
             async let friendsRatingsTask = loadFriendsRatingsAsync()
             async let takesTask = loadTakesAsync()
             async let communityRatingTask = loadCommunityRatingAsync()
             async let seasonsTask = loadSeasonsAsync()
+            async let wishlistCheckTask = checkIfInWishlist()
             
-            // Wait for all tasks to complete
-            let (movieDetailsResult, friendsRatingsResult, takesResult, communityRatingResult, seasonsResult) = await (
-                movieDetailsTask,
+            // Wait for secondary tasks to complete
+            let (friendsRatingsResult, takesResult, communityRatingResult, seasonsResult, wishlistResult) = await (
                 friendsRatingsTask,
                 takesTask,
                 communityRatingTask,
-                seasonsTask
+                seasonsTask,
+                wishlistCheckTask
             )
             
-            // Get actual global statistics for accurate confidence calculation
+            // Get global statistics for community rating calculation
             let globalStats = try? await firestoreService.getGlobalRatingsStatistics()
             let totalRatings = globalStats?.totalRatings ?? 100
             let totalMovies = globalStats?.totalMovies ?? 50
             
             await MainActor.run {
-                // Update movie details
-                if let details = movieDetailsResult {
-                    movieDetails = details
-                }
-                
-                // Update friends ratings
+                // Update secondary data
                 friendsRatings = friendsRatingsResult
-                
-                // Update takes
                 takes = takesResult
+                seasons = seasonsResult
                 
                 // Update community rating
                 if let rating = communityRatingResult {
@@ -876,20 +881,22 @@ struct UnifiedMovieDetailView: View {
                     numberOfRatings = rating.numberOfRatings
                 }
                 
-                // Update seasons
-                seasons = seasonsResult
+                // Update wishlist status
+                isInWishlist = wishlistResult.isInWishlist
+                wishlistItemId = wishlistResult.itemId
                 
-                // Set all loading states to false
-                isLoading = false
+                // Set secondary loading states to false
                 isLoadingFriendsRatings = false
                 isLoadingTakes = false
                 isLoadingSeasons = false
+                isLoadingCommunityRating = false
+                isLoadingWishlistStatus = false
             }
         }
     }
     
     private func loadMovieDetailsAsync() async -> AppModels.Movie? {
-        // Get TMDB ID from either rating or movie
+        // Get TMDB ID from either rating, movie, or direct properties
         let tmdbId: Int?
         let mediaType: AppModels.MediaType
         
@@ -899,6 +906,10 @@ struct UnifiedMovieDetailView: View {
         } else if let movie = initialMovie {
             tmdbId = movie.tmdbId
             mediaType = movie.mediaType
+        } else if let directTmdbId = self.tmdbId, let directMediaType = self.mediaType {
+            // Handle the new initializer case
+            tmdbId = directTmdbId
+            mediaType = directMediaType
         } else {
             // No TMDB ID available
             return nil
@@ -1244,7 +1255,7 @@ struct UnifiedMovieDetailView: View {
             }
             
             Button("Try Again") {
-                loadAllData()
+                loadAllDataOptimized()
             }
             .buttonStyle(.borderedProminent)
         }
@@ -1306,86 +1317,206 @@ struct UnifiedMovieDetailView: View {
         Group {
             if let tmdbId = displayTmdbId,
                let userScore = store.getUserPersonalScore(for: tmdbId) {
-                
-                // Round both scores consistently before calculating difference
-                let roundedUserScore = roundToTenths(userScore)
-                let roundedCommunityScore = roundToTenths(displayAverageRating ?? 0.0)
-                let difference = roundedUserScore - roundedCommunityScore
-                let isHigher = difference > 0
-                let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? Color.adaptiveSentiment(for: userScore, colorScheme: colorScheme) : .red)
-                let arrow = isHigher ? "arrow.up" : "arrow.down"
-                
-                VStack(spacing: 6) {
-                    // Labels row
-                    GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3
-                        HStack(spacing: 18) {
-                            Text("Community")
-                                .font(.subheadline).fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .frame(width: side, alignment: .center)
-                            
-                            // Empty space for net difference (no label)
-                            Spacer()
-                                .frame(width: side)
-                            
-                            Text("My Rating")
-                                .font(.subheadline).fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .fixedSize()
-                                .frame(width: side, alignment: .center)
-                        }
-                    }
-                    .frame(height: 18)
-
-                    // Numbers row
-                    GeometryReader { geometry in
-                        let side = (geometry.size.width - 2*18) / 3
-                        HStack(spacing: 18) {
-                            ratingCircle(value: roundedCommunityScore, color: displaySentimentColor, size: side)
-                            diffCircle(value: difference, arrow: arrow, color: color, size: side)
-                            ratingCircle(value: roundedUserScore, color: .accentColor, size: side)
-                        }
-                    }
-                    .frame(height: 96)
-                }
-                .frame(minHeight: 120)
-                .layoutPriority(1)
-
+                userRatingComparisonView(tmdbId: tmdbId, userScore: userScore)
             } else {
                 // Fallback if not rated
-                Button(action: {
-                    store.selectedMediaType = displayMediaType
-                    showingAddMovie = true
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: store.isOffline ? "wifi.slash" : "plus.circle.fill")
-                            .font(.title2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(store.isOffline ? "Offline - Cannot Rate" : "Rank This \(displayMediaType.rawValue)")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            if !store.isOffline {
-                                Text("Share your rating with the community")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        }
-                        Spacer()
-                    }
-                    .foregroundColor(.white)
-                    .padding(.vertical, 16)
-                    .padding(.horizontal, 20)
-                    .frame(maxWidth: .infinity)
-                    .background(store.isOffline ? Color.gray : Color.accentColor)
-                    .cornerRadius(16)
-                    .shadow(color: store.isOffline ? .gray.opacity(0.3) : .accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
-                }
-                .disabled(store.isOffline)
+                unratedMovieButtonsView
             }
+        }
+    }
+    
+    private func userRatingComparisonView(tmdbId: Int, userScore: Double) -> some View {
+        // Round both scores consistently before calculating difference
+        let roundedUserScore = roundToTenths(userScore)
+        let roundedCommunityScore: Double? = isLoadingCommunityRating ? nil : displayAverageRating
+        
+        // When community rating is loading, set difference to 0 to show neutral state
+        let differenceData = calculateDifferenceData(
+            userScore: roundedUserScore, 
+            communityScore: roundedCommunityScore,
+            isLoading: isLoadingCommunityRating
+        )
+        
+        return VStack(spacing: 6) {
+            // Labels row
+            GeometryReader { geometry in
+                let side = (geometry.size.width - 2*18) / 3
+                HStack(spacing: 18) {
+                    Text("Community")
+                        .font(.subheadline).fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: side, alignment: .center)
+                    
+                    // Empty space for net difference (no label)
+                    Spacer()
+                        .frame(width: side)
+                    
+                    Text("My Rating")
+                        .font(.subheadline).fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: side, alignment: .center)
+                }
+            }
+            .frame(height: 18)
+
+            // Numbers row
+            GeometryReader { geometry in
+                let side = (geometry.size.width - 2*18) / 3
+                HStack(spacing: 18) {
+                    communityRatingCircle(value: roundedCommunityScore, color: displaySentimentColor, size: side, isLoading: isLoadingCommunityRating)
+                    diffCircle(value: differenceData.difference, arrow: differenceData.arrow, color: differenceData.color, size: side)
+                    ratingCircle(value: roundedUserScore, color: .accentColor, size: side)
+                }
+            }
+            .frame(height: 96)
+        }
+        .frame(minHeight: 120)
+        .layoutPriority(1)
+    }
+    
+    private var unratedMovieButtonsView: some View {
+        VStack(spacing: 12) {
+            Button(action: {
+                store.selectedMediaType = displayMediaType
+                showingAddMovie = true
+            }) {
+                HStack(spacing: 12) {
+                    Image(systemName: store.isOffline ? "wifi.slash" : "plus.circle.fill")
+                        .font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.isOffline ? "Offline - Cannot Rate" : "Rank This \(displayMediaType.rawValue)")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        if !store.isOffline {
+                            Text("Share your rating with the community")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    Spacer()
+                }
+                .foregroundColor(.white)
+                .padding(.vertical, 16)
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity)
+                .background(store.isOffline ? Color.gray : Color.accentColor)
+                .cornerRadius(16)
+                .shadow(color: store.isOffline ? .gray.opacity(0.3) : .accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
+            }
+            .disabled(store.isOffline)
+            
+            wishlistButtonView
+        }
+    }
+    
+    private var wishlistButtonView: some View {
+        Button(action: {
+            print("DEBUG: Button pressed - Current state:")
+            print("  - isInWishlist: \(isInWishlist)")
+            print("  - wishlistItemId: \(wishlistItemId ?? "nil")")
+            print("  - isAddingToWishlist: \(isAddingToWishlist)")
+            print("  - Button mode: \(isInWishlist ? "REMOVE" : "ADD")")
+            
+            if !isAddingToWishlist && !isLoadingWishlistStatus {
+                Task {
+                    if isInWishlist {
+                        print("DEBUG: Calling removeFromWishlist")
+                        await removeFromWishlist()
+                    } else {
+                        print("DEBUG: Calling addToWishlist")
+                        await addToWishlist()
+                    }
+                }
+            }
+        }) {
+            wishlistButtonContent
+        }
+        .disabled(store.isOffline || isAddingToWishlist || isLoadingWishlistStatus)
+    }
+    
+    private var wishlistButtonContent: some View {
+        HStack(spacing: 12) {
+            if isAddingToWishlist {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .foregroundColor(.white)
+            } else if isLoadingWishlistStatus {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .foregroundColor(.white)
+            } else {
+                Image(systemName: isInWishlist ? "heart.slash.fill" : "heart.fill")
+                    .font(.title2)
+                    .foregroundColor(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(wishlistButtonText)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                if !isAddingToWishlist && !isLoadingWishlistStatus {
+                    Text(isInWishlist ? "Remove from your saved list" : "Save for later rating")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.9))
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
+        .background(wishlistButtonGradient)
+        .cornerRadius(16)
+        .shadow(color: wishlistButtonShadowColor, radius: 8, x: 0, y: 4)
+    }
+    
+    private var wishlistButtonText: String {
+        if isLoadingWishlistStatus {
+            return "Checking Wish List..."
+        } else if isAddingToWishlist {
+            return isInWishlist ? "Removing from Wish List..." : "Adding to Wish List..."
+        } else {
+            return isInWishlist ? "Remove from Wish List" : "Add to Wish List"
+        }
+    }
+    
+    private var wishlistButtonGradient: LinearGradient {
+        LinearGradient(
+            gradient: Gradient(colors: 
+                isLoadingWishlistStatus ? [Color.gray.opacity(0.6), Color.gray.opacity(0.5)] :
+                isInWishlist ? [Color.gray.opacity(0.7), Color.gray.opacity(0.6)] : 
+                [Color.pink.opacity(0.8), Color.purple.opacity(0.8)]
+            ),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+    
+    private var wishlistButtonShadowColor: Color {
+        if isLoadingWishlistStatus {
+            return .gray.opacity(0.2)
+        } else if isInWishlist {
+            return .gray.opacity(0.3)
+        } else {
+            return .pink.opacity(0.4)
+        }
+    }
+    
+    private func calculateDifferenceData(userScore: Double, communityScore: Double?, isLoading: Bool) -> (difference: Double, color: Color, arrow: String) {
+        if isLoading || communityScore == nil {
+            // Neutral state when loading or no community rating available
+            return (0.0, .gray, "minus")
+        } else {
+            let actualCommunityScore = roundToTenths(communityScore!)
+            let difference = userScore - actualCommunityScore
+            let isHigher = difference > 0
+            let color: Color = abs(difference) < 0.1 ? .gray : (isHigher ? .green : .red)
+            let arrow = isHigher ? "arrow.up" : "arrow.down"
+            return (difference, color, arrow)
         }
     }
     
@@ -1885,6 +2016,29 @@ struct UnifiedMovieDetailView: View {
         .padding(2)
     }
 
+    private func communityRatingCircle(value: Double?, color: Color, size: CGFloat, isLoading: Bool) -> some View {
+        ZStack {
+            Circle()
+                .stroke(color, lineWidth: 2)
+                .frame(width: size, height: size)
+            
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .foregroundColor(color)
+            } else if let value = value {
+                Text(String(format: "%.1f", value))
+                    .font(.title2).bold()
+                    .foregroundColor(color)
+            } else {
+                Text("—")
+                    .font(.title2).bold()
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(2)
+    }
+
     private func diffCircle(value: Double, arrow: String, color: Color, size: CGFloat) -> some View {
         ZStack {
             Circle()
@@ -1908,6 +2062,216 @@ struct UnifiedMovieDetailView: View {
             }
         }
         .padding(2)
+    }
+    
+    private func addToWishlist() async {
+        guard let tmdbId = displayTmdbId else { return }
+        
+        await MainActor.run {
+            isAddingToWishlist = true
+        }
+        
+        do {
+            let firestoreService = FirestoreService()
+            
+            // First check if it already exists to prevent duplicates
+            let existingItems = try await firestoreService.getFutureCannesList()
+            if let existingItem = existingItems.first(where: { $0.movie.id == tmdbId }) {
+                print("DEBUG: Item already exists in wishlist with ID: \(existingItem.id)")
+                await MainActor.run {
+                    isAddingToWishlist = false
+                    isInWishlist = true
+                    wishlistItemId = existingItem.id
+                }
+                return
+            }
+            
+            // Create a TMDBMovie object from current data
+            let tmdbMovie = TMDBMovie(
+                id: tmdbId,
+                title: movieTitle,
+                name: movieTitle,
+                overview: movieDetails?.overview ?? "",
+                posterPath: movieDetails?.poster_path,
+                releaseDate: movieDetails?.release_date,
+                firstAirDate: movieDetails?.first_air_date,
+                voteAverage: movieDetails?.vote_average ?? 0.0,
+                voteCount: movieDetails?.vote_count ?? 0,
+                genres: movieDetails?.genres?.map { TMDBGenre(id: $0.id, name: $0.name) },
+                mediaType: displayMediaType.rawValue,
+                runtime: movieDetails?.runtime,
+                episodeRunTime: movieDetails?.episode_run_time
+            )
+            
+            try await firestoreService.addToFutureCannes(movie: tmdbMovie)
+            print("DEBUG: Successfully added to Firestore")
+            
+            // Create the new item for cache
+            let newItem = FutureCannesItem(
+                id: UUID().uuidString,
+                movie: tmdbMovie,
+                dateAdded: Date()
+            )
+            
+            // Update cache by adding the new item
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                let cacheManager = CacheManager.shared
+                var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) ?? []
+                cachedItems.append(newItem)
+                cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                print("DEBUG: Updated cache after adding")
+            }
+            
+            await MainActor.run {
+                isAddingToWishlist = false
+                
+                // Update wishlist state
+                isInWishlist = true
+                wishlistItemId = newItem.id
+                
+                print("DEBUG: Updated UI state - isInWishlist: \(isInWishlist), itemId: \(newItem.id)")
+                
+                // Set the media type to match what was added
+                store.selectedMediaType = displayMediaType
+                
+                // Dismiss this view
+                dismiss()
+                
+                // Post notification to switch to wishlist
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("SwitchToWishlist"),
+                    object: nil,
+                    userInfo: ["mediaType": displayMediaType]
+                )
+            }
+        } catch {
+            print("DEBUG: Error adding to wishlist: \(error)")
+            await MainActor.run {
+                isAddingToWishlist = false
+            }
+        }
+    }
+    
+    private func removeFromWishlist() async {
+        guard let itemId = wishlistItemId else { 
+            print("DEBUG: No wishlistItemId found")
+            return 
+        }
+        
+        print("DEBUG: Attempting to remove item with ID: \(itemId)")
+        
+        await MainActor.run {
+            isAddingToWishlist = true
+        }
+        
+        do {
+            let firestoreService = FirestoreService()
+            try await firestoreService.removeFromFutureCannes(itemId: itemId)
+            print("DEBUG: Successfully removed item from Firestore")
+            
+            // Update cache by removing the item
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                let cacheManager = CacheManager.shared
+                if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                    cachedItems.removeAll { $0.id == itemId }
+                    cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                    print("DEBUG: Updated cache after removal")
+                }
+            }
+            
+            await MainActor.run {
+                isAddingToWishlist = false
+                
+                // Update the UI state immediately
+                isInWishlist = false
+                wishlistItemId = nil
+                
+                print("DEBUG: Updated UI state - isInWishlist: \(isInWishlist)")
+                
+                // Notify to refresh the wishlist view
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RefreshWishlist"),
+                    object: nil
+                )
+            }
+        } catch {
+            print("DEBUG: Error removing from wishlist: \(error)")
+            await MainActor.run {
+                isAddingToWishlist = false
+            }
+        }
+    }
+    
+    private func checkIfInWishlist(forceRefresh: Bool = false) async -> (isInWishlist: Bool, itemId: String?) {
+        guard let tmdbId = displayTmdbId else { 
+            print("DEBUG: No TMDB ID available for wishlist check")
+            return (false, nil)
+        }
+        
+        print("DEBUG: Checking wishlist for TMDB ID: \(tmdbId), forceRefresh: \(forceRefresh)")
+        
+        do {
+            let firestoreService = FirestoreService()
+            let futureCannesItems = try await firestoreService.getFutureCannesList()
+            print("DEBUG: Found \(futureCannesItems.count) items in Future Cannes list")
+            
+            if let existingItem = futureCannesItems.first(where: { $0.movie.id == tmdbId }) {
+                print("DEBUG: Movie found in wishlist with item ID: \(existingItem.id)")
+                return (true, existingItem.id)
+            } else {
+                print("DEBUG: Movie NOT found in wishlist")
+                return (false, nil)
+            }
+        } catch {
+            print("DEBUG: Error checking wishlist status: \(error)")
+            return (false, nil)
+        }
+    }
+    
+    private func removeFromWishlistAfterRanking(tmdbId: Int) async {
+        print("DEBUG: Checking if ranked movie (TMDB ID: \(tmdbId)) needs to be removed from wishlist")
+        
+        do {
+            let firestoreService = FirestoreService()
+            let futureCannesItems = try await firestoreService.getFutureCannesList()
+            
+            if let itemToRemove = futureCannesItems.first(where: { $0.movie.id == tmdbId }) {
+                print("DEBUG: Found ranked movie in wishlist, removing item ID: \(itemToRemove.id)")
+                
+                // Remove from Firestore
+                try await firestoreService.removeFromFutureCannes(itemId: itemToRemove.id)
+                print("DEBUG: Successfully removed ranked movie from Firestore wishlist")
+                
+                // Update cache
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    let cacheManager = CacheManager.shared
+                    if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                        cachedItems.removeAll { $0.id == itemToRemove.id }
+                        cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                        print("DEBUG: Updated cache after removing ranked movie")
+                    }
+                }
+                
+                // Update local state if this view is showing the same movie
+                await MainActor.run {
+                    if displayTmdbId == tmdbId {
+                        isInWishlist = false
+                        wishlistItemId = nil
+                        print("DEBUG: Updated local UI state - movie no longer in wishlist")
+                    }
+                    
+                    // Notify to refresh the wishlist view
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RefreshWishlist"),
+                        object: nil
+                    )
+                }
+            } else {
+                print("DEBUG: Ranked movie was not in wishlist, no removal needed")
+            }
+        } catch {
+            print("DEBUG: Error removing ranked movie from wishlist: \(error)")
+        }
     }
 }
 

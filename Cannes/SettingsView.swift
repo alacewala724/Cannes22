@@ -505,29 +505,6 @@ struct SettingsView: View {
                             Text(notificationService.notificationPermissionGranted ? "Granted" : "Not Granted")
                                 .foregroundColor(notificationService.notificationPermissionGranted ? .green : .red)
                         }
-                        
-                        HStack {
-                            Text("FCM Token")
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            Text(notificationService.isTokenRefreshed ? "Ready" : "Not Ready")
-                                .foregroundColor(notificationService.isTokenRefreshed ? .green : .orange)
-                        }
-                        
-                        Button(action: {
-                            notificationService.refreshFCMToken()
-                        }) {
-                            HStack {
-                                Text("Refresh Token")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        if notificationService.fcmToken != nil {
-                            Text("Token: \(String(notificationService.fcmToken!.prefix(20)))...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
                     }
                     .padding(.vertical, 8)
                 }

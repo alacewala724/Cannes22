@@ -32,7 +32,8 @@ final class MovieStore: ObservableObject {
     private let cacheManager = CacheManager.shared
     private let networkMonitor = NetworkMonitor.shared
     private var isDeleting = false // Flag to prevent reloading during deletion
-    private var isLoading = false // Flag to prevent concurrent loading
+    private var isLoading = false // Flag to prevent concurrent loading of personal movies
+    private var isLoadingGlobalRatings = false // Flag to prevent concurrent loading of global ratings
     
     private struct Band {
         let min: Double
@@ -453,6 +454,9 @@ final class MovieStore: ObservableObject {
                     await removeFromFutureCannesIfRanked(tmdbId: tmdbId)
                 }
                 
+                // Refresh global ratings to show the newly added movie
+                await loadGlobalRatings(forceRefresh: true)
+                
                 // Update cache after successful insertion
                 await MainActor.run {
                     updateCacheAfterInsertion()
@@ -475,7 +479,7 @@ final class MovieStore: ObservableObject {
         lastSyncDate = Date()
     }
     
-    private func calculateScoreForMovie(at index: Int, in list: [Movie], sentiment: MovieSentiment) -> Double {
+    func calculateScoreForMovie(at index: Int, in list: [Movie], sentiment: MovieSentiment) -> Double {
         guard let band = bands[sentiment] else { return 5.0 }
         
         // Find all movies in the same sentiment section
@@ -1052,13 +1056,13 @@ final class MovieStore: ObservableObject {
     }
     
     func loadGlobalRatings(forceRefresh: Bool = false) async {
-        guard !isLoading else {
+        guard !isLoadingGlobalRatings else {
             print("loadGlobalRatings: Already loading, skipping")
             return
         }
         
-        isLoading = true
-        defer { isLoading = false }
+        isLoadingGlobalRatings = true
+        defer { isLoadingGlobalRatings = false }
         
         // Always try to load from cache first (unless force refresh)
         if !forceRefresh {
@@ -1231,6 +1235,39 @@ final class MovieStore: ObservableObject {
             }
         } catch {
             print("MovieStore: Error removing from Future Cannes: \(error)")
+        }
+    }
+    
+    // Remove movie from wishlist after ranking
+    func removeFromWishlistAfterRanking(tmdbId: Int) async {
+        print("DEBUG: Checking if ranked movie (TMDB ID: \(tmdbId)) needs to be removed from wishlist")
+        
+        do {
+            let futureCannesItems = try await firestoreService.getFutureCannesList()
+            
+            if let itemToRemove = futureCannesItems.first(where: { $0.movie.id == tmdbId }) {
+                print("DEBUG: Found ranked movie in wishlist, removing item ID: \(itemToRemove.id)")
+                
+                // Remove from Firestore
+                try await firestoreService.removeFromFutureCannes(itemId: itemToRemove.id)
+                print("DEBUG: Successfully removed ranked movie from Firestore wishlist")
+                
+                // Update cache
+                if let userId = AuthenticationService.shared.currentUser?.uid {
+                    let cacheManager = CacheManager.shared
+                    if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                        cachedItems.removeAll { $0.id == itemToRemove.id }
+                        cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                        print("DEBUG: Updated cache after removing ranked movie")
+                    }
+                }
+                
+                print("DEBUG: Movie successfully removed from wishlist after ranking")
+            } else {
+                print("DEBUG: Ranked movie not found in wishlist, no removal needed")
+            }
+        } catch {
+            print("DEBUG: Error removing ranked movie from wishlist: \(error)")
         }
     }
 } 
