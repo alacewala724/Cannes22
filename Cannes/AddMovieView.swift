@@ -555,13 +555,11 @@ struct ComparisonView: View {
             
             // Delete from Firebase
             if let userId = AuthenticationService.shared.currentUser?.uid {
-                Task {
-                    do {
-                        try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
-                        print("insertMovie: Successfully deleted old rating for '\(existing.title)'")
-                    } catch {
-                        print("insertMovie: Error deleting old rating: \(error)")
-                    }
+                do {
+                    try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
+                    print("insertMovie: Successfully deleted old rating for '\(existing.title)'")
+                } catch {
+                    print("insertMovie: Error deleting old rating: \(error)")
                 }
             }
         }
@@ -615,21 +613,20 @@ struct ComparisonView: View {
         
         print("insertMovie: Movie '\(newMovie.title)' score updated from \(newMovie.score) to \(properScore)")
         
-        // Insert the movie with the proper score
-        targetList.insert(movieWithProperScore, at: insertionIndex)
-        
-        // Update the appropriate list immediately (optimistic update with correct score)
-        if movieWithProperScore.mediaType == .movie {
-            store.movies = targetList
-        } else {
-            store.tvShows = targetList
+        // Optimistically add to the list
+        await MainActor.run {
+            if movieWithProperScore.mediaType == .movie {
+                store.movies.insert(movieWithProperScore, at: insertionIndex)
+            } else {
+                store.tvShows.insert(movieWithProperScore, at: insertionIndex)
+            }
         }
         
         // Trigger completion immediately for fast UI response
         await MainActor.run {
             onComplete()
         }
-
+        
         // Do all heavy calculations and Firebase operations in background
         if let userId = AuthenticationService.shared.currentUser?.uid {
             Task.detached(priority: .background) {
@@ -706,11 +703,12 @@ struct ComparisonView: View {
                                     // Remove from wishlist after ranking
                                     try await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
                                     
-                                    // Update community rating using finalInsertion for new movies or scoreUpdate for re-ranking
+                                    // Use finalInsertion for all movies (simplified reranking)
+                                    // This ensures proper global community rating calculations
                                     try await store.firestoreService.updateMovieRanking(
                                         userId: userId,
                                         movie: movie,
-                                        state: existingMovie == nil ? .finalInsertion : .scoreUpdate
+                                        state: .finalInsertion
                                     )
                                     
                                     // Add activity

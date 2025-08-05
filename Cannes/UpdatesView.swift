@@ -762,7 +762,10 @@ struct NotificationMovieDetailView: View {
                         numberOfRatings: rating.numberOfRatings,
                         tmdbId: tmdbId,
                         totalRatings: 100, // Default value for this context
-                        totalMovies: 50 // Default value for this context
+                        totalMovies: 50, // Default value for this context
+                        totalScore: rating.averageRating * Double(rating.numberOfRatings), // Calculate total score
+                        globalMu: 7.7, // Default global mean
+                        c: 50 // Default Bayesian prior strength
                     )
                 } else {
                     // If no community rating exists, create a default one
@@ -774,7 +777,10 @@ struct NotificationMovieDetailView: View {
                         numberOfRatings: 0,
                         tmdbId: tmdbId,
                         totalRatings: 100, // Default value for this context
-                        totalMovies: 50 // Default value for this context
+                        totalMovies: 50, // Default value for this context
+                        totalScore: 0.0, // No total score for non-existent rating
+                        globalMu: 7.7, // Default global mean
+                        c: 50 // Default Bayesian prior strength
                     )
                 }
                 isLoading = false

@@ -909,7 +909,10 @@ struct UnifiedMovieDetailView: View {
                         numberOfRatings: rating.numberOfRatings,
                         tmdbId: tmdbId ?? 0,
                         totalRatings: totalRatings,
-                        totalMovies: totalMovies
+                        totalMovies: totalMovies,
+                        totalScore: rating.averageRating * Double(rating.numberOfRatings), // Calculate total score
+                        globalMu: 7.7, // Default global mean
+                        c: 50 // Default Bayesian prior strength
                     )
                     numberOfRatings = rating.numberOfRatings
                 }

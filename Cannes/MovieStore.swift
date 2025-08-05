@@ -169,8 +169,6 @@ final class MovieStore: ObservableObject {
     private func loadFromCache(userId: String) async {
         await MainActor.run { isLoadingFromCache = true }
         
-        print("loadFromCache: Loading personal rankings from cache")
-        
         let cachedMovies = cacheManager.getCachedPersonalMovies(userId: userId) ?? []
         let cachedTVShows = cacheManager.getCachedPersonalTVShows(userId: userId) ?? []
         
@@ -180,13 +178,10 @@ final class MovieStore: ObservableObject {
             self.lastSyncDate = cacheManager.getLastSyncDate(userId: userId)
             self.isLoadingFromCache = false
         }
-        
-        print("loadFromCache: Loaded \(cachedMovies.count) movies and \(cachedTVShows.count) TV shows from cache")
     }
     
     private func loadFromServer(userId: String) async {
         do {
-            print("loadFromServer: Loading personal rankings from server")
             let loadedMovies = try await firestoreService.getUserRankings(userId: userId)
             
             await MainActor.run {
@@ -210,10 +205,7 @@ final class MovieStore: ObservableObject {
             if !loadedMovies.isEmpty {
                 await recalculateScoresOnLoad()
             }
-            
-            print("loadFromServer: Successfully loaded and cached \(loadedMovies.count) total items")
         } catch {
-            print("loadFromServer: Error loading movies: \(error)")
             showError(message: handleError(error))
         }
     }
@@ -1089,31 +1081,32 @@ final class MovieStore: ObservableObject {
     private func loadGlobalRatingsFromCache() async {
         await MainActor.run { isLoadingFromCache = true }
         
-        print("loadGlobalRatingsFromCache: Loading global ratings from cache")
-        
         let cachedMovieRatings = cacheManager.getCachedGlobalMovieRatings() ?? []
         let cachedTVRatings = cacheManager.getCachedGlobalTVRatings() ?? []
+        
+        // For backward compatibility, if cached ratings are empty, refresh from server
+        if cachedMovieRatings.isEmpty || cachedTVRatings.isEmpty {
+            print("loadGlobalRatingsFromCache: Cached data empty, refreshing from server")
+            await loadGlobalRatingsFromServer()
+            return
+        }
         
         await MainActor.run {
             self.globalMovieRatings = cachedMovieRatings
             self.globalTVRatings = cachedTVRatings
             self.isLoadingFromCache = false
         }
-        
-        print("loadGlobalRatingsFromCache: Loaded \(cachedMovieRatings.count) movie ratings and \(cachedTVRatings.count) TV ratings from cache")
     }
     
     private func loadGlobalRatingsFromServer() async {
         do {
-            print("loadGlobalRatingsFromServer: Starting to fetch global community ratings")
-            
             let snapshot = try await Firestore.firestore().collection("ratings").getDocuments()
             
             var movieRatings: [GlobalRating] = []
             var tvRatings: [GlobalRating] = []
             
-            // First pass: collect all ratings to calculate total
-            var allRatings: [(title: String, averageRating: Double, numberOfRatings: Int, mediaType: AppModels.MediaType, tmdbId: Int?)] = []
+            // First pass: collect all ratings to calculate total and global stats
+            var allRatings: [(title: String, averageRating: Double, numberOfRatings: Int, totalScore: Double, mediaType: AppModels.MediaType, tmdbId: Int?)] = []
             
             for document in snapshot.documents {
                 let data = document.data()
@@ -1121,6 +1114,7 @@ final class MovieStore: ObservableObject {
                 guard let title = data["title"] as? String,
                       let averageRating = data["averageRating"] as? Double,
                       let numberOfRatings = data["numberOfRatings"] as? Int,
+                      let totalScore = data["totalScore"] as? Double,
                       numberOfRatings > 0 else {
                     continue
                 }
@@ -1133,18 +1127,33 @@ final class MovieStore: ObservableObject {
                     title: title,
                     averageRating: averageRating,
                     numberOfRatings: numberOfRatings,
+                    totalScore: totalScore,
                     mediaType: mediaType,
                     tmdbId: tmdbId
                 ))
             }
             
-            // Calculate total ratings across all movies
-            let totalRatings = allRatings.reduce(0) { $0 + $1.numberOfRatings }
-            let totalMovies = allRatings.count
-            print("loadGlobalRatingsFromServer: Total ratings across all movies: \(totalRatings)")
-            print("loadGlobalRatingsFromServer: Total movies: \(totalMovies)")
+            // Calculate global stats for Bayesian algorithm
+            let globalTotalScore = allRatings.reduce(0.0) { $0 + $1.totalScore }
+            let globalTotalRatings = allRatings.reduce(0) { $0 + $1.numberOfRatings }
+            let globalMu = globalTotalRatings > 0 ? globalTotalScore / Double(globalTotalRatings) : 7.7
             
-            // Second pass: create GlobalRating objects with total ratings
+            // Calculate c dynamically using median number of ratings
+            let ratingsCounts = allRatings.map { $0.numberOfRatings }
+            let sortedCounts = ratingsCounts.sorted()
+            let medianIndex = sortedCounts.count / 2
+            let c = sortedCounts.count > 0 ? Double(sortedCounts[medianIndex]) : 10.0 // fallback to 10 if no data
+            
+            print("🌍 GLOBAL STATS: totalScore=\(globalTotalScore), totalRatings=\(globalTotalRatings), globalMu=\(globalMu)")
+            print("📊 RATINGS DISTRIBUTION: min=\(ratingsCounts.min() ?? 0), median=\(c), max=\(ratingsCounts.max() ?? 0)")
+            print("🎯 DYNAMIC C VALUE: \(c)")
+            
+            // Calculate total ratings across all movies
+            let totalRatings = globalTotalRatings
+            let totalMovies = allRatings.count
+            print("📈 TOTAL MOVIES: \(totalMovies), TOTAL RATINGS: \(totalRatings)")
+            
+            // Second pass: create GlobalRating objects with total ratings and global stats
             for rating in allRatings {
                 let globalRating = GlobalRating(
                     id: UUID().uuidString, // Generate a unique ID since we don't have document ID here
@@ -1154,7 +1163,10 @@ final class MovieStore: ObservableObject {
                     numberOfRatings: rating.numberOfRatings,
                     tmdbId: rating.tmdbId,
                     totalRatings: totalRatings,
-                    totalMovies: totalMovies
+                    totalMovies: totalMovies,
+                    totalScore: rating.totalScore,
+                    globalMu: globalMu,
+                    c: c
                 )
                 
                 if rating.mediaType == .movie {
@@ -1175,11 +1187,10 @@ final class MovieStore: ObservableObject {
                 // Cache the fresh data
                 self.cacheManager.cacheGlobalRatings(movies: movieRatings, tvShows: tvRatings)
                 
-                print("loadGlobalRatingsFromServer: Loaded and cached \(movieRatings.count) movie ratings and \(tvRatings.count) TV ratings")
+                print("✅ GLOBAL RATINGS LOADED: \(movieRatings.count) movies, \(tvRatings.count) TV shows")
             }
             
         } catch {
-            print("loadGlobalRatingsFromServer: Error loading global ratings: \(error)")
             showError(message: handleError(error))
         }
     }
@@ -1230,27 +1241,21 @@ final class MovieStore: ObservableObject {
                 let futureCannesList = try await firestoreService.getFutureCannesList()
                 if let item = futureCannesList.first(where: { $0.movie.id == tmdbId }) {
                     try await firestoreService.removeFromFutureCannes(itemId: item.id)
-                    print("MovieStore: Removed movie with TMDB ID \(tmdbId) from Future Cannes after ranking")
                 }
             }
         } catch {
-            print("MovieStore: Error removing from Future Cannes: \(error)")
+            // Handle error silently
         }
     }
     
     // Remove movie from wishlist after ranking
     func removeFromWishlistAfterRanking(tmdbId: Int) async {
-        print("DEBUG: Checking if ranked movie (TMDB ID: \(tmdbId)) needs to be removed from wishlist")
-        
         do {
             let futureCannesItems = try await firestoreService.getFutureCannesList()
             
             if let itemToRemove = futureCannesItems.first(where: { $0.movie.id == tmdbId }) {
-                print("DEBUG: Found ranked movie in wishlist, removing item ID: \(itemToRemove.id)")
-                
                 // Remove from Firestore
                 try await firestoreService.removeFromFutureCannes(itemId: itemToRemove.id)
-                print("DEBUG: Successfully removed ranked movie from Firestore wishlist")
                 
                 // Update cache
                 if let userId = AuthenticationService.shared.currentUser?.uid {
@@ -1258,16 +1263,11 @@ final class MovieStore: ObservableObject {
                     if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
                         cachedItems.removeAll { $0.id == itemToRemove.id }
                         cacheManager.cacheFutureCannes(cachedItems, userId: userId)
-                        print("DEBUG: Updated cache after removing ranked movie")
                     }
                 }
-                
-                print("DEBUG: Movie successfully removed from wishlist after ranking")
-            } else {
-                print("DEBUG: Ranked movie not found in wishlist, no removal needed")
             }
         } catch {
-            print("DEBUG: Error removing ranked movie from wishlist: \(error)")
+            // Handle error silently
         }
     }
 } 

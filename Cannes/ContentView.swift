@@ -47,6 +47,21 @@ struct ContentView: View {
                         .animation(.easeInOut(duration: 0.3), value: store.selectedMediaType)
                 }
                 .navigationBarHidden(true)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Admin Fix") {
+                            Task {
+                                do {
+                                    try await store.firestoreService.adminSetNumberOfRatingsToSeven()
+                                    print("ADMIN: Successfully completed numberOfRatings fix")
+                                } catch {
+                                    print("ADMIN: Error during fix: \(error)")
+                                }
+                            }
+                        }
+                        .foregroundColor(.red)
+                    }
+                }
             }
             .preferredColorScheme(.dark) // Only Global tab uses dark mode
             .tabItem {
@@ -74,6 +89,15 @@ struct ContentView: View {
             }
             .tag(1)
             
+            // Discover Tab (new Tinder-like interface)
+            DiscoverView(store: store)
+                .background(Color(.systemBackground))
+                .tabItem {
+                    Image(systemName: "sparkles")
+                    Text("Discover")
+                }
+                .tag(2)
+            
             // Updates Tab
             UpdatesView(store: store)
                 .background(Color(.systemBackground))
@@ -81,7 +105,7 @@ struct ContentView: View {
                     Image(systemName: "bell")
                     Text("Updates")
                 }
-                .tag(2)
+                .tag(3)
             
             // Profile Tab
             ProfileView()
@@ -90,7 +114,7 @@ struct ContentView: View {
                     Image(systemName: "person.circle")
                     Text("Profile")
                 }
-                .tag(3)
+                .tag(4)
         }
         .preferredColorScheme(.light) // Force entire app to light mode
         .background(Color(.systemBackground)) // Default light background for entire TabView
@@ -119,29 +143,19 @@ struct ContentView: View {
             Text(store.errorMessage ?? "An unknown error occurred")
         }
         .task {
-            print("ContentView task started - loading movies and global data")
-            
             // Load personal movies and global data sequentially to avoid isLoading conflicts
             await store.loadMovies()
-            print("Movies loaded: \(store.getMovies().count)")
             
             // Load global data immediately on startup
-            print("Loading global data on app startup...")
             await store.loadGlobalRatings(forceRefresh: true)
-            let globalCount = store.getGlobalRatings().count
-            let isLoading = store.isLoadingFromCache
-            print("Global data loaded on startup - count: \(globalCount), isLoading: \(isLoading)")
             
             // Test following collection access
             let firestoreService = FirestoreService()
             do {
                 let canAccess = try await firestoreService.testFollowingAccess()
-                print("ContentView: Following collection accessible: \(canAccess)")
             } catch {
-                print("ContentView: Error testing following access: \(error)")
+                // Handle error silently
             }
-            
-            print("ContentView task completed")
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToWishlist"))) { notification in
             // Switch to Rankings tab and then to wishlist
@@ -153,22 +167,26 @@ struct ContentView: View {
                 store.selectedMediaType = mediaType
             }
             
-            // Load wishlist data
+            // Clear cache and load wishlist data
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                CacheManager.shared.clearFutureCannesCache(userId: userId)
+            }
             Task {
                 await loadFutureCannesList()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshWishlist"))) { _ in
-            // Refresh the wishlist data
-            if selectedTab == 1 && !showingRankings {
-                Task {
-                    await loadFutureCannesList()
-                }
+            // Always refresh the wishlist data when notification is received
+            // Clear cache first to ensure fresh data
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                CacheManager.shared.clearFutureCannesCache(userId: userId)
+            }
+            Task {
+                await loadFutureCannesList()
             }
         }
         .onAppear {
             // Only load if we have no data at all (don't conflict with task loading)
-            print("ContentView onAppear - global ratings count: \(store.getGlobalRatings().count)")
         }
         .onChange(of: selectedTab) { _, newTab in
             // Only refresh when switching TO global tab, and only if we have internet
@@ -177,7 +195,6 @@ struct ContentView: View {
                     // Wait a moment to avoid conflicts with other loading
                     try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
                     if store.getGlobalRatings().isEmpty {
-                        print("Global tab selected and ratings empty, loading...")
                         await store.loadGlobalRatings(forceRefresh: true)
                     }
                 }
@@ -199,9 +216,6 @@ struct ContentView: View {
                 
                 if isLoading {
                     loadingView
-                        .onAppear {
-                            print("Showing loading view - isLoadingFromCache: \(isLoading), ratings count: \(ratingsCount)")
-                        }
                 } else if ratingsCount == 0 {
                     VStack(spacing: 20) {
                         Image(systemName: "globe")
@@ -219,32 +233,22 @@ struct ContentView: View {
                             .multilineTextAlignment(.center)
                     }
                     .padding()
-                    .onAppear {
-                        print("Showing empty state - isLoadingFromCache: \(isLoading), ratings count: \(ratingsCount)")
-                    }
                 } else {
                     if showingGrid {
                         globalRatingGridView
-                            .onAppear {
-                                print("Showing grid view - ratings count: \(ratingsCount)")
-                            }
                     } else {
                         globalRatingListView
-                            .onAppear {
-                                print("Showing list view - ratings count: \(ratingsCount)")
-                            }
                     }
                 }
+            }
+            .refreshable {
+                // Refresh global ratings
+                await refreshGlobalRatings()
             }
         }
         .background(Color.clear)
         .onAppear {
-            let ratingsCount = store.getGlobalRatings().count
-            let isLoading = store.isLoadingFromCache
-            print("Global content view appeared - isLoading: \(isLoading), ratings count: \(ratingsCount)")
-            
             // Don't force additional loads here - let the main task handle it
-            // Only log what we're seeing
         }
     }
     
@@ -606,16 +610,19 @@ struct ContentView: View {
     // MARK: - Future Cannes Functions
     
     private func loadFutureCannesList() async {
-        print("DEBUG: Loading Future Cannes list...")
         await MainActor.run {
             isLoadingFutureCannes = true
+        }
+        
+        // Clear cache first to ensure fresh data
+        if let userId = AuthenticationService.shared.currentUser?.uid {
+            CacheManager.shared.clearFutureCannesCache(userId: userId)
         }
         
         // Load fresh data from Firebase (don't rely on cache for this)
         do {
             let firestoreService = FirestoreService()
             let items = try await firestoreService.getFutureCannesList()
-            print("DEBUG: Loaded \(items.count) items from Firestore")
             
             await MainActor.run {
                 futureCannesList = items
@@ -624,17 +631,13 @@ struct ContentView: View {
                 // Update cache with fresh data
                 if let userId = AuthenticationService.shared.currentUser?.uid {
                     CacheManager.shared.cacheFutureCannes(items, userId: userId)
-                    print("DEBUG: Updated cache with \(items.count) items")
                 }
             }
         } catch {
-            print("DEBUG: Error loading Future Cannes: \(error)")
-            
             // Try to load from cache as fallback
             if let userId = AuthenticationService.shared.currentUser?.uid {
                 let cacheManager = CacheManager.shared
                 if let cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
-                    print("DEBUG: Using cached data with \(cachedItems.count) items")
                     await MainActor.run {
                         futureCannesList = cachedItems
                         isLoadingFutureCannes = false
@@ -782,8 +785,12 @@ struct ContentView: View {
             // Reload the list
             await loadFutureCannesList()
         } catch {
-            print("Error removing from Future Cannes: \(error)")
+            // Handle error silently
         }
+    }
+
+    private func refreshGlobalRatings() async {
+        await store.loadGlobalRatings(forceRefresh: true)
     }
 }
 

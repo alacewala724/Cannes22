@@ -180,6 +180,9 @@ struct GlobalRating: Identifiable, Codable, Hashable {
     let tmdbId: Int?
     let totalRatings: Int // Total number of ratings across all movies
     let totalMovies: Int // Total number of movies in the system
+    let totalScore: Double // Total score for this movie
+    let globalMu: Double // Global mean rating across all movies
+    let c: Double // Bayesian prior strength parameter
     
     var displayScore: Double { averageRating }
     
@@ -196,102 +199,10 @@ struct GlobalRating: Identifiable, Codable, Hashable {
         }
     }
     
-    /// Calculate the confidence-adjusted score for ranking using Bayesian methods
+    /// Calculate the confidence-adjusted score for ranking using improved Bayesian methods
     var confidenceAdjustedScore: Double {
-        // Bayesian prior: 7.7 with strength based on average ratings per movie
-        let priorMean = 7.7
-        let averageRatingsPerMovie = Double(totalRatings) / max(1.0, Double(totalMovies))
-        
-        // Prior strength: stronger when average ratings per movie is lower (more uncertainty)
-        // But reduce strength for high-rated movies with many ratings
-        let basePriorStrength = max(0.5, min(3.0, 10.0 / max(1.0, averageRatingsPerMovie)))
-        
-        // Adjust prior strength based on rating quality
-        // High-rated movies with many ratings should have weaker prior pull
-        let ratingQuality = averageRating >= 8.0 ? 0.7 : 1.0 // Reduce prior strength for high-rated movies
-        let priorStrength = basePriorStrength * ratingQuality
-        
-        // User's rating (the observed data)
-        let userRating = averageRating
-        let userStrength = Double(numberOfRatings) // Each rating has equal weight
-        
-        // For high-rated movies with many ratings, boost their strength
-        let qualityMultiplier = averageRating >= 8.0 && numberOfRatings >= 10 ? 1.5 : 1.0
-        let adjustedUserStrength = userStrength * qualityMultiplier
-        
-        // Bayesian combination: (prior * priorStrength + userRating * adjustedUserStrength) / (priorStrength + adjustedUserStrength)
-        let totalStrength = priorStrength + adjustedUserStrength
-        let bayesianScore = (priorMean * priorStrength + userRating * adjustedUserStrength) / totalStrength
-        
-        // Round to 1 decimal place for consistency
-        return (bayesianScore * 10).rounded() / 10
-    }
-    
-    /// Calculate base confidence based on total ratings in system
-    private func calculateBaseConfidence() -> Double {
-        // Smooth sliding scale based on total ratings
-        let totalRatings = Double(totalRatings)
-        
-        // Formula: confidence = 0.2 + 0.75 * (1 - e^(-totalRatings/200))
-        // This gives:
-        // - 0.2 confidence for 0 ratings
-        // - 0.4 confidence for ~50 ratings
-        // - 0.6 confidence for ~150 ratings
-        // - 0.8 confidence for ~400 ratings
-        // - 1.0 confidence for ~1000+ ratings
-        let confidence = 0.2 + 0.75 * (1.0 - exp(-totalRatings / 200.0))
-        
-        return min(1.0, confidence) // Cap at 1.0
-    }
-    
-    /// Calculate confidence based on this specific rating's number of votes
-    private func calculateRatingConfidence() -> Double {
-        let votes = Double(numberOfRatings)
-        
-        // Smooth sliding scale based on number of votes
-        // Formula: confidence = 0.1 + 0.85 * (1 - e^(-votes/8))
-        // This gives:
-        // - 0.1 confidence for 0 votes
-        // - 0.3 confidence for ~2 votes
-        // - 0.5 confidence for ~4 votes
-        // - 0.7 confidence for ~7 votes
-        // - 0.85 confidence for ~12 votes
-        // - 1.0 confidence for ~20+ votes
-        let confidence = 0.1 + 0.85 * (1.0 - exp(-votes / 8.0))
-        
-        return min(1.0, confidence) // Cap at 1.0
-    }
-    
-    /// Calculate confidence level (0-1) where 1 is most confident
-    var confidenceLevel: Double {
-        let baseConfidence = calculateBaseConfidence()
-        let ratingConfidence = calculateRatingConfidence()
-        let combinedConfidence = (baseConfidence + ratingConfidence) / 2.0
-        
-        return min(1.0, combinedConfidence)
-    }
-    
-    /// Check if this rating meets minimum confidence requirements
-    var isConfident: Bool {
-        return confidenceLevel >= 0.3 // Lowered from 0.4 to be more inclusive
-    }
-    
-    /// Get the confidence interval range
-    var confidenceIntervalRange: (min: Double, max: Double) {
-        let standardError = 1.0 / sqrt(Double(numberOfRatings))
-        let margin = 1.96 * standardError
-        return (averageRating - margin, averageRating + margin)
-    }
-    
-    /// Get a confidence indicator string
-    var confidenceIndicator: String {
-        if confidenceLevel >= 0.6 {
-            return "🟢" // High confidence - lowered from 0.7
-        } else if confidenceLevel >= 0.3 {
-            return "🟡" // Medium confidence - lowered from 0.4
-        } else {
-            return "🔴" // Low confidence
-        }
+        let bayes = (c * globalMu + totalScore) / (c + Double(numberOfRatings))
+        return (bayes * 10).rounded() / 10 // keep one-decimal rounding
     }
 }
 

@@ -90,6 +90,11 @@ class CacheManager: ObservableObject {
         }
     }
     
+    func clearFutureCannesCache(userId: String) {
+        userDefaults.removeObject(forKey: CacheKeys.futureCannes(userId: userId))
+        print("CacheManager: Cleared Future Cannes cache for user \(userId)")
+    }
+    
     // MARK: - Global Ratings Cache
     
     func cacheGlobalRatings(movies: [GlobalRating], tvShows: [GlobalRating]) {

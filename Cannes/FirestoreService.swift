@@ -770,6 +770,257 @@ class FirestoreService: ObservableObject {
         
         print("fixExistingCommunityRatings: Fixed \(fixedCount) community ratings")
     }
+    
+    // TEMPORARY ADMIN FUNCTION - WILL BE REMOVED AFTER USE
+    func adminSetNumberOfRatingsToSeven() async throws {
+        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+            throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+        
+        print("ADMIN: Starting to set numberOfRatings over 7 to 7")
+        
+        // Get all ratings (using correct collection name)
+        let ratingsRef = db.collection("ratings")
+        let snapshot = try await ratingsRef.getDocuments()
+        
+        var updatedCount = 0
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            
+            if numberOfRatings > 7 {
+                print("ADMIN: Found movie with \(numberOfRatings) ratings, setting to 7")
+                
+                try await document.reference.updateData([
+                    "numberOfRatings": 7
+                ])
+                
+                updatedCount += 1
+            }
+        }
+        
+        print("ADMIN: Completed! Updated \(updatedCount) movies to have numberOfRatings = 7")
+    }
+    
+    // FIX FUNCTION - Fix scores that were broken by the previous admin function
+    func fixBrokenScoresFromAdminFunction() async throws {
+        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+            throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+        
+        print("ADMIN FIX: Starting to fix broken scores from previous admin function")
+        
+        // Get all ratings
+        let ratingsRef = db.collection("ratings")
+        let snapshot = try await ratingsRef.getDocuments()
+        
+        var fixedCount = 0
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            let totalScore = data["totalScore"] as? Double ?? 0.0
+            let averageRating = data["averageRating"] as? Double ?? 0.0
+            
+            // Check if this movie was affected by the previous admin function
+            // (numberOfRatings is exactly 7 but totalScore seems too high for 7 ratings)
+            if numberOfRatings == 7 {
+                // Calculate what the totalScore should be for 7 ratings with the current average
+                let expectedTotalScore = averageRating * 7.0
+                
+                // If the totalScore is significantly different from expected, fix it
+                if abs(totalScore - expectedTotalScore) > 0.1 {
+                    print("ADMIN FIX: Found broken score for \(document.documentID)")
+                    print("ADMIN FIX: numberOfRatings=\(numberOfRatings), current totalScore=\(totalScore), averageRating=\(averageRating)")
+                    print("ADMIN FIX: Expected totalScore=\(expectedTotalScore)")
+                    
+                    // Round the expected total score to 1 decimal place
+                    let roundedExpectedTotal = (expectedTotalScore * 10).rounded() / 10
+                    
+                    try await document.reference.updateData([
+                        "totalScore": roundedExpectedTotal
+                    ])
+                    
+                    print("ADMIN FIX: Fixed totalScore to \(roundedExpectedTotal)")
+                    fixedCount += 1
+                }
+            }
+        }
+        
+        print("ADMIN FIX: Completed! Fixed \(fixedCount) broken scores")
+    }
+    
+    // COMPREHENSIVE RECALCULATION - Rebuild all ratings from actual user data
+    func comprehensiveRecalculationFromUserData() async throws {
+        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+            throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+        
+        print("ADMIN RECALC: Starting comprehensive recalculation from user data")
+        
+        // Step 1: Get all users
+        let usersSnapshot = try await db.collection("users").getDocuments()
+        print("ADMIN RECALC: Found \(usersSnapshot.documents.count) users")
+        
+        // Step 2: Collect all user ratings by TMDB ID
+        var tmdbRatings: [Int: [Double]] = [:]
+        var tmdbTitles: [Int: String] = [:]
+        var tmdbMediaTypes: [Int: AppModels.MediaType] = [:]
+        
+        for userDoc in usersSnapshot.documents {
+            let userId = userDoc.documentID
+            
+            // Get all completed rankings for this user
+            let rankingsSnapshot = try await db.collection("users")
+                .document(userId)
+                .collection("rankings")
+                .whereField("ratingState", in: [MovieRatingState.finalInsertion.rawValue, MovieRatingState.scoreUpdate.rawValue])
+                .getDocuments()
+            
+            for rankingDoc in rankingsSnapshot.documents {
+                let data = rankingDoc.data()
+                
+                if let tmdbId = data["tmdbId"] as? Int,
+                   let score = data["score"] as? Double,
+                   let title = data["title"] as? String,
+                   let mediaTypeString = data["mediaType"] as? String {
+                    
+                    let mediaType: AppModels.MediaType = mediaTypeString.lowercased().contains("tv") ? .tv : .movie
+                    
+                    if tmdbRatings[tmdbId] == nil {
+                        tmdbRatings[tmdbId] = []
+                        tmdbTitles[tmdbId] = title
+                        tmdbMediaTypes[tmdbId] = mediaType
+                    }
+                    
+                    tmdbRatings[tmdbId]?.append(score)
+                }
+            }
+        }
+        
+        print("ADMIN RECALC: Collected ratings for \(tmdbRatings.count) unique TMDB IDs")
+        
+        // Step 3: Delete all existing global ratings
+        let existingRatingsSnapshot = try await db.collection("ratings").getDocuments()
+        for doc in existingRatingsSnapshot.documents {
+            try await doc.reference.delete()
+        }
+        print("ADMIN RECALC: Deleted \(existingRatingsSnapshot.documents.count) existing global ratings")
+        
+        // Step 4: Recreate global ratings from actual user data
+        var recreatedCount = 0
+        
+        for (tmdbId, scores) in tmdbRatings {
+            guard let title = tmdbTitles[tmdbId],
+                  let mediaType = tmdbMediaTypes[tmdbId] else { continue }
+            
+            let totalScore = scores.reduce(0, +)
+            let numberOfRatings = scores.count
+            let averageRating = totalScore / Double(numberOfRatings)
+            
+            // Round to 1 decimal place
+            let roundedAverage = (averageRating * 10).rounded() / 10
+            let roundedTotal = (totalScore * 10).rounded() / 10
+            
+            let ratingsRef = db.collection("ratings").document(tmdbId.description)
+            
+            try await ratingsRef.setData([
+                "totalScore": roundedTotal,
+                "numberOfRatings": numberOfRatings,
+                "averageRating": roundedAverage,
+                "lastUpdated": FieldValue.serverTimestamp(),
+                "title": title,
+                "mediaType": mediaType.rawValue,
+                "tmdbId": tmdbId
+            ])
+            
+            
+            recreatedCount += 1
+        }
+        
+        print("ADMIN RECALC: Completed! Recreated \(recreatedCount) global ratings from actual user data")
+    }
+    
+    // TEST FUNCTION - Read user data to console without making changes
+    func testReadUserDataToConsole() async throws {
+        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+            throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+        
+        print("TEST: Starting to read user data to console")
+        print("TEST: Current user ID: \(currentUserId)")
+        
+        // Step 1: Try to get all users
+        print("TEST: Attempting to get all users...")
+        do {
+            let usersSnapshot = try await db.collection("users").getDocuments()
+            print("TEST: Successfully got \(usersSnapshot.documents.count) users")
+            
+            // Step 2: Try to read rankings from each user
+            var totalRankings = 0
+            var successfulReads = 0
+            var failedReads = 0
+            
+            for userDoc in usersSnapshot.documents {
+                let userId = userDoc.documentID
+                print("TEST: Attempting to read rankings for user: \(userId)")
+                
+                do {
+                    let rankingsSnapshot = try await db.collection("users")
+                        .document(userId)
+                        .collection("rankings")
+                        .whereField("ratingState", in: [MovieRatingState.finalInsertion.rawValue, MovieRatingState.scoreUpdate.rawValue])
+                        .getDocuments()
+                    
+                    let rankingsCount = rankingsSnapshot.documents.count
+                    totalRankings += rankingsCount
+                    successfulReads += 1
+                    
+                    print("TEST: ✅ Successfully read \(rankingsCount) rankings for user \(userId)")
+                    
+                    // Log first few rankings as examples
+                    for (index, rankingDoc) in rankingsSnapshot.documents.prefix(3).enumerated() {
+                        let data = rankingDoc.data()
+                        if let tmdbId = data["tmdbId"] as? Int,
+                           let score = data["score"] as? Double,
+                           let title = data["title"] as? String {
+                            print("TEST:   Ranking \(index + 1): '\(title)' (TMDB: \(tmdbId)) = \(score)")
+                        }
+                    }
+                    
+                } catch {
+                    failedReads += 1
+                    print("TEST: ❌ Failed to read rankings for user \(userId): \(error)")
+                }
+            }
+            
+            print("TEST: SUMMARY:")
+            print("TEST: - Total users: \(usersSnapshot.documents.count)")
+            print("TEST: - Successful reads: \(successfulReads)")
+            print("TEST: - Failed reads: \(failedReads)")
+            print("TEST: - Total rankings found: \(totalRankings)")
+            
+        } catch {
+            print("TEST: ❌ Failed to get users: \(error)")
+        }
+        
+        // Step 3: Also test reading current user's data specifically
+        print("TEST: Testing current user's data access...")
+        do {
+            let currentUserRankings = try await db.collection("users")
+                .document(currentUserId)
+                .collection("rankings")
+                .whereField("ratingState", in: [MovieRatingState.finalInsertion.rawValue, MovieRatingState.scoreUpdate.rawValue])
+                .getDocuments()
+            
+            print("TEST: ✅ Current user has \(currentUserRankings.documents.count) rankings")
+        } catch {
+            print("TEST: ❌ Failed to read current user's rankings: \(error)")
+        }
+        
+        print("TEST: Console read test completed")
+    }
 } 
 
 extension FirestoreService {
@@ -938,17 +1189,25 @@ extension FirestoreService {
                             ], forDocument: ratingsRef)
                         }
                     } else {
-                        // Document doesn't exist - create it with the current score
-                        print("updateSingleMovieRatingWithMovie: Creating new document with final score=\(communityScore)")
-                        transaction.setData([
-                            "totalScore": communityScore,
-                            "numberOfRatings": 1,
-                            "averageRating": communityScore,
-                            "lastUpdated": FieldValue.serverTimestamp(),
-                            "title": update.movie.title,
-                            "mediaType": update.movie.mediaType.rawValue,
-                            "tmdbId": update.movie.tmdbId as Any
-                        ], forDocument: ratingsRef)
+                        // Document doesn't exist
+                        if update.isNewRating {
+                            // This is a new rating - create the document
+                            print("updateSingleMovieRatingWithMovie: Creating new document with final score=\(communityScore)")
+                            transaction.setData([
+                                "totalScore": communityScore,
+                                "numberOfRatings": 1,
+                                "averageRating": communityScore,
+                                "lastUpdated": FieldValue.serverTimestamp(),
+                                "title": update.movie.title,
+                                "mediaType": update.movie.mediaType.rawValue,
+                                "tmdbId": update.movie.tmdbId as Any
+                            ], forDocument: ratingsRef)
+                        } else {
+                            // This is a score update but the document doesn't exist
+                            // This means the user hasn't contributed to the community rating yet
+                            // Skip the update since there's nothing to update
+                            print("updateSingleMovieRatingWithMovie: Document doesn't exist for score update, skipping since user hasn't contributed to community rating yet")
+                        }
                     }
                     return nil
                 } catch {
@@ -2596,16 +2855,14 @@ extension FirestoreService {
     
     // Add a movie to Future Cannes list
     func addToFutureCannes(movie: TMDBMovie) async throws {
-        print("DEBUG FirestoreService: Starting addToFutureCannes")
-        
         guard let currentUser = Auth.auth().currentUser else {
-            print("DEBUG FirestoreService: User not authenticated")
             throw NSError(domain: "FirestoreService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
         let currentUserId = currentUser.uid
         let itemId = UUID().uuidString
         
+        print("DEBUG FirestoreService: Starting addToFutureCannes")
         print("DEBUG FirestoreService: Current user ID: \(currentUserId)")
         print("DEBUG FirestoreService: Item ID: \(itemId)")
         print("DEBUG FirestoreService: Movie title: \(movie.title ?? movie.name ?? "Unknown")")
@@ -2619,13 +2876,13 @@ extension FirestoreService {
             "posterPath": movie.posterPath,
             "releaseDate": movie.releaseDate,
             "firstAirDate": movie.firstAirDate,
-            "voteAverage": movie.voteAverage,
-            "voteCount": movie.voteCount,
+            "voteAverage": movie.voteAverage ?? 0.0,
+            "voteCount": movie.voteCount ?? 0,
+            "mediaType": movie.mediaType ?? "Movie",
+            "runtime": movie.runtime,
+            "episodeRunTime": movie.episodeRunTime,
             "genres": movie.genres?.map { ["id": $0.id, "name": $0.name] } ?? [],
-            "mediaType": movie.mediaType ?? "movie",
-            "runtime": movie.runtime as Any,
-            "episodeRunTime": movie.episodeRunTime as Any,
-            "dateAdded": FieldValue.serverTimestamp()
+            "dateAdded": Timestamp()
         ]
         
         print("DEBUG FirestoreService: About to write to Firestore")
@@ -2638,6 +2895,10 @@ extension FirestoreService {
         
         print("DEBUG FirestoreService: Successfully wrote to Firestore")
         print("addToFutureCannes: Added movie \(movie.title ?? movie.name ?? "Unknown") to Future Cannes")
+        
+        // Clear cache and notify other views to refresh
+        CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
+        NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
     }
     
     // Remove a movie from Future Cannes list
@@ -2655,6 +2916,10 @@ extension FirestoreService {
             .delete()
         
         print("removeFromFutureCannes: Removed item \(itemId) from Future Cannes")
+        
+        // Clear cache and notify other views to refresh
+        CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
+        NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
     }
     
     // Get Future Cannes list

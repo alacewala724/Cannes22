@@ -102,6 +102,23 @@ struct TMDBMovie: Codable, Identifiable {
         case runtime
         case episodeRunTime = "episode_run_time"
     }
+    
+    // Custom initializer to create new instances
+    init(id: Int, title: String?, name: String?, overview: String, posterPath: String?, releaseDate: String?, firstAirDate: String?, voteAverage: Double?, voteCount: Int?, genres: [TMDBGenre]?, mediaType: String?, runtime: Int?, episodeRunTime: [Int]?) {
+        self.id = id
+        self.title = title
+        self.name = name
+        self.overview = overview
+        self.posterPath = posterPath
+        self.releaseDate = releaseDate
+        self.firstAirDate = firstAirDate
+        self.voteAverage = voteAverage
+        self.voteCount = voteCount
+        self.genres = genres
+        self.mediaType = mediaType
+        self.runtime = runtime
+        self.episodeRunTime = episodeRunTime
+    }
 
     var displayTitle: String {
         return title ?? name ?? "Untitled"
