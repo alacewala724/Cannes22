@@ -2344,67 +2344,92 @@ extension FirestoreService {
     }
     
     /// Validate global ratings for data integrity issues
-    func validateGlobalRatings() async throws -> (validCount: Int, invalidCount: Int, issues: [String]) {
+    func validateGlobalRatings() async throws -> (validCount: Int, invalidCount: Int, errors: [String]) {
         let snapshot = try await db.collection("ratings").getDocuments()
         
         var validCount = 0
         var invalidCount = 0
-        var issues: [String] = []
+        var errors: [String] = []
         
         for doc in snapshot.documents {
             let data = doc.data()
-            let totalScore = data["totalScore"] as? Double ?? 0.0
             let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
             let averageRating = data["averageRating"] as? Double ?? 0.0
+            let totalScore = data["totalScore"] as? Double ?? 0.0
             
-            var isValid = true
-            var docIssues: [String] = []
-            
-            // Check for negative values
-            if totalScore < 0 {
-                isValid = false
-                docIssues.append("Negative totalScore: \(totalScore)")
-            }
-            
-            if numberOfRatings < 0 {
-                isValid = false
-                docIssues.append("Negative numberOfRatings: \(numberOfRatings)")
-            }
-            
-            // Check for NaN or infinite values
-            if totalScore.isNaN || totalScore.isInfinite {
-                isValid = false
-                docIssues.append("Invalid totalScore: \(totalScore)")
-            }
-            
-            if averageRating.isNaN || averageRating.isInfinite {
-                isValid = false
-                docIssues.append("Invalid averageRating: \(averageRating)")
-            }
-            
-            // Check if average matches calculated average
-            if numberOfRatings > 0 {
-                let calculatedAverage = totalScore / Double(numberOfRatings)
-                let roundedCalculated = (calculatedAverage * 10).rounded() / 10
-                let roundedStored = (averageRating * 10).rounded() / 10
-                
-                if abs(roundedCalculated - roundedStored) > 0.01 {
-                    isValid = false
-                    docIssues.append("Average mismatch: stored=\(roundedStored), calculated=\(roundedCalculated)")
-                }
-            }
-            
-            if isValid {
-                validCount += 1
-            } else {
+            // Check for common issues
+            if numberOfRatings <= 0 {
                 invalidCount += 1
-                issues.append("Document \(doc.documentID): \(docIssues.joined(separator: ", "))")
+                errors.append("\(doc.documentID): numberOfRatings is \(numberOfRatings)")
+            } else if averageRating.isNaN || averageRating.isInfinite {
+                invalidCount += 1
+                errors.append("\(doc.documentID): averageRating is invalid (\(averageRating))")
+            } else if totalScore.isNaN || totalScore.isInfinite {
+                invalidCount += 1
+                errors.append("\(doc.documentID): totalScore is invalid (\(totalScore))")
+            } else {
+                validCount += 1
             }
         }
         
-        return (validCount, invalidCount, issues)
+        return (validCount, invalidCount, errors)
     }
-
+    
+    // MARK: - Admin Functions
+    
+    /// Get all user rankings for admin review
+    func getAllUserRankings() async throws -> [UserRankingData] {
+        print("🔍 ADMIN: Fetching all user rankings...")
+        
+        let snapshot = try await db.collection("users").getDocuments()
+        var allRankings: [UserRankingData] = []
+        
+        for userDoc in snapshot.documents {
+            let userId = userDoc.documentID
+            
+            // Get user's username
+            let username = userDoc.data()["username"] as? String ?? "Unknown"
+            
+            // Get user's rankings
+            let rankingsSnapshot = try await db.collection("users")
+                .document(userId)
+                .collection("rankings")
+                .getDocuments()
+            
+            for rankingDoc in rankingsSnapshot.documents {
+                let data = rankingDoc.data()
+                
+                guard let title = data["title"] as? String,
+                      let score = data["score"] as? Double,
+                      let sentiment = data["sentiment"] as? String,
+                      let mediaType = data["mediaType"] as? String,
+                      let timestamp = data["timestamp"] as? Timestamp else {
+                    continue
+                }
+                
+                let tmdbId = data["tmdbId"] as? Int
+                
+                let rankingData = UserRankingData(
+                    userId: userId,
+                    username: username,
+                    movieTitle: title,
+                    tmdbId: tmdbId,
+                    score: score,
+                    sentiment: sentiment,
+                    mediaType: mediaType,
+                    timestamp: timestamp.dateValue()
+                )
+                
+                allRankings.append(rankingData)
+            }
+        }
+        
+        // Sort by timestamp (newest first)
+        allRankings.sort { $0.timestamp > $1.timestamp }
+        
+        print("🔍 ADMIN: Found \(allRankings.count) rankings from \(snapshot.documents.count) users")
+        return allRankings
+    }
 } 
 
 extension FirestoreService {
@@ -2436,14 +2461,26 @@ extension FirestoreService {
         try await db.collection("activities").document(activityId).setData(activityData)
         print("Created activity update: \(type.rawValue) for \(movie.title)")
         
-        // Send push notifications for movie ratings
-        if (type == .movieRanked || type == .movieUpdated) && movie.tmdbId != nil {
-            print("📱 Checking for followers who have rated the same movie: \(movie.title)")
+        // Send push notifications only for NEW movie ratings, not updates
+        if type == .movieRanked && movie.tmdbId != nil {
+            print("📱 DEBUG: Sending notification for NEW movie rating")
+            print("📱 DEBUG: Movie: \(movie.title)")
+            print("📱 DEBUG: Score: \(movie.score)")
+            print("📱 DEBUG: TMDB ID: \(movie.tmdbId!)")
+            print("📱 DEBUG: Activity Type: \(type.rawValue)")
+            print("📱 DEBUG: ---")
+            
             await NotificationService.shared.checkAndNotifyFollowersForMovie(
                 movieTitle: movie.title,
                 score: movie.score,
                 tmdbId: movie.tmdbId!
             )
+        } else {
+            print("📱 DEBUG: NOT sending notification")
+            print("📱 DEBUG: Movie: \(movie.title)")
+            print("📱 DEBUG: Activity Type: \(type.rawValue)")
+            print("📱 DEBUG: Has TMDB ID: \(movie.tmdbId != nil)")
+            print("📱 DEBUG: ---")
         }
     }
     

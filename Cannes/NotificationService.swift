@@ -14,6 +14,9 @@ class NotificationService: NSObject, ObservableObject {
     @Published var isTokenRefreshed = false
     @Published var notificationPermissionGranted = false
     
+    // Simple toggle for testing - set to false to disable all notifications
+    @Published var notificationsEnabled = true
+    
     private override init() {
         super.init()
         setupMessaging()
@@ -35,7 +38,10 @@ class NotificationService: NSObject, ObservableObject {
                 if let error = error {
                     print("❌ Notification permission error: \(error)")
                 } else {
-                    print("✅ Notification permission granted: \(granted)")
+                    print("📱 ===== NOTIFICATION PERMISSION STATUS =====")
+                    print("📱 Permission granted: \(granted)")
+                    print("📱 Timestamp: \(Date())")
+                    print("📱 ==========================================")
                 }
             }
         )
@@ -47,6 +53,10 @@ class NotificationService: NSObject, ObservableObject {
     // MARK: - FCM Token Management
     
     func refreshFCMToken() {
+        print("📱 ===== REFRESHING FCM TOKEN =====")
+        print("📱 Timestamp: \(Date())")
+        print("📱 ===============================")
+        
         Messaging.messaging().token { [weak self] token, error in
             if let error = error {
                 print("❌ Error fetching FCM token: \(error)")
@@ -58,7 +68,11 @@ class NotificationService: NSObject, ObservableObject {
                     self?.fcmToken = token
                     self?.isTokenRefreshed = true
                 }
-                print("✅ FCM token refreshed: \(token)")
+                print("📱 ===== FCM TOKEN REFRESHED =====")
+                print("📱 Token: \(token)")
+                print("📱 Token length: \(token.count) characters")
+                print("📱 Timestamp: \(Date())")
+                print("📱 ==============================")
                 
                 // Save token to Firestore for the current user
                 self?.saveFCMTokenToFirestore(token: token)
@@ -137,6 +151,21 @@ class NotificationService: NSObject, ObservableObject {
         score: Double,
         tmdbId: Int
     ) async {
+        // Check if notifications are enabled
+        guard notificationsEnabled else {
+            print("🔕 Notifications disabled - skipping notification to \(userId)")
+            return
+        }
+        
+        print("📱 ===== DIRECT MOVIE RATING NOTIFICATION =====")
+        print("📱 To User ID: \(userId)")
+        print("📱 From Username: \(username)")
+        print("📱 Movie: \(movieTitle)")
+        print("📱 Score: \(score)")
+        print("📱 TMDB ID: \(tmdbId)")
+        print("📱 Timestamp: \(Date())")
+        print("📱 ============================================")
+        
         do {
             // Call Firebase Function to send notification
             let functions = Functions.functions()
@@ -149,14 +178,20 @@ class NotificationService: NSObject, ObservableObject {
                 "tmdbId": tmdbId
             ]
             
+            print("📱 Calling Firebase function with data: \(data)")
+            
             let result = try await functions.httpsCallable("sendMovieRatingNotification").call(data)
+            
+            print("📱 Firebase function result: \(result.data ?? "nil")")
             
             if let resultData = result.data as? [String: Any],
                let success = resultData["success"] as? Bool {
                 if success {
                     print("✅ Successfully sent notification to \(userId)")
+                    print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
                 } else {
                     print("❌ Failed to send notification to \(userId)")
+                    print("📱 Error: \(resultData["message"] as? String ?? "unknown error")")
                 }
             }
             
@@ -172,6 +207,19 @@ class NotificationService: NSObject, ObservableObject {
         score: Double,
         tmdbId: Int
     ) async {
+        // Check if notifications are enabled
+        guard notificationsEnabled else {
+            print("🔕 Notifications disabled - skipping follower notifications for \(movieTitle)")
+            return
+        }
+        
+        print("📱 ===== MOVIE RATING NOTIFICATION TRIGGERED =====")
+        print("📱 Movie: \(movieTitle)")
+        print("📱 Score: \(score)")
+        print("📱 TMDB ID: \(tmdbId)")
+        print("📱 Timestamp: \(Date())")
+        print("📱 ==============================================")
+        
         do {
             // Call Firebase Function to check and notify followers
             let functions = Functions.functions()
@@ -182,13 +230,18 @@ class NotificationService: NSObject, ObservableObject {
                 "tmdbId": tmdbId
             ]
             
+            print("📱 Calling Firebase function with data: \(data)")
+            
             let result = try await functions.httpsCallable("checkAndNotifyFollowersForMovie").call(data)
+            
+            print("📱 Firebase function result: \(result.data ?? "nil")")
             
             if let resultData = result.data as? [String: Any],
                let success = resultData["success"] as? Bool,
                let notificationsSent = resultData["notificationsSent"] as? Int {
                 if success {
                     print("✅ Successfully sent \(notificationsSent) notifications for movie: \(movieTitle)")
+                    print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
                 } else {
                     print("❌ Failed to send notifications for movie: \(movieTitle)")
                 }
@@ -205,6 +258,18 @@ class NotificationService: NSObject, ObservableObject {
         to userId: String,
         from username: String
     ) async {
+        // Check if notifications are enabled
+        guard notificationsEnabled else {
+            print("🔕 Notifications disabled - skipping follow notification to \(userId)")
+            return
+        }
+        
+        print("📱 ===== FOLLOW NOTIFICATION TRIGGERED =====")
+        print("📱 To User ID: \(userId)")
+        print("📱 From Username: \(username)")
+        print("📱 Timestamp: \(Date())")
+        print("📱 ========================================")
+        
         do {
             // Call Firebase Function to send follow notification
             let functions = Functions.functions()
@@ -214,14 +279,20 @@ class NotificationService: NSObject, ObservableObject {
                 "username": username
             ]
             
+            print("📱 Calling Firebase function with data: \(data)")
+            
             let result = try await functions.httpsCallable("sendFollowNotification").call(data)
+            
+            print("📱 Firebase function result: \(result.data ?? "nil")")
             
             if let resultData = result.data as? [String: Any],
                let success = resultData["success"] as? Bool {
                 if success {
                     print("✅ Successfully sent follow notification to \(userId)")
+                    print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
                 } else {
                     print("❌ Failed to send follow notification to \(userId)")
+                    print("📱 Error: \(resultData["message"] as? String ?? "unknown error")")
                 }
             }
             
@@ -237,6 +308,19 @@ class NotificationService: NSObject, ObservableObject {
         comment: String,
         tmdbId: Int
     ) async {
+        // Check if notifications are enabled
+        guard notificationsEnabled else {
+            print("🔕 Notifications disabled - skipping comment notifications for \(movieTitle)")
+            return
+        }
+        
+        print("📱 ===== MOVIE COMMENT NOTIFICATION TRIGGERED =====")
+        print("📱 Movie: \(movieTitle)")
+        print("📱 Comment: \(comment)")
+        print("📱 TMDB ID: \(tmdbId)")
+        print("📱 Timestamp: \(Date())")
+        print("📱 ================================================")
+        
         do {
             // Call Firebase Function to check and notify followers about movie comment
             let functions = Functions.functions()
@@ -247,13 +331,18 @@ class NotificationService: NSObject, ObservableObject {
                 "tmdbId": tmdbId
             ]
             
+            print("📱 Calling Firebase function with data: \(data)")
+            
             let result = try await functions.httpsCallable("checkAndNotifyFollowersForMovieComment").call(data)
+            
+            print("📱 Firebase function result: \(result.data ?? "nil")")
             
             if let resultData = result.data as? [String: Any],
                let success = resultData["success"] as? Bool,
                let notificationsSent = resultData["notificationsSent"] as? Int {
                 if success {
                     print("✅ Successfully sent \(notificationsSent) comment notifications for movie: \(movieTitle)")
+                    print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
                 } else {
                     print("❌ Failed to send comment notifications for movie: \(movieTitle)")
                 }

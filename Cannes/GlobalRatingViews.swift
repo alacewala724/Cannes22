@@ -583,12 +583,28 @@ struct UnifiedMovieDetailView: View {
         return .movie
     }
     
+    // Computed property that observes store changes and automatically updates community rating
     private var displayAverageRating: Double? {
         if let rating = initialRating {
             return rating.confidenceAdjustedScore
         } else if let communityRating = communityRating {
             return communityRating.confidenceAdjustedScore
         }
+        return nil
+    }
+    
+    // Computed property that automatically updates community rating from store
+    private var currentCommunityRating: GlobalRating? {
+        // First check if we have an initial rating (for global view)
+        if let rating = initialRating {
+            return rating
+        }
+        
+        // Then check if we have a community rating loaded from store
+        if let tmdbId = displayTmdbId {
+            return store.getAllGlobalRatings().first { $0.tmdbId == tmdbId }
+        }
+        
         return nil
     }
     
@@ -888,11 +904,6 @@ struct UnifiedMovieDetailView: View {
                 wishlistCheckTask
             )
             
-            // Get global statistics for community rating calculation
-            let globalStats = try? await firestoreService.getGlobalRatingsStatistics()
-            let totalRatings = globalStats?.totalRatings ?? 100
-            let totalMovies = globalStats?.totalMovies ?? 50
-            
             await MainActor.run {
                 // Update secondary data
                 friendsRatings = friendsRatingsResult
@@ -901,19 +912,28 @@ struct UnifiedMovieDetailView: View {
                 
                 // Update community rating with smooth transition
                 if let rating = communityRatingResult {
-                    communityRating = GlobalRating(
-                        id: tmdbId?.description ?? "",
-                        title: displayTitle,
-                        mediaType: displayMediaType,
-                        averageRating: rating.averageRating,
-                        numberOfRatings: rating.numberOfRatings,
-                        tmdbId: tmdbId ?? 0,
-                        totalRatings: totalRatings,
-                        totalMovies: totalMovies,
-                        totalScore: rating.averageRating * Double(rating.numberOfRatings), // Calculate total score
-                        globalMu: 7.7, // Default global mean
-                        c: 50 // Default Bayesian prior strength
-                    )
+                    // Find the existing GlobalRating from the store that already has proper statistics
+                    let existingGlobalRating = store.getAllGlobalRatings().first { $0.tmdbId == tmdbId }
+                    
+                    if let existingRating = existingGlobalRating {
+                        // Use the existing GlobalRating that already has proper dynamic statistics
+                        communityRating = existingRating
+                    } else {
+                        // Fallback: create a new GlobalRating with basic data
+                        communityRating = GlobalRating(
+                            id: tmdbId?.description ?? "",
+                            title: displayTitle,
+                            mediaType: displayMediaType,
+                            averageRating: rating.averageRating,
+                            numberOfRatings: rating.numberOfRatings,
+                            tmdbId: tmdbId ?? 0,
+                            totalRatings: 100, // Will be updated when store refreshes
+                            totalMovies: 50,   // Will be updated when store refreshes
+                            totalScore: rating.averageRating * Double(rating.numberOfRatings),
+                            globalMu: 7.7,     // Will be updated when store refreshes
+                            c: 50.0           // Will be updated when store refreshes
+                        )
+                    }
                     numberOfRatings = rating.numberOfRatings
                 }
                 
@@ -1400,7 +1420,7 @@ struct UnifiedMovieDetailView: View {
     private func userRatingComparisonView(tmdbId: Int, userScore: Double) -> some View {
         // Round both scores consistently before calculating difference
         let roundedUserScore = roundToTenths(userScore)
-        let roundedCommunityScore: Double? = isLoadingCommunityRating ? nil : displayAverageRating
+        let roundedCommunityScore: Double? = isLoadingCommunityRating ? nil : currentCommunityRating?.confidenceAdjustedScore
         
         // When community rating is loading, set difference to 0 to show neutral state
         let differenceData = calculateDifferenceData(

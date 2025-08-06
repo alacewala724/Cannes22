@@ -65,6 +65,14 @@ exports.sendFollowNotification = functions.https.onCall(async (data, context) =>
             },
         };
 
+        // Log what notification would be sent
+        console.log(`📱 WOULD SEND FOLLOW NOTIFICATION:`);
+        console.log(`   To: ${targetUserId}`);
+        console.log(`   Title: "New Follower"`);
+        console.log(`   Body: "${username} started following you"`);
+        console.log(`   From: ${username}`);
+        console.log(`   ---`);
+
         // Send the notification
         const response = await admin.messaging().send(message);
         console.log(`Successfully sent follow notification to ${targetUserId}: ${response}`);
@@ -206,6 +214,16 @@ exports.checkAndNotifyFollowersForMovie = functions.https.onCall(async (data, co
         const results = [];
         for (const notification of notifications) {
             try {
+                // Log what notification would be sent
+                console.log(`📱 WOULD SEND NOTIFICATION:`);
+                console.log(`   To: ${notification.targetUserId}`);
+                console.log(`   Title: "New Movie Rating"`);
+                console.log(`   Body: "${notification.username} rated "${notification.movieTitle}" a ${notification.score.toFixed(1)}"`);
+                console.log(`   Movie: ${notification.movieTitle} (TMDB: ${notification.tmdbId})`);
+                console.log(`   Score: ${notification.score.toFixed(1)}`);
+                console.log(`   From: ${notification.username}`);
+                console.log(`   ---`);
+                
                 // Send notification directly using admin.messaging()
                 const message = {
                     token: await getTargetUserFCMToken(notification.targetUserId),
@@ -341,6 +359,16 @@ exports.checkAndNotifyFollowersForMovieComment = functions.https.onCall(async (d
         const results = [];
         for (const notification of notifications) {
             try {
+                // Log what notification would be sent
+                console.log(`📱 WOULD SEND COMMENT NOTIFICATION:`);
+                console.log(`   To: ${notification.targetUserId}`);
+                console.log(`   Title: "New Movie Comment"`);
+                console.log(`   Body: "${notification.username} commented on "${notification.movieTitle}""`);
+                console.log(`   Movie: ${notification.movieTitle} (TMDB: ${notification.tmdbId})`);
+                console.log(`   Comment: "${notification.comment}"`);
+                console.log(`   From: ${notification.username}`);
+                console.log(`   ---`);
+                
                 // Send notification directly using admin.messaging()
                 const message = {
                     token: await getTargetUserFCMToken(notification.targetUserId),

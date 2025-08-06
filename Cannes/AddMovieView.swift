@@ -703,12 +703,13 @@ struct ComparisonView: View {
                                     // Remove from wishlist after ranking
                                     try await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
                                     
-                                    // Use finalInsertion for all movies (simplified reranking)
-                                    // This ensures proper global community rating calculations
+                                    // Use finalInsertion for new movies, scoreUpdate for existing movies
+                                    let state: MovieRatingState = (existingMovie == nil && movie.id == movieWithProperScore.id) ? .finalInsertion : .scoreUpdate
+                                    
                                     try await store.firestoreService.updateMovieRanking(
                                         userId: userId,
                                         movie: movie,
-                                        state: .finalInsertion
+                                        state: state
                                     )
                                     
                                     // Add activity

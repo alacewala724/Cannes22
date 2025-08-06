@@ -92,11 +92,11 @@ struct DiscoverView: View {
         currentIndex = 0
         seenMovieIds.removeAll()
         
-        // Reset pagination counters
-        popularMoviesPage = 1
-        topRatedMoviesPage = 1
-        mostRatedMoviesPage = 1
-        trendingMoviesPage = 1
+        // Reset pagination counters with random values to ensure fresh content
+        popularMoviesPage = Int.random(in: 1...5)
+        topRatedMoviesPage = Int.random(in: 1...5)
+        mostRatedMoviesPage = Int.random(in: 1...5)
+        trendingMoviesPage = Int.random(in: 1...5)
         hasMoreMovies = true
         
         // Reset session time
@@ -168,9 +168,9 @@ struct DiscoverView: View {
             currentIndex = 0
             seenMovieIds.removeAll()
             
-            // Force fresh load for new media type
+            // Force fresh load for new media type with randomization
             Task {
-                await loadDiscoverMovies()
+                await loadFreshMovies()
             }
         }
         .onAppear {
@@ -564,9 +564,12 @@ struct DiscoverView: View {
             
             var allMovies: [TMDBMovie] = []
             
-            // 1. First priority: Unranked, unwishlisted global rankings
+            // 1. First priority: Unranked, unwishlisted global rankings (RANDOMIZED)
             let globalMovies = await withTaskGroup(of: TMDBMovie?.self) { group in
-                for globalRating in filteredGlobalRatings {
+                // Shuffle global ratings to avoid same order every time
+                let shuffledGlobalRatings = filteredGlobalRatings.shuffled()
+                
+                for globalRating in shuffledGlobalRatings {
                     // Only include if not rated by user and not in wishlist
                     guard let tmdbId = globalRating.tmdbId,
                           !userRatedIds.contains(tmdbId) && 
@@ -591,7 +594,7 @@ struct DiscoverView: View {
                                 posterPath: nil,
                                 releaseDate: nil,
                                 firstAirDate: nil,
-                                voteAverage: globalRating.averageRating,
+                                voteAverage: globalRating.confidenceAdjustedScore,
                                 voteCount: globalRating.numberOfRatings,
                                 genres: nil,
                                 mediaType: globalRating.mediaType == .movie ? "Movie" : "TV Show",
@@ -629,15 +632,17 @@ struct DiscoverView: View {
             print("DEBUG: User has \(wishlistIds.count) movies in wishlist")
             print("DEBUG: Seen movies count: \(seenMovieIds.count)")
             
-            // Sort by priority: global first (by global order), then by vote count
+            // Sort by priority: global first (RANDOMIZED), then by vote count
             let sortedMovies = allMovies.sorted { movie1, movie2 in
-                let movie1GlobalIndex = filteredGlobalRatings.firstIndex { $0.tmdbId == movie1.id } ?? Int.max
-                let movie2GlobalIndex = filteredGlobalRatings.firstIndex { $0.tmdbId == movie2.id } ?? Int.max
+                let movie1IsGlobal = globalMovies.contains { $0.id == movie1.id }
+                let movie2IsGlobal = globalMovies.contains { $0.id == movie2.id }
                 
-                if movie1GlobalIndex != movie2GlobalIndex {
-                    return movie1GlobalIndex < movie2GlobalIndex
+                // Global movies first (but they're already randomized from the shuffle above)
+                if movie1IsGlobal != movie2IsGlobal {
+                    return movie1IsGlobal
                 }
                 
+                // Then by vote count for variety
                 return (movie1.voteCount ?? 0) > (movie2.voteCount ?? 0)
             }
             
@@ -697,7 +702,9 @@ struct DiscoverView: View {
                 !discoverMovies.contains { $0.id == movie.id } // Don't include movies already in current list
             }
             
-            let toAdd = Array(filtered.prefix(maxCount))
+            // Shuffle the filtered movies to avoid predictable order
+            let shuffled = filtered.shuffled()
+            let toAdd = Array(shuffled.prefix(maxCount))
             allMovies.append(contentsOf: toAdd)
             
             // Track seen movies in this load
@@ -712,18 +719,18 @@ struct DiscoverView: View {
             group.addTask {
                 do {
                     if self.store.selectedMediaType == .movie {
-                        // Mix pages 1-2 with higher pages for variety
-                        let pages = [1, 2, self.topRatedMoviesPage, self.topRatedMoviesPage + 1]
+                        // Use random pages to avoid predictable patterns
+                        let randomPages = Array(1...10).shuffled().prefix(4)
                         var allMovies: [TMDBMovie] = []
-                        for page in pages {
+                        for page in randomPages {
                             let movies = try await self.tmdbService.getTopRatedMovies(page: page)
                             allMovies.append(contentsOf: movies)
                         }
                         return allMovies
                     } else {
-                        let pages = [1, 2, self.topRatedMoviesPage, self.topRatedMoviesPage + 1]
+                        let randomPages = Array(1...10).shuffled().prefix(4)
                         var allMovies: [TMDBMovie] = []
-                        for page in pages {
+                        for page in randomPages {
                             let movies = try await self.tmdbService.getTopRatedTVShows(page: page)
                             allMovies.append(contentsOf: movies)
                         }
@@ -739,18 +746,18 @@ struct DiscoverView: View {
             group.addTask {
                 do {
                     if self.store.selectedMediaType == .movie {
-                        // Mix pages 1-2 with higher pages for variety
-                        let pages = [1, 2, self.mostRatedMoviesPage, self.mostRatedMoviesPage + 1]
+                        // Use random pages to avoid predictable patterns
+                        let randomPages = Array(1...10).shuffled().prefix(4)
                         var allMovies: [TMDBMovie] = []
-                        for page in pages {
+                        for page in randomPages {
                             let movies = try await self.tmdbService.getMostRatedMovies(page: page)
                             allMovies.append(contentsOf: movies)
                         }
                         return allMovies
                     } else {
-                        let pages = [1, 2, self.mostRatedMoviesPage, self.mostRatedMoviesPage + 1]
+                        let randomPages = Array(1...10).shuffled().prefix(4)
                         var allMovies: [TMDBMovie] = []
-                        for page in pages {
+                        for page in randomPages {
                             let movies = try await self.tmdbService.getMostRatedTVShows(page: page)
                             allMovies.append(contentsOf: movies)
                         }
@@ -805,13 +812,13 @@ struct DiscoverView: View {
             }
         }
         
-        // Increment page numbers for next load
+        // Increment page numbers for next load (but use random increments to avoid patterns)
         if store.selectedMediaType == .movie {
-            topRatedMoviesPage += 2
-            mostRatedMoviesPage += 2
+            topRatedMoviesPage += Int.random(in: 2...5)
+            mostRatedMoviesPage += Int.random(in: 2...5)
         } else {
-            topRatedMoviesPage += 2
-            mostRatedMoviesPage += 2
+            topRatedMoviesPage += Int.random(in: 2...5)
+            mostRatedMoviesPage += Int.random(in: 2...5)
         }
         
         print("DEBUG: Loaded \(allMovies.count) movies from multiple endpoints")
@@ -858,8 +865,8 @@ struct DiscoverView: View {
             
             print("DEBUG: Load more - total new movies: \(newMovies.count)")
             
-            // Sort by vote count for variety
-            let sortedMovies = newMovies.sorted { movie1, movie2 in
+            // Sort by vote count for variety and shuffle to avoid predictable order
+            let sortedMovies = newMovies.shuffled().sorted { movie1, movie2 in
                 return (movie1.voteCount ?? 0) > (movie2.voteCount ?? 0)
             }
             
@@ -996,9 +1003,12 @@ struct DiscoverView: View {
             
             var allMovies: [TMDBMovie] = []
             
-            // 1. First priority: Unranked, unwishlisted global rankings
+            // 1. First priority: Unranked, unwishlisted global rankings (RANDOMIZED)
             let globalMovies = await withTaskGroup(of: TMDBMovie?.self) { group in
-                for globalRating in filteredGlobalRatings {
+                // Shuffle global ratings to avoid same order every time
+                let shuffledGlobalRatings = filteredGlobalRatings.shuffled()
+                
+                for globalRating in shuffledGlobalRatings {
                     // Only include if not rated by user and not in wishlist
                     guard let tmdbId = globalRating.tmdbId,
                           !userRatedIds.contains(tmdbId) && 
@@ -1023,7 +1033,7 @@ struct DiscoverView: View {
                                 posterPath: nil,
                                 releaseDate: nil,
                                 firstAirDate: nil,
-                                voteAverage: globalRating.averageRating,
+                                voteAverage: globalRating.confidenceAdjustedScore,
                                 voteCount: globalRating.numberOfRatings,
                                 genres: nil,
                                 mediaType: globalRating.mediaType == .movie ? "Movie" : "TV Show",
@@ -1061,15 +1071,17 @@ struct DiscoverView: View {
             print("DEBUG: Refresh - User has \(wishlistIds.count) movies in wishlist")
             print("DEBUG: Refresh - Seen movies count: \(seenMovieIds.count)")
             
-            // Sort by priority: global first (by global order), then by vote count
+            // Sort by priority: global first (RANDOMIZED), then by vote count
             let sortedMovies = allMovies.sorted { movie1, movie2 in
-                let movie1GlobalIndex = filteredGlobalRatings.firstIndex { $0.tmdbId == movie1.id } ?? Int.max
-                let movie2GlobalIndex = filteredGlobalRatings.firstIndex { $0.tmdbId == movie2.id } ?? Int.max
+                let movie1IsGlobal = globalMovies.contains { $0.id == movie1.id }
+                let movie2IsGlobal = globalMovies.contains { $0.id == movie2.id }
                 
-                if movie1GlobalIndex != movie2GlobalIndex {
-                    return movie1GlobalIndex < movie2GlobalIndex
+                // Global movies first (but they're already randomized from the shuffle above)
+                if movie1IsGlobal != movie2IsGlobal {
+                    return movie1IsGlobal
                 }
                 
+                // Then by vote count for variety
                 return (movie1.voteCount ?? 0) > (movie2.voteCount ?? 0)
             }
             

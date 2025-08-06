@@ -184,10 +184,10 @@ struct GlobalRating: Identifiable, Codable, Hashable {
     let globalMu: Double // Global mean rating across all movies
     let c: Double // Bayesian prior strength parameter
     
-    var displayScore: Double { averageRating }
+    var displayScore: Double { confidenceAdjustedScore }
     
     var sentimentColor: Color {
-        switch averageRating {
+        switch confidenceAdjustedScore {
         case 6.9...10.0:
             return Color(.systemGreen)  // likedIt range
         case 4.0..<6.9:

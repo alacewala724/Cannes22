@@ -700,20 +700,25 @@ struct NotificationMovieDetailView: View {
     @ObservedObject var store: MovieStore
     @StateObject private var firestoreService = FirestoreService()
     @State private var communityRating: GlobalRating?
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @Environment(\.dismiss) private var dismiss
+    @State private var numberOfRatings: Int = 0
+    @State private var isLoadingCommunityRating = false
+    
+    // Computed property that automatically updates community rating from store
+    private var currentCommunityRating: GlobalRating? {
+        // Check if we have a community rating loaded from store
+        return store.getAllGlobalRatings().first { $0.tmdbId == tmdbId }
+    }
     
     var body: some View {
         Group {
-            if isLoading {
+            if isLoadingCommunityRating {
                 VStack(spacing: 16) {
                     ProgressView()
                     Text("Loading community rating...")
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let rating = communityRating {
+            } else if let rating = currentCommunityRating {
                 NavigationView {
                     UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: notificationSenderRating)
                 }
@@ -727,13 +732,13 @@ struct NotificationMovieDetailView: View {
                         .font(.title2)
                         .fontWeight(.medium)
                     
-                    Text(errorMessage ?? "The community rating for this movie could not be loaded.")
+                    Text("The community rating for this movie could not be loaded.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                     
                     Button("Close") {
-                        dismiss()
+                        // Dismiss the sheet
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -742,54 +747,11 @@ struct NotificationMovieDetailView: View {
             }
         }
         .task {
-            await loadCommunityRating()
-        }
-    }
-    
-    private func loadCommunityRating() async {
-        isLoading = true
-        do {
-            // Fetch the actual community rating from Firestore
-            let rating = try await firestoreService.getCommunityRating(tmdbId: tmdbId)
-            
-            await MainActor.run {
-                if let rating = rating {
-                    self.communityRating = GlobalRating(
-                        id: tmdbId.description,
-                        title: movieTitle,
-                        mediaType: mediaType,
-                        averageRating: rating.averageRating,
-                        numberOfRatings: rating.numberOfRatings,
-                        tmdbId: tmdbId,
-                        totalRatings: 100, // Default value for this context
-                        totalMovies: 50, // Default value for this context
-                        totalScore: rating.averageRating * Double(rating.numberOfRatings), // Calculate total score
-                        globalMu: 7.7, // Default global mean
-                        c: 50 // Default Bayesian prior strength
-                    )
-                } else {
-                    // If no community rating exists, create a default one
-                    self.communityRating = GlobalRating(
-                        id: tmdbId.description,
-                        title: movieTitle,
-                        mediaType: mediaType,
-                        averageRating: 0.0,
-                        numberOfRatings: 0,
-                        tmdbId: tmdbId,
-                        totalRatings: 100, // Default value for this context
-                        totalMovies: 50, // Default value for this context
-                        totalScore: 0.0, // No total score for non-existent rating
-                        globalMu: 7.7, // Default global mean
-                        c: 50 // Default Bayesian prior strength
-                    )
-                }
-                isLoading = false
-            }
-        } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-                isLoading = false
-            }
+            // Set loading state briefly to show loading indicator
+            isLoadingCommunityRating = true
+            // Small delay to show loading state
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            isLoadingCommunityRating = false
         }
     }
 }
