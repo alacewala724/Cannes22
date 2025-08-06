@@ -876,36 +876,49 @@ struct ComparisonView: View {
             }
         }
         
-        // Add to middle of appropriate sentiment section immediately (optimistic update)
+        // Get the current list and find the movie we're being compared to
         var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
         
-        // Find the middle of the appropriate sentiment section
+        // Find the movie we're being compared to (the one at mid position)
+        let comparisonMovie = sortedMovies[mid]
+        let comparisonScore = comparisonMovie.score
+        
+        // Calculate a score similar to the comparison movie with slight random variation
+        let randomVariation = Double.random(in: -0.1...0.1) // Small variation for ordering
+        let similarScore = max(0.0, min(10.0, comparisonScore + randomVariation))
+        
+        print("Too close to call: Comparison movie '\(comparisonMovie.title)' has score \(comparisonScore)")
+        print("Too close to call: New movie '\(newMovie.title)' will get similar score \(similarScore)")
+        
+        // Create a new movie with the similar score
+        var movieWithSimilarScore = newMovie
+        movieWithSimilarScore.score = similarScore
+        
+        // Find the appropriate position near the comparison movie
         let insertionIndex: Int
-        if let sectionStart = targetList.firstIndex(where: { $0.sentiment == newMovie.sentiment }) {
-            let sectionEnd = targetList.lastIndex(where: { $0.sentiment == newMovie.sentiment }) ?? sectionStart
-            insertionIndex = (sectionStart + sectionEnd) / 2 + 1
-            print("Too close to call: Will insert '\(newMovie.title)' at middle of section (index \(insertionIndex))")
+        if let comparisonIndex = targetList.firstIndex(where: { $0.id == comparisonMovie.id }) {
+            // Insert near the comparison movie (slightly after it)
+            insertionIndex = comparisonIndex + 1
+            print("Too close to call: Will insert '\(newMovie.title)' near comparison movie at index \(insertionIndex)")
         } else {
-            // No existing movies with this sentiment, add at the end
-            insertionIndex = targetList.count
-            print("Too close to call: Will append '\(newMovie.title)' to end of list")
+            // Fallback: insert in the middle of the sentiment section
+            if let sectionStart = targetList.firstIndex(where: { $0.sentiment == newMovie.sentiment }) {
+                let sectionEnd = targetList.lastIndex(where: { $0.sentiment == newMovie.sentiment }) ?? sectionStart
+                insertionIndex = (sectionStart + sectionEnd) / 2 + 1
+                print("Too close to call: Will insert '\(newMovie.title)' at middle of section (index \(insertionIndex))")
+            } else {
+                // No existing movies with this sentiment, add at the end
+                insertionIndex = targetList.count
+                print("Too close to call: Will append '\(newMovie.title)' to end of list")
+            }
         }
         
-        // Calculate the proper score for this position BEFORE inserting
-        let properScore = store.calculateScoreForMovie(at: insertionIndex, in: targetList, sentiment: newMovie.sentiment)
-        
-        // Create a new movie with the proper score
-        var movieWithProperScore = newMovie
-        movieWithProperScore.score = properScore
-        
-        print("Too close to call: Movie '\(newMovie.title)' score updated from \(newMovie.score) to \(properScore)")
-        
-        // Insert the movie with the proper score
-        targetList.insert(movieWithProperScore, at: insertionIndex)
+        // Insert the movie with the similar score
+        targetList.insert(movieWithSimilarScore, at: insertionIndex)
         
         // Update the UI immediately
         await MainActor.run {
-            if movieWithProperScore.mediaType == .movie {
+            if movieWithSimilarScore.mediaType == .movie {
                 store.movies = targetList
             } else {
                 store.tvShows = targetList
@@ -921,25 +934,25 @@ struct ComparisonView: View {
         if let userId = AuthenticationService.shared.currentUser?.uid {
             Task.detached(priority: .background) {
                 do {
-                    print("Too close to call: Starting background processing for '\(movieWithProperScore.title)'")
+                    print("Too close to call: Starting background processing for '\(movieWithSimilarScore.title)'")
                     
                     // Save to Firebase and update community ratings in background
                     try await store.firestoreService.updateMovieRanking(
                         userId: userId,
-                        movie: movieWithProperScore,
+                        movie: movieWithSimilarScore,
                         state: .initialSentiment
                     )
                     
                     // Recalculate scores in background with error handling
                     let currentList = await MainActor.run {
-                        return movieWithProperScore.mediaType == .movie ? store.movies : store.tvShows
+                        return movieWithSimilarScore.mediaType == .movie ? store.movies : store.tvShows
                     }
                     
                     let (updatedList, personalUpdates) = await store.calculateScoreUpdatesForList(currentList)
                     
                     // Update UI with recalculated scores
                     await MainActor.run {
-                        if movieWithProperScore.mediaType == .movie {
+                        if movieWithSimilarScore.mediaType == .movie {
                             store.movies = updatedList
                         } else {
                             store.tvShows = updatedList
@@ -953,7 +966,7 @@ struct ComparisonView: View {
                     }
                     
                     // Get the final movie after recalculation
-                    let finalMovie = updatedList.first { $0.id == movieWithProperScore.id } ?? movieWithProperScore
+                    let finalMovie = updatedList.first { $0.id == movieWithSimilarScore.id } ?? movieWithSimilarScore
                     
                     // Community rating and activity updates
                     try await store.firestoreService.updateMovieRanking(
@@ -990,10 +1003,10 @@ struct ComparisonView: View {
                     print("Too close to call: Background processing error: \(error)")
                     // On error, try to revert the optimistic update
                     await MainActor.run {
-                        if movieWithProperScore.mediaType == .movie {
-                            store.movies.removeAll { $0.id == movieWithProperScore.id }
+                        if movieWithSimilarScore.mediaType == .movie {
+                            store.movies.removeAll { $0.id == movieWithSimilarScore.id }
                         } else {
-                            store.tvShows.removeAll { $0.id == movieWithProperScore.id }
+                            store.tvShows.removeAll { $0.id == movieWithSimilarScore.id }
                         }
                         print("Too close to call: Reverted optimistic update due to error")
                         // Show error to user
