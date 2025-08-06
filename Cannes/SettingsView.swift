@@ -551,47 +551,26 @@ struct SettingsView: View {
                             .font(.headline)
                             .foregroundColor(.primary)
                         
-                        Text("View all user rankings and recalculate global ratings from actual user data.")
+                        Text("View all user rankings. Global rating recalculation is available remotely.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         
-                        HStack {
-                            Button(action: {
-                                Task {
-                                    await showAllUserRankings()
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "list.bullet")
-                                    Text("View All Rankings")
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.blue)
-                                .cornerRadius(8)
+                        Button(action: {
+                            Task {
+                                await showAllUserRankings()
                             }
-                            .disabled(isAdminLoading)
-                            
-                            Spacer()
-                            
-                            Button(action: {
-                                Task {
-                                    await recalculateGlobalRatings()
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "arrow.clockwise")
-                                    Text("Recalculate Global")
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.green)
-                                .cornerRadius(8)
+                        }) {
+                            HStack {
+                                Image(systemName: "list.bullet")
+                                Text("View All Rankings")
                             }
-                            .disabled(isAdminLoading)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .cornerRadius(8)
                         }
+                        .disabled(isAdminLoading)
                         
                         if isAdminLoading {
                             HStack {
@@ -955,24 +934,6 @@ struct SettingsView: View {
             await MainActor.run {
                 isAdminLoading = false
                 adminMessage = "Error loading rankings: \(error.localizedDescription)"
-            }
-        }
-    }
-    
-    private func recalculateGlobalRatings() async {
-        isAdminLoading = true
-        adminMessage = "Recalculating global ratings from user data..."
-        
-        do {
-            try await firestoreService.recalculateAllGlobalAveragesFromUserData()
-            await MainActor.run {
-                isAdminLoading = false
-                adminMessage = "✅ Global ratings recalculated successfully!"
-            }
-        } catch {
-            await MainActor.run {
-                isAdminLoading = false
-                adminMessage = "❌ Error recalculating: \(error.localizedDescription)"
             }
         }
     }
