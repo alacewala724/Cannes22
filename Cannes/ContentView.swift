@@ -426,7 +426,7 @@ struct ContentView: View {
                 
                 HStack(spacing: 20) {
                     Button(action: { showingAddMovie = true }) {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: "magnifyingglass.circle.fill")
                             .font(.title)
                             .foregroundColor(.accentColor)
                     }

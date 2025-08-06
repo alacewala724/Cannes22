@@ -445,4 +445,142 @@ exports.checkAndNotifyFollowersForMovieComment = functions.https.onCall(async (d
         console.error('Error checking followers for movie comment:', error);
         throw new functions.https.HttpsError('internal', 'Failed to check followers for movie comment');
     }
+});
+
+// Cloud Function to recalculate global ratings (admin only)
+exports.recalculateGlobalRatings = functions.https.onRequest(async (req, res) => {
+    // Set CORS headers
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+
+    // Simple authentication (you can enhance this)
+    const adminKey = req.headers['x-admin-key'] || req.query.key;
+    if (!adminKey || adminKey !== 'cannes-admin-2024') {
+        return res.status(403).json({ 
+            error: 'Unauthorized', 
+            message: 'Valid admin key required' 
+        });
+    }
+
+    try {
+        console.log('🔄 Starting global ratings recalculation...');
+        
+        const db = admin.firestore();
+        
+        // Get all users
+        const usersSnapshot = await db.collection('users').get();
+        console.log(`Found ${usersSnapshot.docs.length} users`);
+        
+        const tmdbRatings = new Map();
+        const tmdbTitles = new Map();
+        const tmdbMediaTypes = new Map();
+        let totalRatings = 0;
+        
+        // Collect all ratings from all users
+        for (const userDoc of usersSnapshot.docs) {
+            const rankingsSnapshot = await db.collection('users').doc(userDoc.id).collection('rankings').get();
+            
+            for (const ranking of rankingsSnapshot.docs) {
+                const data = ranking.data();
+                if (data.tmdbId && data.score && data.title && data.mediaType) {
+                    if (!tmdbRatings.has(data.tmdbId)) {
+                        tmdbRatings.set(data.tmdbId, []);
+                        tmdbTitles.set(data.tmdbId, data.title);
+                        tmdbMediaTypes.set(data.tmdbId, data.mediaType);
+                    }
+                    tmdbRatings.get(data.tmdbId).push(data.score);
+                    totalRatings++;
+                }
+            }
+        }
+        
+        console.log(`Collected ${totalRatings} ratings for ${tmdbRatings.size} unique movies`);
+        
+        // Get existing ratings to preserve their structure
+        const existingRatingsSnapshot = await db.collection('ratings').get();
+        const existingRatings = new Map();
+        
+        for (const doc of existingRatingsSnapshot.docs) {
+            const data = doc.data();
+            if (data.tmdbId) {
+                existingRatings.set(data.tmdbId.toString(), { docId: doc.id, data: data });
+            }
+        }
+        
+        console.log(`Found ${existingRatings.size} existing rating documents`);
+        
+        // Update existing ratings with new calculations
+        const updatePromises = [];
+        let updatedCount = 0;
+        
+        for (const [tmdbId, scores] of tmdbRatings) {
+            const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+            const totalScore = scores.reduce((sum, score) => sum + score, 0);
+            
+            if (existingRatings.has(tmdbId)) {
+                // Update existing document
+                const existing = existingRatings.get(tmdbId);
+                const updateData = {
+                    ...existing.data, // Preserve all existing fields
+                    averageRating: average,
+                    numberOfRatings: scores.length,
+                    totalScore: totalScore,
+                    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                    // Update title and mediaType if we have them from user data
+                    title: tmdbTitles.get(tmdbId) || existing.data.title,
+                    mediaType: tmdbMediaTypes.get(tmdbId) || existing.data.mediaType
+                };
+                
+                updatePromises.push(
+                    db.collection('ratings').doc(existing.docId).update(updateData)
+                );
+                updatedCount++;
+            } else {
+                // For new documents, use title and mediaType from user data
+                const newData = {
+                    tmdbId: parseInt(tmdbId),
+                    averageRating: average,
+                    numberOfRatings: scores.length,
+                    totalScore: totalScore,
+                    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                    title: tmdbTitles.get(tmdbId) || `Movie ${tmdbId}`,
+                    mediaType: tmdbMediaTypes.get(tmdbId) || 'movie'
+                };
+                
+                updatePromises.push(
+                    db.collection('ratings').doc(tmdbId.toString()).set(newData)
+                );
+                updatedCount++;
+            }
+        }
+        
+        await Promise.all(updatePromises);
+        console.log(`✅ Updated ${updatedCount} global ratings from actual user data`);
+        
+        res.json({ 
+            success: true, 
+            message: `Updated ${updatedCount} global ratings from ${totalRatings} user ratings`,
+            stats: {
+                totalUsers: usersSnapshot.docs.length,
+                totalRatings: totalRatings,
+                uniqueMovies: tmdbRatings.size,
+                updatedRatings: updatedCount,
+                preservedExisting: existingRatings.size
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Error recalculating global ratings:', error);
+        res.status(500).json({ 
+            error: 'Internal server error', 
+            message: error.message 
+        });
+    }
 }); 

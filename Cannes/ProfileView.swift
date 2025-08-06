@@ -490,7 +490,7 @@ struct FollowerRow: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("\(moviesInCommon) movies in common")
+                        Text("\(moviesInCommon) media in common")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -547,9 +547,9 @@ struct FollowerRow: View {
     private func loadMoviesInCommon() async {
         isLoadingMoviesInCommon = true
         do {
-            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: follower.uid)
+            moviesInCommon = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: follower.uid)
         } catch {
-            print("Error loading movies in common: \(error)")
+            print("Error loading media in common: \(error)")
             moviesInCommon = 0
         }
         isLoadingMoviesInCommon = false
@@ -748,7 +748,7 @@ struct ProfileFollowingRow: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("\(moviesInCommon) movies in common")
+                        Text("\(moviesInCommon) media in common")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -808,9 +808,9 @@ struct ProfileFollowingRow: View {
     private func loadMoviesInCommon() async {
         isLoadingMoviesInCommon = true
         do {
-            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+            moviesInCommon = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: user.uid)
         } catch {
-            print("Error loading movies in common: \(error)")
+            print("Error loading media in common: \(error)")
             moviesInCommon = 0
         }
         isLoadingMoviesInCommon = false
@@ -976,7 +976,7 @@ struct UserFollowerRow: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("\(moviesInCommon) movies in common")
+                        Text("\(moviesInCommon) media in common")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -1033,9 +1033,9 @@ struct UserFollowerRow: View {
     private func loadMoviesInCommon() async {
         isLoadingMoviesInCommon = true
         do {
-            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: follower.uid)
+            moviesInCommon = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: follower.uid)
         } catch {
-            print("Error loading movies in common: \(error)")
+            print("Error loading media in common: \(error)")
             moviesInCommon = 0
         }
         isLoadingMoviesInCommon = false
@@ -1202,7 +1202,7 @@ struct UserFollowingRow: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("\(moviesInCommon) movies in common")
+                        Text("\(moviesInCommon) media in common")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -1259,9 +1259,9 @@ struct UserFollowingRow: View {
     private func loadMoviesInCommon() async {
         isLoadingMoviesInCommon = true
         do {
-            moviesInCommon = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+            moviesInCommon = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: user.uid)
         } catch {
-            print("Error loading movies in common: \(error)")
+            print("Error loading media in common: \(error)")
             moviesInCommon = 0
         }
         isLoadingMoviesInCommon = false

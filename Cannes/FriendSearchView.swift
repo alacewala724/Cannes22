@@ -1051,7 +1051,7 @@ struct FollowingListView: View {
                                 Text("@Unknown User")
                                     .font(.headline)
                                     .foregroundColor(.secondary)
-                                Text("0 movies in common")
+                                Text("0 media in common")
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
@@ -1097,14 +1097,14 @@ struct FollowingListView: View {
             
             following = validatedFollowing
             
-            // Calculate movies in common for each followed user
+            // Calculate media in common for each followed user
             for user in following {
                 do {
-                    let count = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+                    let count = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: user.uid)
                     moviesInCommon[user.uid] = count
-                    print("FollowingListView: \(user.username) has \(count) movies in common")
+                    print("FollowingListView: \(user.username) has \(count) media in common")
                 } catch {
-                    print("FollowingListView: Error getting movies in common for \(user.username): \(error)")
+                    print("FollowingListView: Error getting media in common for \(user.username): \(error)")
                     moviesInCommon[user.uid] = 0
                 }
             }
@@ -1129,14 +1129,14 @@ struct FollowingListView: View {
             
             following = validatedFollowing
             
-            // Calculate movies in common for each followed user
+            // Calculate media in common for each followed user
             for user in following {
                 do {
-                    let count = try await firestoreService.getMoviesInCommonWithFollowedUser(followedUserId: user.uid)
+                    let count = try await firestoreService.getMediaInCommonWithFollowedUser(followedUserId: user.uid)
                     moviesInCommon[user.uid] = count
-                    print("FollowingListView: \(user.username) has \(count) movies in common")
+                    print("FollowingListView: \(user.username) has \(count) media in common")
                 } catch {
-                    print("FollowingListView: Error getting movies in common for \(user.username): \(error)")
+                    print("FollowingListView: Error getting media in common for \(user.username): \(error)")
                     moviesInCommon[user.uid] = 0
                 }
             }
@@ -1193,7 +1193,7 @@ struct FollowingRowSkeleton: View {
                     .frame(width: 120, height: 16)
                     .opacity(0.6)
                 
-                // Movies in common skeleton
+                // Media in common skeleton
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color(.systemGray5))
                     .frame(width: 100, height: 12)
@@ -1248,7 +1248,7 @@ struct FollowingRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("\(moviesInCommon) movies in common")
+                    Text("\(moviesInCommon) media in common")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }

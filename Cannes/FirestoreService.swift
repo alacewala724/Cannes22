@@ -1,6 +1,20 @@
 import Firebase
 import FirebaseFirestore
 import FirebaseAuth
+import Foundation
+
+// MARK: - Admin Data Structure (for internal use)
+struct UserRankingData: Identifiable {
+    let id = UUID()
+    let userId: String
+    let username: String
+    let movieTitle: String
+    let tmdbId: Int?
+    let score: Double
+    let sentiment: String
+    let mediaType: String
+    let timestamp: Date
+}
 
 class FirestoreService: ObservableObject {
     private let db = Firestore.firestore()
@@ -1651,26 +1665,26 @@ extension FirestoreService {
         return followingSnapshot.documents.count
     }
     
-    // Get number of movies in common with a followed user
-    func getMoviesInCommonWithFollowedUser(followedUserId: String) async throws -> Int {
+    // Get number of media in common with a followed user
+    func getMediaInCommonWithFollowedUser(followedUserId: String) async throws -> Int {
         guard let currentUser = Auth.auth().currentUser else {
             return 0
         }
         
         let currentUserId = currentUser.uid
         
-        // Get current user's movies
-        let currentUserMovies = try await getUserRankings(userId: currentUserId)
-        let currentUserTmdbIds = Set(currentUserMovies.compactMap { $0.tmdbId })
+        // Get current user's media
+        let currentUserMedia = try await getUserRankings(userId: currentUserId)
+        let currentUserTmdbIds = Set(currentUserMedia.compactMap { $0.tmdbId })
         
-        // Get followed user's movies
-        let followedUserMovies = try await getUserRankings(userId: followedUserId)
-        let followedUserTmdbIds = Set(followedUserMovies.compactMap { $0.tmdbId })
+        // Get followed user's media
+        let followedUserMedia = try await getUserRankings(userId: followedUserId)
+        let followedUserTmdbIds = Set(followedUserMedia.compactMap { $0.tmdbId })
         
         // Calculate intersection
-        let moviesInCommon = currentUserTmdbIds.intersection(followedUserTmdbIds)
+        let mediaInCommon = currentUserTmdbIds.intersection(followedUserTmdbIds)
         
-        return moviesInCommon.count
+        return mediaInCommon.count
     }
     
     // Get ratings from users that the current user follows for a specific movie
@@ -1862,26 +1876,26 @@ extension FirestoreService {
         return allRatings
     }
     
-    // Get number of movies in common with a friend
-    func getMoviesInCommonWithFriend(friendUserId: String) async throws -> Int {
+    // Get number of media in common with a friend
+    func getMediaInCommonWithFriend(friendUserId: String) async throws -> Int {
         guard let currentUser = Auth.auth().currentUser else {
             return 0
         }
         
         let currentUserId = currentUser.uid
         
-        // Get current user's movies
-        let currentUserMovies = try await getUserRankings(userId: currentUserId)
-        let currentUserTmdbIds = Set(currentUserMovies.compactMap { $0.tmdbId })
+        // Get current user's media
+        let currentUserMedia = try await getUserRankings(userId: currentUserId)
+        let currentUserTmdbIds = Set(currentUserMedia.compactMap { $0.tmdbId })
         
-        // Get friend's movies
-        let friendMovies = try await getUserRankings(userId: friendUserId)
-        let friendTmdbIds = Set(friendMovies.compactMap { $0.tmdbId })
+        // Get friend's media
+        let friendMedia = try await getUserRankings(userId: friendUserId)
+        let friendTmdbIds = Set(friendMedia.compactMap { $0.tmdbId })
         
         // Calculate intersection
-        let moviesInCommon = currentUserTmdbIds.intersection(friendTmdbIds)
+        let mediaInCommon = currentUserTmdbIds.intersection(friendTmdbIds)
         
-        return moviesInCommon.count
+        return mediaInCommon.count
     }
 } 
 

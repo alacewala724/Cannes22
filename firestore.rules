@@ -88,13 +88,5 @@ service cloud.firestore {
       allow write, delete: if request.auth != null && 
         (resource == null || resource.data.userId == request.auth.uid);
     }
-    
-    // TEMPORARY ADMIN RULE - REMOVE AFTER TESTING
-    // Allow admin to read all user rankings for global rating calculations
-    match /users/{userId}/rankings/{movieId} {
-      allow read: if request.auth != null && 
-        (request.auth.uid == userId || 
-         request.auth.uid == "ADMIN_USER_ID_HERE"); // Replace with actual admin UID
-    }
   }
 } 

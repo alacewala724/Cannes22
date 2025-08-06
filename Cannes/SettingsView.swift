@@ -51,12 +51,6 @@ struct SettingsView: View {
     @State private var isUpdatingMyPoster = false
     @State private var posterUpdateMessage: String?
     
-    // Admin state variables
-    @State private var adminMessage: String?
-    @State private var isAdminLoading = false
-    @State private var allUserRankings: [UserRankingData] = []
-    @State private var showingRankingsSheet = false
-    
     var body: some View {
         NavigationView {
             List {
@@ -543,57 +537,6 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
                 
-                // Admin Section (only for admin users)
-                // if authService.currentUser?.uid == "ADMIN_USER_ID_HERE" { // Replace with actual admin UID
-                Section("Admin Tools") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Global Rating Management")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        
-                        Text("View all user rankings. Global rating recalculation is available remotely.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Button(action: {
-                            Task {
-                                await showAllUserRankings()
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "list.bullet")
-                                Text("View All Rankings")
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color.blue)
-                            .cornerRadius(8)
-                        }
-                        .disabled(isAdminLoading)
-                        
-                        if isAdminLoading {
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Processing...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.top, 4)
-                        }
-                        
-                        if let adminMessage = adminMessage {
-                            Text(adminMessage)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 4)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                // }
-                
                 // Sign Out Section
                 Section {
                     Button(action: { showingSignOutAlert = true }) {
@@ -638,9 +581,6 @@ struct SettingsView: View {
             }
         } message: {
             Text("Are you sure you want to unlink your phone number? You'll need to use your email to sign in.")
-        }
-        .sheet(isPresented: $showingRankingsSheet) {
-            AllUserRankingsView(rankings: allUserRankings)
         }
     }
     
@@ -914,120 +854,5 @@ struct SettingsView: View {
     // MARK: - Keyboard Dismissal
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-    
-    // MARK: - Admin Functions
-    
-    private func showAllUserRankings() async {
-        isAdminLoading = true
-        adminMessage = "Loading all user rankings..."
-        
-        do {
-            let rankings = try await firestoreService.getAllUserRankings()
-            await MainActor.run {
-                allUserRankings = rankings
-                showingRankingsSheet = true
-                isAdminLoading = false
-                adminMessage = "Loaded \(rankings.count) user rankings"
-            }
-        } catch {
-            await MainActor.run {
-                isAdminLoading = false
-                adminMessage = "Error loading rankings: \(error.localizedDescription)"
-            }
-        }
-    }
-}
-
-// MARK: - Admin Data Structures
-
-struct UserRankingData: Identifiable {
-    let id = UUID()
-    let userId: String
-    let username: String
-    let movieTitle: String
-    let tmdbId: Int?
-    let score: Double
-    let sentiment: String
-    let mediaType: String
-    let timestamp: Date
-    
-    var displayInfo: String {
-        "\(username): \(movieTitle) (\(score))"
-    }
-}
-
-// MARK: - All User Rankings View
-
-struct AllUserRankingsView: View {
-    let rankings: [UserRankingData]
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        NavigationView {
-            List {
-                ForEach(rankings) { ranking in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(ranking.username)
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            
-                            Spacer()
-                            
-                            Text(String(format: "%.1f", ranking.score))
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        Text(ranking.movieTitle)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        HStack {
-                            Text(ranking.sentiment)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.2))
-                                .cornerRadius(4)
-                            
-                            Text(ranking.mediaType)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.2))
-                                .cornerRadius(4)
-                            
-                            if let tmdbId = ranking.tmdbId {
-                                Text("TMDB: \(tmdbId)")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.2))
-                                    .cornerRadius(4)
-                            }
-                            
-                            Spacer()
-                            
-                            Text(ranking.timestamp, style: .date)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-            .navigationTitle("All User Rankings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
     }
 } 
