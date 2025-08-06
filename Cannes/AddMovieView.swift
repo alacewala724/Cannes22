@@ -703,8 +703,9 @@ struct ComparisonView: View {
                                     // Remove from wishlist after ranking
                                     try await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
                                     
-                                    // Use finalInsertion for new movies, scoreUpdate for existing movies
-                                    let state: MovieRatingState = (existingMovie == nil && movie.id == movieWithProperScore.id) ? .finalInsertion : .scoreUpdate
+                                    // Use finalInsertion for new movies and re-ranking (since we delete old movie)
+                                    // Use scoreUpdate only for existing movies that didn't get deleted
+                                    let state: MovieRatingState = (existingMovie == nil || movie.id == movieWithProperScore.id) ? .finalInsertion : .scoreUpdate
                                     
                                     try await store.firestoreService.updateMovieRanking(
                                         userId: userId,
@@ -714,7 +715,7 @@ struct ComparisonView: View {
                                     
                                     // Add activity
                                     try await store.firestoreService.createActivityUpdate(
-                                        type: existingMovie != nil ? .movieUpdated : .movieRanked,
+                                        type: (existingMovie == nil || movie.id == movieWithProperScore.id) ? .movieRanked : .movieUpdated,
                                         movie: movie
                                     )
                                     
