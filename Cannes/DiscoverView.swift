@@ -18,6 +18,14 @@ struct DiscoverView: View {
     @State private var cardScale: CGFloat = 1.0
     @State private var seenMovieIds: Set<Int> = [] // Track seen movies to prevent duplicates
     
+    // Error handling state
+    @State private var errorMessage: String?
+    @State private var showError = false
+    @State private var isLoadingMore = false
+    @State private var retryCount = 0
+    @State private var lastErrorTime: Date?
+    @State private var isOffline = false
+    
     // Pagination state for endless movie supply
     @State private var popularMoviesPage = 1
     @State private var topRatedMoviesPage = 1  // Start from page 1, will mix with pages 1-2
@@ -102,6 +110,81 @@ struct DiscoverView: View {
         // Reset session time
         lastSessionTime = 0.0
     }
+    
+    // MARK: - Error Handling
+    
+    private func handleError(_ error: Error, context: String) {
+        let errorMessage = getErrorMessage(for: error, context: context)
+        
+        DispatchQueue.main.async {
+            self.errorMessage = errorMessage
+            self.showError = true
+            self.lastErrorTime = Date()
+            self.isLoading = false
+            self.isLoadingMore = false
+            
+            // Check if it's a network error
+            if self.isNetworkError(error) {
+                self.isOffline = true
+            }
+            
+            print("❌ DiscoverView Error [\(context)]: \(error.localizedDescription)")
+        }
+    }
+    
+    private func getErrorMessage(for error: Error, context: String) -> String {
+        if isNetworkError(error) {
+            return "No internet connection. Please check your network and try again."
+        } else if isAuthError(error) {
+            return "Authentication error. Please sign in again."
+        } else if isRateLimitError(error) {
+            return "Too many requests. Please wait a moment and try again."
+        } else if isServerError(error) {
+            return "Server error. Please try again later."
+        } else {
+            return "Failed to load movies. Please try again."
+        }
+    }
+    
+    private func isNetworkError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && 
+               (nsError.code == NSURLErrorNotConnectedToInternet ||
+                nsError.code == NSURLErrorNetworkConnectionLost ||
+                nsError.code == NSURLErrorTimedOut)
+    }
+    
+    private func isAuthError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "FirebaseAuthErrorDomain" ||
+               nsError.code == 401
+    }
+    
+    private func isRateLimitError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.code == 429
+    }
+    
+    private func isServerError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.code >= 500 && nsError.code < 600
+    }
+    
+    private func shouldRetry() -> Bool {
+        guard let lastError = lastErrorTime else { return true }
+        let timeSinceLastError = Date().timeIntervalSince(lastError)
+        
+        // Allow retry if more than 30 seconds have passed or if retry count is low
+        return timeSinceLastError > 30 || retryCount < 3
+    }
+    
+    private func resetErrorState() {
+        errorMessage = nil
+        showError = false
+        retryCount = 0
+        lastErrorTime = nil
+        isOffline = false
+    }
 
     var body: some View {
         ZStack {
@@ -116,6 +199,8 @@ struct DiscoverView: View {
                 ZStack {
                     if isLoading {
                         loadingView
+                    } else if showError {
+                        errorView
                     } else if discoverMovies.isEmpty {
                         emptyStateView
                     } else if currentIndex < discoverMovies.count {
@@ -159,9 +244,20 @@ struct DiscoverView: View {
                 ))
             }
         }
+        .alert("Error", isPresented: $showError) {
+            Button("Retry") {
+                Task {
+                    await retryLoad()
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage ?? "An unknown error occurred")
+        }
         .onChange(of: store.selectedMediaType) { _, _ in
             // Reset state when media type changes
             clearSavedState()
+            resetErrorState()
             
             // Clear current movie list to force fresh load
             discoverMovies.removeAll()
@@ -487,11 +583,11 @@ struct DiscoverView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             
-            Text("No movies to discover")
+            Text("No Movies Available")
                 .font(.title2)
-                .fontWeight(.medium)
+                .fontWeight(.semibold)
             
-            Text("Try changing the media type or check back later")
+            Text("Try refreshing or switching media types")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -501,13 +597,62 @@ struct DiscoverView: View {
                     await loadDiscoverMovies()
                 }
             }
-            .font(.headline)
-            .foregroundColor(.white)
-            .padding()
-            .background(Color.accentColor)
-            .cornerRadius(12)
+            .buttonStyle(.borderedProminent)
         }
         .padding()
+    }
+    
+    private var errorView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: isOffline ? "wifi.slash" : "exclamationmark.triangle")
+                .font(.system(size: 60))
+                .foregroundColor(.orange)
+            
+            Text(isOffline ? "No Internet Connection" : "Something Went Wrong")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text(errorMessage ?? "An error occurred while loading movies")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            
+            HStack(spacing: 16) {
+                Button("Retry") {
+                    Task {
+                        await retryLoad()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                
+                Button("Refresh") {
+                    Task {
+                        await loadFreshMovies()
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+    }
+    
+    private func retryLoad() async {
+        retryCount += 1
+        
+        if shouldRetry() {
+            resetErrorState()
+            isLoading = true
+            
+            // Wait a bit before retrying to avoid overwhelming the server
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            
+            await loadDiscoverMovies()
+        } else {
+            // Too many retries, show a different message
+            errorMessage = "Too many failed attempts. Please try again later."
+            showError = true
+        }
     }
     
     private var noMoreMoviesView: some View {
@@ -542,6 +687,7 @@ struct DiscoverView: View {
     private func loadDiscoverMovies() async {
         await MainActor.run {
             isLoading = true
+            resetErrorState()
         }
         
         do {
@@ -675,10 +821,7 @@ struct DiscoverView: View {
             }
             
         } catch {
-            await MainActor.run {
-                isLoading = false
-            }
-            print("Error loading discover movies: \(error)")
+            handleError(error, context: "loadDiscoverMovies")
         }
     }
     
@@ -846,6 +989,10 @@ struct DiscoverView: View {
     }
     
     private func loadMoreMovies() async {
+        await MainActor.run {
+            isLoadingMore = true
+        }
+        
         do {
             // Get user's rated movies and wishlist
             let userRatedIds = Set(store.getAllMovies().compactMap { $0.tmdbId })
@@ -874,19 +1021,19 @@ struct DiscoverView: View {
                 // Append new movies to existing list
                 discoverMovies.append(contentsOf: sortedMovies)
                 
-                // Add new movies to seen set
+                // Add to seen set
                 for movie in sortedMovies {
                     seenMovieIds.insert(movie.id)
                 }
                 
-                // Save state after adding more movies
-                saveCurrentState()
+                isLoadingMore = false
                 
-                print("DEBUG: Added \(sortedMovies.count) more movies. Total: \(discoverMovies.count)")
+                print("DEBUG: Load more - Added \(sortedMovies.count) new movies")
+                print("DEBUG: Load more - Total movies now: \(discoverMovies.count)")
             }
             
         } catch {
-            print("Error loading more movies: \(error)")
+            handleError(error, context: "loadMoreMovies")
         }
     }
     
@@ -981,6 +1128,7 @@ struct DiscoverView: View {
     private func loadFreshMovies() async {
         await MainActor.run {
             isLoading = true
+            resetErrorState()
         }
 
         do {
@@ -1109,10 +1257,7 @@ struct DiscoverView: View {
             }
             
         } catch {
-            await MainActor.run {
-                isLoading = false
-            }
-            print("Error loading fresh movies: \(error)")
+            handleError(error, context: "loadFreshMovies")
         }
     }
 }

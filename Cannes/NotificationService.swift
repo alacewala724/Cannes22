@@ -17,6 +17,13 @@ class NotificationService: NSObject, ObservableObject {
     // Simple toggle for testing - set to false to disable all notifications
     @Published var notificationsEnabled = true
     
+    // Error handling state
+    @Published var lastError: String?
+    @Published var showError = false
+    @Published var isOffline = false
+    @Published var retryCount = 0
+    @Published var lastErrorTime: Date?
+    
     private override init() {
         super.init()
         setupMessaging()
@@ -37,6 +44,7 @@ class NotificationService: NSObject, ObservableObject {
                 }
                 if let error = error {
                     print("❌ Notification permission error: \(error)")
+                    self?.handleError(error, context: "notificationPermission")
                 } else {
                     print("📱 ===== NOTIFICATION PERMISSION STATUS =====")
                     print("📱 Permission granted: \(granted)")
@@ -50,6 +58,79 @@ class NotificationService: NSObject, ObservableObject {
         UIApplication.shared.registerForRemoteNotifications()
     }
     
+    // MARK: - Error Handling
+    
+    private func handleError(_ error: Error, context: String) {
+        let errorMessage = getErrorMessage(for: error, context: context)
+        
+        DispatchQueue.main.async {
+            self.lastError = errorMessage
+            self.showError = true
+            self.lastErrorTime = Date()
+            
+            // Check if it's a network error
+            if self.isNetworkError(error) {
+                self.isOffline = true
+            }
+            
+            print("❌ NotificationService Error [\(context)]: \(error.localizedDescription)")
+        }
+    }
+    
+    private func getErrorMessage(for error: Error, context: String) -> String {
+        if isNetworkError(error) {
+            return "No internet connection. Please check your network and try again."
+        } else if isAuthError(error) {
+            return "Authentication error. Please sign in again."
+        } else if isRateLimitError(error) {
+            return "Too many requests. Please wait a moment and try again."
+        } else if isServerError(error) {
+            return "Server error. Please try again later."
+        } else {
+            return "Failed to send notification. Please try again."
+        }
+    }
+    
+    private func isNetworkError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && 
+               (nsError.code == NSURLErrorNotConnectedToInternet ||
+                nsError.code == NSURLErrorNetworkConnectionLost ||
+                nsError.code == NSURLErrorTimedOut)
+    }
+    
+    private func isAuthError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "FirebaseAuthErrorDomain" ||
+               nsError.code == 401
+    }
+    
+    private func isRateLimitError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.code == 429
+    }
+    
+    private func isServerError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.code >= 500 && nsError.code < 600
+    }
+    
+    private func shouldRetry() -> Bool {
+        guard let lastError = lastErrorTime else { return true }
+        let timeSinceLastError = Date().timeIntervalSince(lastError)
+        
+        // Allow retry if more than 30 seconds have passed or if retry count is low
+        return timeSinceLastError > 30 || retryCount < 3
+    }
+    
+    private func resetErrorState() {
+        lastError = nil
+        showError = false
+        retryCount = 0
+        lastErrorTime = nil
+        isOffline = false
+    }
+    
     // MARK: - FCM Token Management
     
     func refreshFCMToken() {
@@ -60,6 +141,7 @@ class NotificationService: NSObject, ObservableObject {
         Messaging.messaging().token { [weak self] token, error in
             if let error = error {
                 print("❌ Error fetching FCM token: \(error)")
+                self?.handleError(error, context: "refreshFCMToken")
                 return
             }
             
@@ -83,6 +165,7 @@ class NotificationService: NSObject, ObservableObject {
     private func saveFCMTokenToFirestore(token: String) {
         guard let currentUser = Auth.auth().currentUser else {
             print("❌ No authenticated user to save FCM token")
+            handleError(NSError(domain: "NotificationService", code: 5, userInfo: [NSLocalizedDescriptionKey: "No authenticated user"]), context: "saveFCMTokenToFirestore")
             return
         }
         
@@ -103,6 +186,7 @@ class NotificationService: NSObject, ObservableObject {
         userDocRef.getDocument { [weak self] document, error in
             if let error = error {
                 print("❌ Error checking user document: \(error)")
+                self?.handleError(error, context: "saveFCMTokenToFirestore")
                 return
             }
             
@@ -115,6 +199,7 @@ class NotificationService: NSObject, ObservableObject {
                 ]) { error in
                     if let error = error {
                         print("❌ Error creating user document: \(error)")
+                        self?.handleError(error, context: "saveFCMTokenToFirestore")
                         return
                     }
                     print("✅ User document created")
@@ -132,12 +217,14 @@ class NotificationService: NSObject, ObservableObject {
             .document(userId)
             .collection("tokens")
             .document("fcm")
-            .setData(tokenData) { error in
+            .setData(tokenData) { [weak self] error in
                 if let error = error {
                     print("❌ Error saving FCM token: \(error)")
                     print("🔍 DEBUG: Error details: \(error.localizedDescription)")
+                    self?.handleError(error, context: "saveTokenToUserDocument")
                 } else {
                     print("✅ FCM token saved to Firestore")
+                    self?.resetErrorState()
                 }
             }
     }
@@ -189,14 +276,17 @@ class NotificationService: NSObject, ObservableObject {
                 if success {
                     print("✅ Successfully sent notification to \(userId)")
                     print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
+                    resetErrorState()
                 } else {
+                    let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send notification to \(userId)")
-                    print("📱 Error: \(resultData["message"] as? String ?? "unknown error")")
+                    print("📱 Error: \(errorMessage)")
+                    handleError(NSError(domain: "NotificationService", code: 1, userInfo: [NSLocalizedDescriptionKey: errorMessage]), context: "sendMovieRatingNotification")
                 }
             }
             
         } catch {
-            print("❌ Error sending notification: \(error)")
+            handleError(error, context: "sendMovieRatingNotification")
         }
     }
     
@@ -242,13 +332,17 @@ class NotificationService: NSObject, ObservableObject {
                 if success {
                     print("✅ Successfully sent \(notificationsSent) notifications for movie: \(movieTitle)")
                     print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
+                    resetErrorState()
                 } else {
+                    let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send notifications for movie: \(movieTitle)")
+                    print("📱 Error: \(errorMessage)")
+                    handleError(NSError(domain: "NotificationService", code: 2, userInfo: [NSLocalizedDescriptionKey: errorMessage]), context: "checkAndNotifyFollowersForMovie")
                 }
             }
             
         } catch {
-            print("❌ Error checking followers for movie: \(error)")
+            handleError(error, context: "checkAndNotifyFollowersForMovie")
         }
     }
     
@@ -290,14 +384,17 @@ class NotificationService: NSObject, ObservableObject {
                 if success {
                     print("✅ Successfully sent follow notification to \(userId)")
                     print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
+                    resetErrorState()
                 } else {
+                    let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send follow notification to \(userId)")
-                    print("📱 Error: \(resultData["message"] as? String ?? "unknown error")")
+                    print("📱 Error: \(errorMessage)")
+                    handleError(NSError(domain: "NotificationService", code: 3, userInfo: [NSLocalizedDescriptionKey: errorMessage]), context: "sendFollowNotification")
                 }
             }
             
         } catch {
-            print("❌ Error sending follow notification: \(error)")
+            handleError(error, context: "sendFollowNotification")
         }
     }
     
@@ -343,13 +440,17 @@ class NotificationService: NSObject, ObservableObject {
                 if success {
                     print("✅ Successfully sent \(notificationsSent) comment notifications for movie: \(movieTitle)")
                     print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
+                    resetErrorState()
                 } else {
+                    let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send comment notifications for movie: \(movieTitle)")
+                    print("📱 Error: \(errorMessage)")
+                    handleError(NSError(domain: "NotificationService", code: 4, userInfo: [NSLocalizedDescriptionKey: errorMessage]), context: "checkAndNotifyFollowersForMovieComment")
                 }
             }
             
         } catch {
-            print("❌ Error checking followers for movie comment: \(error)")
+            handleError(error, context: "checkAndNotifyFollowersForMovieComment")
         }
     }
     
