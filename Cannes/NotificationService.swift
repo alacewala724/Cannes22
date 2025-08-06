@@ -24,6 +24,13 @@ class NotificationService: NSObject, ObservableObject {
     @Published var retryCount = 0
     @Published var lastErrorTime: Date?
     
+    // Notification rate limiting
+    @Published var notificationCounts: [String: Int] = [:] // Track notifications per user
+    @Published var notificationTimestamps: [String: [Date]] = [:] // Track timestamps per user
+    private let maxNotificationsPerHour = 5 // Maximum notifications per hour per user
+    private let maxNotificationsPerDay = 20 // Maximum notifications per day per user
+    private let maxNotificationsPerWeek = 50 // Maximum notifications per week per user
+    
     private override init() {
         super.init()
         setupMessaging()
@@ -129,6 +136,110 @@ class NotificationService: NSObject, ObservableObject {
         retryCount = 0
         lastErrorTime = nil
         isOffline = false
+    }
+    
+    // MARK: - Rate Limiting
+    
+    private func shouldSendNotification(to userId: String, type: String) -> Bool {
+        let now = Date()
+        let key = "\(userId)_\(type)"
+        
+        // Get existing timestamps for this user and notification type
+        var timestamps = notificationTimestamps[key] ?? []
+        
+        // Clean up old timestamps (older than 1 week)
+        let oneWeekAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        timestamps = timestamps.filter { $0 > oneWeekAgo }
+        
+        // Check hourly limit
+        let oneHourAgo = now.addingTimeInterval(-60 * 60)
+        let hourlyCount = timestamps.filter { $0 > oneHourAgo }.count
+        if hourlyCount >= maxNotificationsPerHour {
+            print("📱 Rate limit: Hourly limit reached for user \(userId) (\(hourlyCount)/\(maxNotificationsPerHour))")
+            return false
+        }
+        
+        // Check daily limit
+        let oneDayAgo = now.addingTimeInterval(-24 * 60 * 60)
+        let dailyCount = timestamps.filter { $0 > oneDayAgo }.count
+        if dailyCount >= maxNotificationsPerDay {
+            print("📱 Rate limit: Daily limit reached for user \(userId) (\(dailyCount)/\(maxNotificationsPerDay))")
+            return false
+        }
+        
+        // Check weekly limit
+        let weeklyCount = timestamps.count
+        if weeklyCount >= maxNotificationsPerWeek {
+            print("📱 Rate limit: Weekly limit reached for user \(userId) (\(weeklyCount)/\(maxNotificationsPerWeek))")
+            return false
+        }
+        
+        // Log current status
+        print("📱 Rate limit: Status for user \(userId) (\(type)) - Hourly: \(hourlyCount)/\(maxNotificationsPerHour), Daily: \(dailyCount)/\(maxNotificationsPerDay), Weekly: \(weeklyCount)/\(maxNotificationsPerWeek)")
+        
+        return true
+    }
+    
+    private func trackNotificationSent(to userId: String, type: String) {
+        let now = Date()
+        let key = "\(userId)_\(type)"
+        
+        // Add current timestamp
+        var timestamps = notificationTimestamps[key] ?? []
+        timestamps.append(now)
+        notificationTimestamps[key] = timestamps
+        
+        // Update count
+        let currentCount = notificationCounts[key] ?? 0
+        notificationCounts[key] = currentCount + 1
+        
+        print("📱 Rate limit: Tracked notification to user \(userId) (type: \(type), total: \(currentCount + 1))")
+    }
+    
+    private func getRateLimitStatus(for userId: String, type: String) -> (hourly: Int, daily: Int, weekly: Int) {
+        let now = Date()
+        let key = "\(userId)_\(type)"
+        let timestamps = notificationTimestamps[key] ?? []
+        
+        let oneHourAgo = now.addingTimeInterval(-60 * 60)
+        let oneDayAgo = now.addingTimeInterval(-24 * 60 * 60)
+        let oneWeekAgo = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        
+        let hourlyCount = timestamps.filter { $0 > oneHourAgo }.count
+        let dailyCount = timestamps.filter { $0 > oneDayAgo }.count
+        let weeklyCount = timestamps.filter { $0 > oneWeekAgo }.count
+        
+        return (hourly: hourlyCount, daily: dailyCount, weekly: weeklyCount)
+    }
+    
+    // MARK: - Public Rate Limit Status
+    
+    func getRateLimitStatus(for userId: String) -> [String: (hourly: Int, daily: Int, weekly: Int)] {
+        let types = ["movie_rating", "follow", "movie_comment"]
+        var status: [String: (hourly: Int, daily: Int, weekly: Int)] = [:]
+        
+        for type in types {
+            status[type] = getRateLimitStatus(for: userId, type: type)
+        }
+        
+        return status
+    }
+    
+    func clearRateLimitData(for userId: String? = nil) {
+        if let userId = userId {
+            // Clear data for specific user
+            let keysToRemove = notificationTimestamps.keys.filter { $0.hasPrefix("\(userId)_") }
+            for key in keysToRemove {
+                notificationTimestamps.removeValue(forKey: key)
+                notificationCounts.removeValue(forKey: key)
+            }
+            print("📱 Rate limit: Cleared data for user \(userId)")
+        } else {
+            // Clear all data
+            notificationTimestamps.removeAll()
+            notificationCounts.removeAll()
+            print("📱 Rate limit: Cleared all rate limit data")
+        }
     }
     
     // MARK: - FCM Token Management
@@ -244,6 +355,12 @@ class NotificationService: NSObject, ObservableObject {
             return
         }
         
+        // Check rate limiting
+        guard shouldSendNotification(to: userId, type: "movie_rating") else {
+            print("📱 Rate limit: Skipping movie rating notification to \(userId)")
+            return
+        }
+        
         print("📱 ===== DIRECT MOVIE RATING NOTIFICATION =====")
         print("📱 To User ID: \(userId)")
         print("📱 From Username: \(username)")
@@ -277,6 +394,9 @@ class NotificationService: NSObject, ObservableObject {
                     print("✅ Successfully sent notification to \(userId)")
                     print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
                     resetErrorState()
+                    
+                    // Track successful notification
+                    trackNotificationSent(to: userId, type: "movie_rating")
                 } else {
                     let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send notification to \(userId)")
@@ -333,6 +453,13 @@ class NotificationService: NSObject, ObservableObject {
                     print("✅ Successfully sent \(notificationsSent) notifications for movie: \(movieTitle)")
                     print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
                     resetErrorState()
+                    
+                    // Track successful notifications for each recipient
+                    if let recipients = resultData["recipients"] as? [String] {
+                        for recipient in recipients {
+                            trackNotificationSent(to: recipient, type: "movie_rating")
+                        }
+                    }
                 } else {
                     let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send notifications for movie: \(movieTitle)")
@@ -355,6 +482,12 @@ class NotificationService: NSObject, ObservableObject {
         // Check if notifications are enabled
         guard notificationsEnabled else {
             print("🔕 Notifications disabled - skipping follow notification to \(userId)")
+            return
+        }
+        
+        // Check rate limiting
+        guard shouldSendNotification(to: userId, type: "follow") else {
+            print("📱 Rate limit: Skipping follow notification to \(userId)")
             return
         }
         
@@ -385,6 +518,9 @@ class NotificationService: NSObject, ObservableObject {
                     print("✅ Successfully sent follow notification to \(userId)")
                     print("📱 Message ID: \(resultData["messageId"] as? String ?? "unknown")")
                     resetErrorState()
+                    
+                    // Track successful notification
+                    trackNotificationSent(to: userId, type: "follow")
                 } else {
                     let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send follow notification to \(userId)")
@@ -441,6 +577,13 @@ class NotificationService: NSObject, ObservableObject {
                     print("✅ Successfully sent \(notificationsSent) comment notifications for movie: \(movieTitle)")
                     print("📱 Notification recipients: \(resultData["recipients"] as? [String] ?? [])")
                     resetErrorState()
+                    
+                    // Track successful notifications for each recipient
+                    if let recipients = resultData["recipients"] as? [String] {
+                        for recipient in recipients {
+                            trackNotificationSent(to: recipient, type: "movie_comment")
+                        }
+                    }
                 } else {
                     let errorMessage = resultData["message"] as? String ?? "Unknown error"
                     print("❌ Failed to send comment notifications for movie: \(movieTitle)")
