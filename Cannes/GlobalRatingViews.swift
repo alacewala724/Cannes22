@@ -854,7 +854,10 @@ struct UnifiedMovieDetailView: View {
                     "friends": false,
                     "runtime": false,
                     "overview": false,
-                    "takes": false
+                    "takes": false,
+                    "backdrop": false,
+                    "cast": false,
+                    "crew": false
                 ]
                 
                 // Stagger section appearances
@@ -959,7 +962,7 @@ struct UnifiedMovieDetailView: View {
     }
     
     private func staggerContentSections() {
-        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes"]
+        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes", "backdrop", "cast", "crew"]
         
         for (index, section) in sections.enumerated() {
             let delay = Double(index) * 0.1 + 0.3 // Start after 0.3s, then 0.1s between each
@@ -998,9 +1001,9 @@ struct UnifiedMovieDetailView: View {
         do {
             let tmdbMovie: TMDBMovie
             if mediaType == .tv {
-                tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                tmdbMovie = try await tmdbService.getTVShowDetailsWithCredits(id: tmdbId)
             } else {
-                tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                tmdbMovie = try await tmdbService.getMovieDetailsWithCredits(id: tmdbId)
             }
             
             return AppModels.Movie(
@@ -1009,14 +1012,17 @@ struct UnifiedMovieDetailView: View {
                 name: tmdbMovie.name,
                 overview: tmdbMovie.overview,
                 poster_path: tmdbMovie.posterPath,
+                backdrop_path: tmdbMovie.backdropPath, // NEW: Include backdrop path
                 release_date: tmdbMovie.releaseDate,
                 first_air_date: tmdbMovie.firstAirDate,
                 vote_average: tmdbMovie.voteAverage,
                 vote_count: tmdbMovie.voteCount,
+                popularity: tmdbMovie.popularity, // NEW: Include popularity
                 genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
                 media_type: mediaType.rawValue,
                 runtime: tmdbMovie.runtime,
-                episode_run_time: tmdbMovie.episodeRunTime
+                episode_run_time: tmdbMovie.episodeRunTime,
+                credits: tmdbMovie.credits // NEW: Include credits
             )
         } catch {
             if (error as NSError).code != NSURLErrorCancelled {
@@ -1801,6 +1807,166 @@ struct UnifiedMovieDetailView: View {
                 .opacity(contentSections["overview"] ?? false ? 1 : 0)
                 .offset(y: contentSections["overview"] ?? false ? 0 : 20)
                 .animation(.easeOut(duration: 0.4), value: contentSections["overview"])
+            }
+            
+            // NEW: Backdrop Image Section
+            if let backdropPath = details.backdrop_path {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Background")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w1280\(backdropPath)")) { phase in
+                        switch phase {
+                        case .empty:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 200)
+                                .clipped()
+                                .cornerRadius(12)
+                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        }
+                    }
+                }
+                .card()
+                .opacity(contentSections["backdrop"] ?? false ? 1 : 0)
+                .offset(y: contentSections["backdrop"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["backdrop"])
+            }
+            
+            // NEW: Cast Section
+            if let credits = details.credits, let cast = credits.cast, !cast.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Cast")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(cast.prefix(10)) { member in
+                                VStack(spacing: 8) {
+                                    // Profile image
+                                    AsyncImage(url: member.profilePath != nil ? URL(string: "https://image.tmdb.org/t/p/w185\(member.profilePath!)") : nil) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            Circle()
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 60, height: 60)
+                                                .opacity(0.6)
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 60, height: 60)
+                                                .clipped()
+                                                .cornerRadius(30)
+                                        case .failure:
+                                            Circle()
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 60, height: 60)
+                                                .opacity(0.6)
+                                        @unknown default:
+                                            Circle()
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 60, height: 60)
+                                                .opacity(0.6)
+                                        }
+                                    }
+                                    
+                                    VStack(spacing: 4) {
+                                        Text(member.name)
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                        
+                                        if let character = member.character {
+                                            Text(character)
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(1)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                    }
+                                    .frame(width: 80)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                }
+                .card()
+                .opacity(contentSections["cast"] ?? false ? 1 : 0)
+                .offset(y: contentSections["cast"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["cast"])
+            }
+            
+            // NEW: Crew Section (Directors, Writers, etc.)
+            if let credits = details.credits, let crew = credits.crew, !crew.isEmpty {
+                let directors = crew.filter { $0.job?.lowercased() == "director" }
+                let writers = crew.filter { $0.job?.lowercased().contains("writer") == true || $0.job?.lowercased().contains("screenplay") == true }
+                
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Crew")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    VStack(spacing: 12) {
+                        if !directors.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Director\(directors.count > 1 ? "s" : "")")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                
+                                ForEach(directors.prefix(3)) { director in
+                                    Text(director.name)
+                                        .font(.body)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                        }
+                        
+                        if !writers.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Writer\(writers.count > 1 ? "s" : "")")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                
+                                ForEach(writers.prefix(3)) { writer in
+                                    Text(writer.name)
+                                        .font(.body)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .card()
+                .opacity(contentSections["crew"] ?? false ? 1 : 0)
+                .offset(y: contentSections["crew"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["crew"])
             }
             
             // Takes Section with enhanced design

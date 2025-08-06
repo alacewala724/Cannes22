@@ -43,14 +43,17 @@ enum AppModels {
         let name: String?  // For TV shows
         let overview: String?
         let poster_path: String?
+        let backdrop_path: String? // NEW: Background image path
         let release_date: String?
         let first_air_date: String?  // For TV shows
         let vote_average: Double?
         let vote_count: Int?
+        let popularity: Double? // NEW: Popularity score
         let genres: [Genre]?
         let media_type: String?
         let runtime: Int?  // For movies
         let episode_run_time: [Int]?  // For TV shows
+        let credits: TMDBMovieCredits? // NEW: Cast and crew information
 
         var displayTitle: String {
             title ?? name ?? "Untitled"
@@ -86,6 +89,41 @@ enum AppModels {
     struct Genre: Codable, Hashable, Identifiable {
         let id: Int
         let name: String
+    }
+    
+    // NEW: Cast and crew information
+    struct TMDBMovieCredits: Codable {
+        let cast: [TMDBCastMember]?
+        let crew: [TMDBCrewMember]?
+    }
+    
+    // NEW: Cast member information
+    struct TMDBCastMember: Codable, Identifiable {
+        let id: Int
+        let name: String
+        let character: String?
+        let profilePath: String?
+        let order: Int?
+        
+        enum CodingKeys: String, CodingKey {
+            case id, name, character
+            case profilePath = "profile_path"
+            case order = "cast_id"
+        }
+    }
+    
+    // NEW: Crew member information
+    struct TMDBCrewMember: Codable, Identifiable {
+        let id: Int
+        let name: String
+        let job: String?
+        let department: String?
+        let profilePath: String?
+        
+        enum CodingKeys: String, CodingKey {
+            case id, name, job, department
+            case profilePath = "profile_path"
+        }
     }
 }
 

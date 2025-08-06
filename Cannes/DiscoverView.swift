@@ -801,7 +801,7 @@ struct DiscoverView: View {
             print("DEBUG: User has \(wishlistIds.count) movies in wishlist")
             print("DEBUG: Seen movies count: \(seenMovieIds.count)")
             
-            // Sort by priority: global first (RANDOMIZED), then by vote count
+            // Sort by priority: global first (RANDOMIZED), then by vote count and popularity
             let sortedMovies = allMovies.sorted { movie1, movie2 in
                 let movie1IsGlobal = globalMovies.contains { $0.id == movie1.id }
                 let movie2IsGlobal = globalMovies.contains { $0.id == movie2.id }
@@ -811,8 +811,11 @@ struct DiscoverView: View {
                     return movie1IsGlobal
                 }
                 
-                // Then by vote count for variety
-                return (movie1.voteCount ?? 0) > (movie2.voteCount ?? 0)
+                // Then by a combination of vote count and popularity for better variety
+                let movie1Score = (movie1.voteCount ?? 0) + (movie1.popularity ?? 0) * 10
+                let movie2Score = (movie2.voteCount ?? 0) + (movie2.popularity ?? 0) * 10
+                
+                return movie1Score > movie2Score
             }
             
             await MainActor.run {
@@ -1242,7 +1245,7 @@ struct DiscoverView: View {
             print("DEBUG: Refresh - User has \(wishlistIds.count) movies in wishlist")
             print("DEBUG: Refresh - Seen movies count: \(seenMovieIds.count)")
             
-            // Sort by priority: global first (RANDOMIZED), then by vote count
+            // Sort by priority: global first (RANDOMIZED), then by vote count and popularity
             let sortedMovies = allMovies.sorted { movie1, movie2 in
                 let movie1IsGlobal = globalMovies.contains { $0.id == movie1.id }
                 let movie2IsGlobal = globalMovies.contains { $0.id == movie2.id }
@@ -1252,8 +1255,11 @@ struct DiscoverView: View {
                     return movie1IsGlobal
                 }
                 
-                // Then by vote count for variety
-                return (movie1.voteCount ?? 0) > (movie2.voteCount ?? 0)
+                // Then by a combination of vote count and popularity for better variety
+                let movie1Score = (movie1.voteCount ?? 0) + (movie1.popularity ?? 0) * 10
+                let movie2Score = (movie2.voteCount ?? 0) + (movie2.popularity ?? 0) * 10
+                
+                return movie1Score > movie2Score
             }
             
             await MainActor.run {

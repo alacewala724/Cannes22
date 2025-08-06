@@ -36,14 +36,17 @@ class TMDBService {
                 name: movies[i].name,
                 overview: movies[i].overview,
                 posterPath: movies[i].posterPath,
+                backdropPath: movies[i].backdropPath,
                 releaseDate: movies[i].releaseDate,
                 firstAirDate: movies[i].firstAirDate,
                 voteAverage: movies[i].voteAverage,
                 voteCount: movies[i].voteCount,
+                popularity: movies[i].popularity,
                 genres: movies[i].genres,
                 mediaType: "Movie",
                 runtime: movies[i].runtime,
-                episodeRunTime: movies[i].episodeRunTime
+                episodeRunTime: movies[i].episodeRunTime,
+                credits: movies[i].credits
             )
         }
         
@@ -69,14 +72,17 @@ class TMDBService {
                 name: tvShows[i].name,
                 overview: tvShows[i].overview,
                 posterPath: tvShows[i].posterPath,
+                backdropPath: tvShows[i].backdropPath,
                 releaseDate: tvShows[i].releaseDate,
                 firstAirDate: tvShows[i].firstAirDate,
                 voteAverage: tvShows[i].voteAverage,
                 voteCount: tvShows[i].voteCount,
+                popularity: tvShows[i].popularity,
                 genres: tvShows[i].genres,
                 mediaType: "TV Show",
                 runtime: tvShows[i].runtime,
-                episodeRunTime: tvShows[i].episodeRunTime
+                episodeRunTime: tvShows[i].episodeRunTime,
+                credits: tvShows[i].credits
             )
         }
         
@@ -100,14 +106,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "Movie",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -129,16 +138,87 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "TV Show",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
+    }
+    
+    // NEW: Get detailed movie information with credits
+    func getMovieDetailsWithCredits(id: Int) async throws -> TMDBMovie {
+        let urlString = "\(baseURL)/movie/\(id)?api_key=\(apiKey)&append_to_response=credits"
+        
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        var movie = try JSONDecoder().decode(TMDBMovie.self, from: data)
+        
+        // Set mediaType for movie
+        movie = TMDBMovie(
+            id: movie.id,
+            title: movie.title,
+            name: movie.name,
+            overview: movie.overview,
+            posterPath: movie.posterPath,
+            backdropPath: movie.backdropPath,
+            releaseDate: movie.releaseDate,
+            firstAirDate: movie.firstAirDate,
+            voteAverage: movie.voteAverage,
+            voteCount: movie.voteCount,
+            popularity: movie.popularity,
+            genres: movie.genres,
+            mediaType: "Movie",
+            runtime: movie.runtime,
+            episodeRunTime: movie.episodeRunTime,
+            credits: movie.credits
+        )
+        
+        return movie
+    }
+    
+    // NEW: Get detailed TV show information with credits
+    func getTVShowDetailsWithCredits(id: Int) async throws -> TMDBMovie {
+        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&append_to_response=credits"
+        
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        var tvShow = try JSONDecoder().decode(TMDBMovie.self, from: data)
+        
+        // Set mediaType for TV show
+        tvShow = TMDBMovie(
+            id: tvShow.id,
+            title: tvShow.title,
+            name: tvShow.name,
+            overview: tvShow.overview,
+            posterPath: tvShow.posterPath,
+            backdropPath: tvShow.backdropPath,
+            releaseDate: tvShow.releaseDate,
+            firstAirDate: tvShow.firstAirDate,
+            voteAverage: tvShow.voteAverage,
+            voteCount: tvShow.voteCount,
+            popularity: tvShow.popularity,
+            genres: tvShow.genres,
+            mediaType: "TV Show",
+            runtime: tvShow.runtime,
+            episodeRunTime: tvShow.episodeRunTime,
+            credits: tvShow.credits
+        )
+        
+        return tvShow
     }
     
     func getTrendingMovies() async throws -> [TMDBMovie] {
@@ -158,14 +238,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "Movie",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -187,14 +270,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "TV Show",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -217,14 +303,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "Movie",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -247,14 +336,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "TV Show",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -277,14 +369,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "Movie",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -307,14 +402,17 @@ class TMDBService {
                 name: movie.name,
                 overview: movie.overview,
                 posterPath: movie.posterPath,
+                backdropPath: movie.backdropPath,
                 releaseDate: movie.releaseDate,
                 firstAirDate: movie.firstAirDate,
                 voteAverage: movie.voteAverage,
                 voteCount: movie.voteCount,
+                popularity: movie.popularity,
                 genres: movie.genres,
                 mediaType: "TV Show",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episodeRunTime
+                episodeRunTime: movie.episodeRunTime,
+                credits: movie.credits
             )
         }
     }
@@ -336,14 +434,17 @@ class TMDBService {
             name: movie.name,
             overview: movie.overview,
             posterPath: movie.posterPath,
+            backdropPath: movie.backdropPath,
             releaseDate: movie.releaseDate,
             firstAirDate: movie.firstAirDate,
             voteAverage: movie.voteAverage,
             voteCount: movie.voteCount,
+            popularity: movie.popularity,
             genres: movie.genres,
             mediaType: "Movie",
             runtime: movie.runtime,
-            episodeRunTime: movie.episodeRunTime
+            episodeRunTime: movie.episodeRunTime,
+            credits: movie.credits
         )
         
         return movie
@@ -366,14 +467,17 @@ class TMDBService {
             name: tvShow.name,
             overview: tvShow.overview,
             posterPath: tvShow.posterPath,
+            backdropPath: tvShow.backdropPath,
             releaseDate: tvShow.releaseDate,
             firstAirDate: tvShow.firstAirDate,
             voteAverage: tvShow.voteAverage,
             voteCount: tvShow.voteCount,
+            popularity: tvShow.popularity,
             genres: tvShow.genres,
             mediaType: "TV Show",
             runtime: tvShow.runtime,
-            episodeRunTime: tvShow.episodeRunTime
+            episodeRunTime: tvShow.episodeRunTime,
+            credits: tvShow.credits
         )
         
         return tvShow
