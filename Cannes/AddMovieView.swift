@@ -10,6 +10,9 @@ struct AddMovieView: View {
     // Optional existing movie for re-ranking
     @State private var existingMovie: Movie?
     
+    // New parameter for movies from Discover
+    @State private var discoverMovie: Movie?
+    
     @State private var searchText = ""
     @State private var searchResults: [AppModels.Movie] = []
     @State private var isSearching = false
@@ -31,7 +34,7 @@ struct AddMovieView: View {
     }
     
     // Initialize with optional existing movie
-    init(store: MovieStore, existingMovie: Movie? = nil) {
+    init(store: MovieStore, existingMovie: Movie? = nil, discoverMovie: Movie? = nil) {
         self.store = store
         
         // If we have an existing movie, pre-populate the search
@@ -40,8 +43,15 @@ struct AddMovieView: View {
             self._sentiment = State(initialValue: existing.sentiment)
             self._searchType = State(initialValue: existing.mediaType == .movie ? .movie : .tvShow)
             self._existingMovie = State(initialValue: existing)
+        } else if let discover = discoverMovie {
+            // If we have a movie from Discover, pre-populate
+            self._searchText = State(initialValue: discover.title)
+            self._sentiment = State(initialValue: discover.sentiment)
+            self._searchType = State(initialValue: discover.mediaType == .movie ? .movie : .tvShow)
+            self._discoverMovie = State(initialValue: discover)
         } else {
             self._existingMovie = State(initialValue: nil)
+            self._discoverMovie = State(initialValue: nil)
         }
     }
     
@@ -51,7 +61,7 @@ struct AddMovieView: View {
                 Group {
                     switch currentStep {
                     case 1:
-                        if existingMovie != nil {
+                        if existingMovie != nil || discoverMovie != nil {
                             sentimentStep
                         } else {
                             searchStep
@@ -116,6 +126,24 @@ struct AddMovieView: View {
                         vote_count: nil,
                         genres: existingMovie!.genres,
                         media_type: existingMovie!.mediaType == .movie ? "movie" : "tv",
+                        runtime: nil,
+                        episode_run_time: nil
+                    )
+                } else if discoverMovie != nil {
+                    currentStep = 1
+                    // Pre-populate the selected movie with discover movie data
+                    selectedMovie = AppModels.Movie(
+                        id: discoverMovie!.tmdbId ?? 0,
+                        title: discoverMovie!.title,
+                        name: discoverMovie!.title,
+                        overview: nil,
+                        poster_path: nil,
+                        release_date: nil,
+                        first_air_date: nil,
+                        vote_average: nil,
+                        vote_count: nil,
+                        genres: discoverMovie!.genres,
+                        media_type: discoverMovie!.mediaType == .movie ? "movie" : "tv",
                         runtime: nil,
                         episode_run_time: nil
                     )
@@ -713,11 +741,13 @@ struct ComparisonView: View {
                                         state: state
                                     )
                                     
-                                    // Add activity
-                                    try await store.firestoreService.createActivityUpdate(
-                                        type: (existingMovie == nil || movie.id == movieWithProperScore.id) ? .movieRanked : .movieUpdated,
-                                        movie: movie
-                                    )
+                                    // Add activity only for new rankings, not for score updates
+                                    if existingMovie == nil || movie.id == movieWithProperScore.id {
+                                        try await store.firestoreService.createActivityUpdate(
+                                            type: .movieRanked,
+                                            movie: movie
+                                        )
+                                    }
                                     
                                     // Update user's top movie poster if this is a high-rated movie
                                     try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
@@ -799,6 +829,9 @@ struct ComparisonView: View {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
                 
+                // Prevent rapid-fire clicks
+                guard !isProcessing else { return }
+                
                 isProcessing = true
                 Task {
                     await handleTooCloseToCall()
@@ -807,16 +840,39 @@ struct ComparisonView: View {
             .font(.headline)
             .foregroundColor(.gray)
             .padding(.top, 8)
+            .disabled(isProcessing)
         }
     }
     
     private func handleTooCloseToCall() async {
-        // Check if movie already exists to prevent duplicates
-        if let tmdbId = newMovie.tmdbId {
-            let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
-            if existingMovie != nil {
-                print("Too close to call: Movie already exists with TMDB ID \(tmdbId), skipping completely")
-                return
+        // For re-ranking, we need to handle the case where the movie already exists
+        if let existing = existingMovie {
+            print("Too close to call: Re-ranking movie '\(existing.title)', deleting old rating first")
+            
+            // Remove the existing movie from the list immediately
+            if existing.mediaType == .movie {
+                store.movies.removeAll { $0.id == existing.id }
+            } else {
+                store.tvShows.removeAll { $0.id == existing.id }
+            }
+            
+            // Delete from Firebase
+            if let userId = AuthenticationService.shared.currentUser?.uid {
+                do {
+                    try await store.firestoreService.deleteMovieRanking(userId: userId, movieId: existing.id.uuidString)
+                    print("Too close to call: Successfully deleted old rating for '\(existing.title)'")
+                } catch {
+                    print("Too close to call: Error deleting old rating: \(error)")
+                }
+            }
+        } else {
+            // For new movies, check if movie already exists to prevent duplicates
+            if let tmdbId = newMovie.tmdbId {
+                let existingMovie = (newMovie.mediaType == .movie ? store.movies : store.tvShows).first { $0.tmdbId == tmdbId }
+                if existingMovie != nil {
+                    print("Too close to call: Movie already exists with TMDB ID \(tmdbId), skipping completely")
+                    return
+                }
             }
         }
         
@@ -848,10 +904,12 @@ struct ComparisonView: View {
         targetList.insert(movieWithProperScore, at: insertionIndex)
         
         // Update the UI immediately
-        if movieWithProperScore.mediaType == .movie {
-            store.movies = targetList
-        } else {
-            store.tvShows = targetList
+        await MainActor.run {
+            if movieWithProperScore.mediaType == .movie {
+                store.movies = targetList
+            } else {
+                store.tvShows = targetList
+            }
         }
         
         // Trigger completion immediately for fast UI response
@@ -859,7 +917,7 @@ struct ComparisonView: View {
             onComplete()
         }
         
-        // Do heavy processing in background
+        // Do heavy processing in background with better error handling
         if let userId = AuthenticationService.shared.currentUser?.uid {
             Task.detached(priority: .background) {
                 do {
@@ -872,7 +930,7 @@ struct ComparisonView: View {
                         state: .initialSentiment
                     )
                     
-                    // Recalculate scores in background
+                    // Recalculate scores in background with error handling
                     let currentList = await MainActor.run {
                         return movieWithProperScore.mediaType == .movie ? store.movies : store.tvShows
                     }
@@ -913,9 +971,14 @@ struct ComparisonView: View {
                     // Update user's top movie poster
                     try await store.firestoreService.updateUserTopMoviePoster(userId: userId)
                     
-                    // Remove from Future Cannes if it was there
+                    // Remove from Future Cannes if it was there (with better error handling)
                     if let tmdbId = finalMovie.tmdbId {
-                        await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
+                        do {
+                            await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
+                        } catch {
+                            print("Too close to call: Error removing from Future Cannes: \(error)")
+                            // Don't fail the entire operation for this
+                        }
                     }
                     
                     // Refresh global ratings to show the newly added movie

@@ -932,7 +932,7 @@ final class MovieStore: ObservableObject {
         var personalUpdates: [(movie: Movie, newScore: Double, oldScore: Double)] = []
         var updatedList = list
         
-        // Calculate new scores synchronously
+        // Calculate new scores synchronously with better error handling
         for sentiment in MovieSentiment.allCasesOrdered {
             let idxs = updatedList.indices.filter { updatedList[$0].sentiment == sentiment }
             guard let band = bands[sentiment], !idxs.isEmpty else { continue }
@@ -950,15 +950,18 @@ final class MovieStore: ObservableObject {
                 // Round to 3 decimal places to avoid floating point precision issues and prevent NaN
                 let newScore = (rawNewScore.isNaN || rawNewScore.isInfinite) ? band.mid : (rawNewScore * 1000).rounded() / 1000
                 
-                if abs(oldScore - newScore) > 0.001 { // Use threshold for floating point comparison
+                // Ensure score is within valid bounds
+                let clampedScore = max(0.0, min(10.0, newScore))
+                
+                if abs(oldScore - clampedScore) > 0.001 { // Use threshold for floating point comparison
                     personalUpdates.append((
                         movie: movie,
-                        newScore: newScore,
+                        newScore: clampedScore,
                         oldScore: oldScore
                     ))
                 }
                 
-                updatedList[arrayIndex].score = newScore
+                updatedList[arrayIndex].score = clampedScore
             }
         }
         
@@ -1241,10 +1244,22 @@ final class MovieStore: ObservableObject {
                 let futureCannesList = try await firestoreService.getFutureCannesList()
                 if let item = futureCannesList.first(where: { $0.movie.id == tmdbId }) {
                     try await firestoreService.removeFromFutureCannes(itemId: item.id)
+                    
+                    // Update cache immediately
+                    if let userId = AuthenticationService.shared.currentUser?.uid {
+                        let cacheManager = CacheManager.shared
+                        if var cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                            cachedItems.removeAll { $0.id == item.id }
+                            cacheManager.cacheFutureCannes(cachedItems, userId: userId)
+                        }
+                    }
+                    
+                    print("✅ Removed movie with TMDB ID \(tmdbId) from Future Cannes")
                 }
             }
         } catch {
-            // Handle error silently
+            print("⚠️ Error removing from Future Cannes for TMDB ID \(tmdbId): \(error)")
+            // Handle error gracefully - don't throw to avoid breaking the main flow
         }
     }
     

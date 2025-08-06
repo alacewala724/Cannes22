@@ -234,14 +234,37 @@ struct DiscoverView: View {
         }
         .sheet(isPresented: $showingAddMovie) {
             if let movie = currentMovie {
-                AddMovieView(store: store, existingMovie: Movie(
-                    title: movie.displayTitle,
-                    sentiment: .likedIt,
-                    tmdbId: movie.id,
-                    mediaType: movie.mediaType == "TV Show" ? .tv : .movie,
-                    genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
-                    score: movie.voteAverage ?? 0.0
-                ))
+                // Check if user has already rated this movie
+                let userRatedIds = Set(store.getAllMovies().compactMap { $0.tmdbId })
+                let isAlreadyRated = userRatedIds.contains(movie.id)
+                
+                if isAlreadyRated {
+                    // User has rated this movie - pass existing movie for re-ranking
+                    if let existingMovie = store.getAllMovies().first(where: { $0.tmdbId == movie.id }) {
+                        AddMovieView(store: store, existingMovie: existingMovie)
+                    } else {
+                        // Fallback - create movie object for re-ranking
+                        AddMovieView(store: store, existingMovie: Movie(
+                            title: movie.displayTitle,
+                            sentiment: .likedIt,
+                            tmdbId: movie.id,
+                            mediaType: movie.mediaType == "TV Show" ? .tv : .movie,
+                            genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                            score: movie.voteAverage ?? 0.0
+                        ))
+                    }
+                } else {
+                    // User hasn't rated this movie - pass discover movie for new ranking
+                    let discoverMovie = Movie(
+                        title: movie.displayTitle,
+                        sentiment: .likedIt,
+                        tmdbId: movie.id,
+                        mediaType: movie.mediaType == "TV Show" ? .tv : .movie,
+                        genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                        score: movie.voteAverage ?? 0.0
+                    )
+                    AddMovieView(store: store, existingMovie: nil, discoverMovie: discoverMovie)
+                }
             }
         }
         .alert("Error", isPresented: $showError) {

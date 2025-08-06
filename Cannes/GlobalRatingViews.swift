@@ -801,43 +801,26 @@ struct UnifiedMovieDetailView: View {
             }
         }
         .sheet(isPresented: $showingReRankSheet) {
-            if let tmdbId = displayTmdbId,
-               let userScore = store.getUserPersonalScore(for: tmdbId) {
-                // Find the actual existing movie to get its real ID
-                let allMovies = store.getMovies()
-                let existingMovie = allMovies.first { $0.tmdbId == tmdbId }
+            if let tmdbId = displayTmdbId {
+                let userScore = store.getUserPersonalScore(for: tmdbId)
                 
-                if let existingMovie = existingMovie {
-                    // Use the actual existing movie for re-ranking
-                    AddMovieView(store: store, existingMovie: existingMovie)
-                        .onDisappear {
-                            // Remove from wishlist after re-ranking (in case it was added there)
-                            Task {
-                                await removeFromWishlistAfterRanking(tmdbId: tmdbId)
-                                // Refresh the movie details
-                                await loadAllDataOptimized()
-                            }
-                        }
-                } else {
-                    // Fallback: create a new movie object if we can't find the existing one
-                    let fallbackMovie = Movie(
-                        id: UUID(), // This will be replaced during the re-ranking process
-                        title: displayTitle,
-                        sentiment: sentimentFromScore(userScore),
-                        tmdbId: displayTmdbId,
-                        mediaType: displayMediaType,
-                        genres: [],
-                        score: userScore
-                    )
-                    AddMovieView(store: store, existingMovie: fallbackMovie)
-                        .onDisappear {
-                            // Remove from wishlist after re-ranking (in case it was added there)
-                            Task {
-                                await removeFromWishlistAfterRanking(tmdbId: tmdbId)
-                                // Refresh the movie details
-                                await loadAllDataOptimized()
-                            }
-                        }
+                if let userScore = userScore {
+                    // Find the existing movie for re-ranking
+                    let allMovies = store.movies + store.tvShows
+                    if let existingMovie = allMovies.first(where: { $0.tmdbId == tmdbId }) {
+                        AddMovieView(store: store, existingMovie: existingMovie)
+                    } else {
+                        // Fallback - create movie object for re-ranking
+                        let fallbackMovie = Movie(
+                            title: displayTitle ?? "Unknown",
+                            sentiment: .likedIt,
+                            tmdbId: tmdbId,
+                            mediaType: displayMediaType,
+                            genres: [],
+                            score: userScore
+                        )
+                        AddMovieView(store: store, existingMovie: fallbackMovie)
+                    }
                 }
             }
         }
@@ -1949,26 +1932,34 @@ struct UnifiedMovieDetailView: View {
             }
             
             // Re-rank button with improved styling
-            if let tmdbId = displayTmdbId,
-               let userScore = store.getUserPersonalScore(for: tmdbId) {
-                Button(action: {
-                    // Set the correct media type before starting the rating process
-                    store.selectedMediaType = displayMediaType
-                    showingReRankSheet = true
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title3)
-                        Text("Re-rank This \(displayMediaType.rawValue)")
-                            .font(.headline)
-                            .fontWeight(.semibold)
+            if let tmdbId = displayTmdbId {
+                let userScore = store.getUserPersonalScore(for: tmdbId)
+                
+                if let userScore = userScore {
+                    Button(action: {
+                        // Set the correct media type before starting the rating process
+                        store.selectedMediaType = displayMediaType
+                        showingReRankSheet = true
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.title3)
+                            Text("Re-rank This \(displayMediaType.rawValue)")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.orange)
+                        .cornerRadius(16)
+                        .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
-                    .foregroundColor(.white)
-                    .padding(.vertical, 16)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.orange)
-                    .cornerRadius(16)
-                    .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .onAppear {
+                        print("DEBUG: Re-rank button appeared for TMDB ID: \(tmdbId), User Score: \(userScore)")
+                        print("DEBUG: Total movies in store: \(store.movies.count)")
+                        print("DEBUG: Total TV shows in store: \(store.tvShows.count)")
+                    }
                 }
             }
         }
