@@ -54,6 +54,7 @@ enum AppModels {
         let runtime: Int?  // For movies
         let episode_run_time: [Int]?  // For TV shows
         let credits: TMDBMovieCredits? // NEW: Cast and crew information
+        let productionCompanies: [TMDBProductionCompany]? // NEW: Production companies
 
         var displayTitle: String {
             title ?? name ?? "Untitled"
@@ -123,6 +124,20 @@ enum AppModels {
         enum CodingKeys: String, CodingKey {
             case id, name, job, department
             case profilePath = "profile_path"
+        }
+    }
+    
+    // NEW: Production company information
+    struct TMDBProductionCompany: Codable, Identifiable {
+        let id: Int
+        let name: String
+        let logoPath: String?
+        let originCountry: String?
+        
+        enum CodingKeys: String, CodingKey {
+            case id, name
+            case logoPath = "logo_path"
+            case originCountry = "origin_country"
         }
     }
 }

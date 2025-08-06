@@ -3021,14 +3021,18 @@ extension FirestoreService {
                 name: name,
                 overview: overview ?? "",
                 posterPath: posterPath,
+                backdropPath: nil,
                 releaseDate: releaseDate,
                 firstAirDate: firstAirDate,
                 voteAverage: voteAverage,
                 voteCount: voteCount,
+                popularity: nil,
                 genres: genres,
                 mediaType: mediaType.rawValue,
                 runtime: runtime,
-                episodeRunTime: episodeRunTime
+                episodeRunTime: episodeRunTime,
+                credits: nil,
+                productionCompanies: nil
             )
             
             return FutureCannesItem(

@@ -560,14 +560,46 @@ struct SearchView: View {
                         name: tmdbMovie.name,
                         overview: tmdbMovie.overview,
                         poster_path: tmdbMovie.posterPath,
+                        backdrop_path: tmdbMovie.backdropPath,
                         release_date: tmdbMovie.releaseDate,
                         first_air_date: tmdbMovie.firstAirDate,
                         vote_average: tmdbMovie.voteAverage,
                         vote_count: tmdbMovie.voteCount,
+                        popularity: tmdbMovie.popularity,
                         genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
                         media_type: searchType == .movie ? "movie" : "tv",
                         runtime: tmdbMovie.runtime,
-                        episode_run_time: tmdbMovie.episodeRunTime
+                        episode_run_time: tmdbMovie.episodeRunTime,
+                        credits: tmdbMovie.credits.map { credits in
+                            AppModels.TMDBMovieCredits(
+                                cast: credits.cast?.map { castMember in
+                                    AppModels.TMDBCastMember(
+                                        id: castMember.id,
+                                        name: castMember.name,
+                                        character: castMember.character,
+                                        profilePath: castMember.profilePath,
+                                        order: castMember.order
+                                    )
+                                },
+                                crew: credits.crew?.map { crewMember in
+                                    AppModels.TMDBCrewMember(
+                                        id: crewMember.id,
+                                        name: crewMember.name,
+                                        job: crewMember.job,
+                                        department: crewMember.department,
+                                        profilePath: crewMember.profilePath
+                                    )
+                                }
+                            )
+                        },
+                        productionCompanies: tmdbMovie.productionCompanies?.map { company in
+                            AppModels.TMDBProductionCompany(
+                                id: company.id,
+                                name: company.name,
+                                logoPath: company.logoPath,
+                                originCountry: company.originCountry
+                            )
+                        }
                     )
                 }
                 isSearching = false
@@ -594,14 +626,46 @@ struct SearchView: View {
                 name: movie.name,
                 overview: movie.overview ?? "",
                 posterPath: movie.poster_path,
+                backdropPath: movie.backdrop_path,
                 releaseDate: movie.release_date,
                 firstAirDate: movie.first_air_date,
                 voteAverage: movie.vote_average ?? 0.0,
                 voteCount: movie.vote_count ?? 0,
+                popularity: movie.popularity,
                 genres: movie.genres?.map { TMDBGenre(id: $0.id, name: $0.name) } ?? [],
                 mediaType: movie.media_type == "movie" ? "Movie" : "TV Show",
                 runtime: movie.runtime,
-                episodeRunTime: movie.episode_run_time
+                episodeRunTime: movie.episode_run_time,
+                credits: movie.credits.map { credits in
+                    TMDBMovieCredits(
+                        cast: credits.cast?.map { castMember in
+                            TMDBCastMember(
+                                id: castMember.id,
+                                name: castMember.name,
+                                character: castMember.character,
+                                profilePath: castMember.profilePath,
+                                order: castMember.order
+                            )
+                        },
+                        crew: credits.crew?.map { crewMember in
+                            TMDBCrewMember(
+                                id: crewMember.id,
+                                name: crewMember.name,
+                                job: crewMember.job,
+                                department: crewMember.department,
+                                profilePath: crewMember.profilePath
+                            )
+                        }
+                    )
+                },
+                productionCompanies: movie.productionCompanies?.map { company in
+                    TMDBProductionCompany(
+                        id: company.id,
+                        name: company.name,
+                        logoPath: company.logoPath,
+                        originCountry: company.originCountry
+                    )
+                }
             )
             
             print("DEBUG: Created TMDBMovie: \(tmdbMovie.title ?? tmdbMovie.name ?? "Unknown")")

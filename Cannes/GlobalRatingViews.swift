@@ -857,7 +857,8 @@ struct UnifiedMovieDetailView: View {
                     "takes": false,
                     "backdrop": false,
                     "cast": false,
-                    "crew": false
+                    "crew": false,
+                    "production": false
                 ]
                 
                 // Stagger section appearances
@@ -962,7 +963,7 @@ struct UnifiedMovieDetailView: View {
     }
     
     private func staggerContentSections() {
-        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes", "backdrop", "cast", "crew"]
+        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes", "backdrop", "cast", "crew", "production"]
         
         for (index, section) in sections.enumerated() {
             let delay = Double(index) * 0.1 + 0.3 // Start after 0.3s, then 0.1s between each
@@ -1022,7 +1023,36 @@ struct UnifiedMovieDetailView: View {
                 media_type: mediaType.rawValue,
                 runtime: tmdbMovie.runtime,
                 episode_run_time: tmdbMovie.episodeRunTime,
-                credits: tmdbMovie.credits // NEW: Include credits
+                credits: tmdbMovie.credits.map { credits in
+                    AppModels.TMDBMovieCredits(
+                        cast: credits.cast?.map { castMember in
+                            AppModels.TMDBCastMember(
+                                id: castMember.id,
+                                name: castMember.name,
+                                character: castMember.character,
+                                profilePath: castMember.profilePath,
+                                order: castMember.order
+                            )
+                        },
+                        crew: credits.crew?.map { crewMember in
+                            AppModels.TMDBCrewMember(
+                                id: crewMember.id,
+                                name: crewMember.name,
+                                job: crewMember.job,
+                                department: crewMember.department,
+                                profilePath: crewMember.profilePath
+                            )
+                        }
+                    )
+                }, // NEW: Include credits with proper type conversion
+                productionCompanies: tmdbMovie.productionCompanies?.map { company in
+                    AppModels.TMDBProductionCompany(
+                        id: company.id,
+                        name: company.name,
+                        logoPath: company.logoPath,
+                        originCountry: company.originCountry
+                    )
+                }
             )
         } catch {
             if (error as NSError).code != NSURLErrorCancelled {
@@ -1809,48 +1839,6 @@ struct UnifiedMovieDetailView: View {
                 .animation(.easeOut(duration: 0.4), value: contentSections["overview"])
             }
             
-            // NEW: Backdrop Image Section
-            if let backdropPath = details.backdrop_path {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Background")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    
-                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w1280\(backdropPath)")) { phase in
-                        switch phase {
-                        case .empty:
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(.systemGray5))
-                                .frame(height: 200)
-                                .opacity(0.6)
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 200)
-                                .clipped()
-                                .cornerRadius(12)
-                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                        case .failure:
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(.systemGray5))
-                                .frame(height: 200)
-                                .opacity(0.6)
-                        @unknown default:
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color(.systemGray5))
-                                .frame(height: 200)
-                                .opacity(0.6)
-                        }
-                    }
-                }
-                .card()
-                .opacity(contentSections["backdrop"] ?? false ? 1 : 0)
-                .offset(y: contentSections["backdrop"] ?? false ? 0 : 20)
-                .animation(.easeOut(duration: 0.4), value: contentSections["backdrop"])
-            }
-            
             // NEW: Cast Section
             if let credits = details.credits, let cast = credits.cast, !cast.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
@@ -1930,19 +1918,22 @@ struct UnifiedMovieDetailView: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         if !directors.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Director\(directors.count > 1 ? "s" : "")")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
                                     .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 
                                 ForEach(directors.prefix(3)) { director in
                                     Text(director.name)
                                         .font(.body)
                                         .foregroundColor(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                         }
@@ -1953,11 +1944,13 @@ struct UnifiedMovieDetailView: View {
                                     .font(.subheadline)
                                     .fontWeight(.medium)
                                     .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 
                                 ForEach(writers.prefix(3)) { writer in
                                     Text(writer.name)
                                         .font(.body)
                                         .foregroundColor(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                         }
@@ -1967,6 +1960,78 @@ struct UnifiedMovieDetailView: View {
                 .opacity(contentSections["crew"] ?? false ? 1 : 0)
                 .offset(y: contentSections["crew"] ?? false ? 0 : 20)
                 .animation(.easeOut(duration: 0.4), value: contentSections["crew"])
+            }
+            
+            // NEW: Production Companies Section
+            if let productionCompanies = details.productionCompanies, !productionCompanies.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Production Companies")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    VStack(spacing: 12) {
+                        ForEach(productionCompanies.prefix(5)) { company in
+                            HStack(spacing: 12) {
+                                // Company logo if available
+                                if let logoPath = company.logoPath {
+                                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/original\(logoPath)")) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 40, height: 40)
+                                                .opacity(0.6)
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: 40, height: 40)
+                                                .clipped()
+                                                .cornerRadius(8)
+                                        case .failure:
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 40, height: 40)
+                                                .opacity(0.6)
+                                        @unknown default:
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color(.systemGray5))
+                                                .frame(width: 40, height: 40)
+                                                .opacity(0.6)
+                                        }
+                                    }
+                                } else {
+                                    // Placeholder for companies without logos
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color(.systemGray5))
+                                        .frame(width: 40, height: 40)
+                                        .opacity(0.6)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(company.name)
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    
+                                    if let originCountry = company.originCountry {
+                                        Text(originCountry)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                .card()
+                .opacity(contentSections["production"] ?? false ? 1 : 0)
+                .offset(y: contentSections["production"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["production"])
             }
             
             // Takes Section with enhanced design
@@ -2039,6 +2104,43 @@ struct UnifiedMovieDetailView: View {
             .opacity(contentSections["takes"] ?? false ? 1 : 0)
             .scaleEffect(contentSections["takes"] ?? false ? 1 : 0.95)
             .animation(.easeOut(duration: 0.4), value: contentSections["takes"])
+            
+            // Backdrop Image Section
+            if let backdropPath = details.backdrop_path {
+                VStack(alignment: .leading, spacing: 12) {
+                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w1280\(backdropPath)")) { phase in
+                        switch phase {
+                        case .empty:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: 200)
+                                .clipped()
+                                .cornerRadius(12)
+                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.systemGray5))
+                                .frame(height: 200)
+                                .opacity(0.6)
+                        }
+                    }
+                }
+                .card()
+                .opacity(contentSections["backdrop"] ?? false ? 1 : 0)
+                .offset(y: contentSections["backdrop"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["backdrop"])
+            }
             
             // Seasons and Episodes Section (TV Shows only)
             if displayMediaType == .tv && !seasons.isEmpty {
@@ -2377,14 +2479,46 @@ struct UnifiedMovieDetailView: View {
                 name: movieTitle,
                 overview: movieDetails?.overview ?? "",
                 posterPath: movieDetails?.poster_path,
+                backdropPath: movieDetails?.backdrop_path,
                 releaseDate: movieDetails?.release_date,
                 firstAirDate: movieDetails?.first_air_date,
                 voteAverage: movieDetails?.vote_average ?? 0.0,
                 voteCount: movieDetails?.vote_count ?? 0,
+                popularity: movieDetails?.popularity,
                 genres: movieDetails?.genres?.map { TMDBGenre(id: $0.id, name: $0.name) },
                 mediaType: displayMediaType.rawValue,
                 runtime: movieDetails?.runtime,
-                episodeRunTime: movieDetails?.episode_run_time
+                episodeRunTime: movieDetails?.episode_run_time,
+                credits: movieDetails?.credits.map { credits in
+                    TMDBMovieCredits(
+                        cast: credits.cast?.map { castMember in
+                            TMDBCastMember(
+                                id: castMember.id,
+                                name: castMember.name,
+                                character: castMember.character,
+                                profilePath: castMember.profilePath,
+                                order: castMember.order
+                            )
+                        },
+                        crew: credits.crew?.map { crewMember in
+                            TMDBCrewMember(
+                                id: crewMember.id,
+                                name: crewMember.name,
+                                job: crewMember.job,
+                                department: crewMember.department,
+                                profilePath: crewMember.profilePath
+                            )
+                        }
+                    )
+                }, // NEW: Include credits with proper type conversion
+                productionCompanies: movieDetails?.productionCompanies?.map { company in
+                    TMDBProductionCompany(
+                        id: company.id,
+                        name: company.name,
+                        logoPath: company.logoPath,
+                        originCountry: company.originCountry
+                    )
+                }
             )
             
             try await firestoreService.addToFutureCannes(movie: tmdbMovie)

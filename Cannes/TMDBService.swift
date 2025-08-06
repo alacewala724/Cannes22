@@ -46,7 +46,8 @@ class TMDBService {
                 mediaType: "Movie",
                 runtime: movies[i].runtime,
                 episodeRunTime: movies[i].episodeRunTime,
-                credits: movies[i].credits
+                credits: movies[i].credits,
+                productionCompanies: movies[i].productionCompanies
             )
         }
         
@@ -82,7 +83,8 @@ class TMDBService {
                 mediaType: "TV Show",
                 runtime: tvShows[i].runtime,
                 episodeRunTime: tvShows[i].episodeRunTime,
-                credits: tvShows[i].credits
+                credits: tvShows[i].credits,
+                productionCompanies: tvShows[i].productionCompanies
             )
         }
         
@@ -116,7 +118,8 @@ class TMDBService {
                 mediaType: "Movie",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -148,7 +151,8 @@ class TMDBService {
                 mediaType: "TV Show",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -181,7 +185,8 @@ class TMDBService {
             mediaType: "Movie",
             runtime: movie.runtime,
             episodeRunTime: movie.episodeRunTime,
-            credits: movie.credits
+            credits: movie.credits,
+            productionCompanies: movie.productionCompanies
         )
         
         return movie
@@ -215,7 +220,8 @@ class TMDBService {
             mediaType: "TV Show",
             runtime: tvShow.runtime,
             episodeRunTime: tvShow.episodeRunTime,
-            credits: tvShow.credits
+            credits: tvShow.credits,
+            productionCompanies: tvShow.productionCompanies
         )
         
         return tvShow
@@ -248,7 +254,8 @@ class TMDBService {
                 mediaType: "Movie",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -280,7 +287,8 @@ class TMDBService {
                 mediaType: "TV Show",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -313,7 +321,8 @@ class TMDBService {
                 mediaType: "Movie",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -346,7 +355,8 @@ class TMDBService {
                 mediaType: "TV Show",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -379,7 +389,8 @@ class TMDBService {
                 mediaType: "Movie",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -412,7 +423,8 @@ class TMDBService {
                 mediaType: "TV Show",
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
-                credits: movie.credits
+                credits: movie.credits,
+                productionCompanies: movie.productionCompanies
             )
         }
     }
@@ -444,7 +456,8 @@ class TMDBService {
             mediaType: "Movie",
             runtime: movie.runtime,
             episodeRunTime: movie.episodeRunTime,
-            credits: movie.credits
+            credits: movie.credits,
+            productionCompanies: movie.productionCompanies
         )
         
         return movie
@@ -477,7 +490,8 @@ class TMDBService {
             mediaType: "TV Show",
             runtime: tvShow.runtime,
             episodeRunTime: tvShow.episodeRunTime,
-            credits: tvShow.credits
+            credits: tvShow.credits,
+            productionCompanies: tvShow.productionCompanies
         )
         
         return tvShow

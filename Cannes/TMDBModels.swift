@@ -93,6 +93,7 @@ struct TMDBMovie: Codable, Identifiable {
     let runtime: Int?           // for movies
     let episodeRunTime: [Int]?  // for TV shows
     let credits: TMDBMovieCredits? // NEW: Cast and crew information
+    let productionCompanies: [TMDBProductionCompany]? // NEW: Production companies
 
     enum CodingKeys: String, CodingKey {
         case id, title, name, overview
@@ -107,10 +108,11 @@ struct TMDBMovie: Codable, Identifiable {
         case runtime
         case episodeRunTime = "episode_run_time"
         case credits
+        case productionCompanies = "production_companies"
     }
     
     // Custom initializer to create new instances
-    init(id: Int, title: String?, name: String?, overview: String, posterPath: String?, backdropPath: String?, releaseDate: String?, firstAirDate: String?, voteAverage: Double?, voteCount: Int?, popularity: Double?, genres: [TMDBGenre]?, mediaType: String?, runtime: Int?, episodeRunTime: [Int]?, credits: TMDBMovieCredits?) {
+    init(id: Int, title: String?, name: String?, overview: String, posterPath: String?, backdropPath: String?, releaseDate: String?, firstAirDate: String?, voteAverage: Double?, voteCount: Int?, popularity: Double?, genres: [TMDBGenre]?, mediaType: String?, runtime: Int?, episodeRunTime: [Int]?, credits: TMDBMovieCredits?, productionCompanies: [TMDBProductionCompany]?) {
         self.id = id
         self.title = title
         self.name = name
@@ -127,6 +129,7 @@ struct TMDBMovie: Codable, Identifiable {
         self.runtime = runtime
         self.episodeRunTime = episodeRunTime
         self.credits = credits
+        self.productionCompanies = productionCompanies
     }
 
     var displayTitle: String {
@@ -174,5 +177,19 @@ struct TMDBCrewMember: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, name, job, department
         case profilePath = "profile_path"
+    }
+}
+
+// NEW: Production company information
+struct TMDBProductionCompany: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let logoPath: String?
+    let originCountry: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case logoPath = "logo_path"
+        case originCountry = "origin_country"
     }
 } 

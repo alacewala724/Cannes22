@@ -101,10 +101,10 @@ struct DiscoverView: View {
         seenMovieIds.removeAll()
         
         // Reset pagination counters with random values to ensure fresh content
-        popularMoviesPage = Int.random(in: 1...5)
-        topRatedMoviesPage = Int.random(in: 1...5)
-        mostRatedMoviesPage = Int.random(in: 1...5)
-        trendingMoviesPage = Int.random(in: 1...5)
+        popularMoviesPage = Int.random(in: 1...10)
+        topRatedMoviesPage = Int.random(in: 1...20)
+        mostRatedMoviesPage = Int.random(in: 1...20)
+        trendingMoviesPage = Int.random(in: 1...10)
         hasMoreMovies = true
         
         // Reset session time
@@ -761,14 +761,18 @@ struct DiscoverView: View {
                                 name: globalRating.title,
                                 overview: "",
                                 posterPath: nil,
+                                backdropPath: nil,
                                 releaseDate: nil,
                                 firstAirDate: nil,
                                 voteAverage: globalRating.confidenceAdjustedScore,
                                 voteCount: globalRating.numberOfRatings,
+                                popularity: nil,
                                 genres: nil,
                                 mediaType: globalRating.mediaType == .movie ? "Movie" : "TV Show",
                                 runtime: nil,
-                                episodeRunTime: nil
+                                episodeRunTime: nil,
+                                credits: nil,
+                                productionCompanies: nil
                             )
                         }
                     }
@@ -812,19 +816,22 @@ struct DiscoverView: View {
                 }
                 
                 // Then by a combination of vote count and popularity for better variety
-                let movie1Score = (movie1.voteCount ?? 0) + (movie1.popularity ?? 0) * 10
-                let movie2Score = (movie2.voteCount ?? 0) + (movie2.popularity ?? 0) * 10
+                let movie1Score = (movie1.voteCount ?? 0) + Int((movie1.popularity ?? 0) * 10)
+                let movie2Score = (movie2.voteCount ?? 0) + Int((movie2.popularity ?? 0) * 10)
                 
                 return movie1Score > movie2Score
             }
             
+            // Add final randomization to ensure different starting points
+            let randomizedMovies = sortedMovies.shuffled()
+            
             await MainActor.run {
                 // Only replace the movie list if we're starting fresh (empty list)
                 if discoverMovies.isEmpty {
-                    discoverMovies = sortedMovies
+                    discoverMovies = randomizedMovies
                 } else {
                     // Append new movies to existing list
-                    discoverMovies.append(contentsOf: sortedMovies)
+                    discoverMovies.append(contentsOf: randomizedMovies)
                 }
                 
                 // Don't reset currentIndex - preserve user's place
@@ -837,12 +844,12 @@ struct DiscoverView: View {
                 
                 // Only add current movies to seen set for this session if we're starting fresh
                 if seenMovieIds.isEmpty {
-                    for movie in sortedMovies {
+                    for movie in randomizedMovies {
                         seenMovieIds.insert(movie.id)
                     }
                 }
                 
-                print("DEBUG: Loaded \(sortedMovies.count) movies for discovery")
+                print("DEBUG: Loaded \(randomizedMovies.count) movies for discovery")
                 print("DEBUG: Current index preserved at: \(currentIndex)")
             }
             
@@ -889,21 +896,21 @@ struct DiscoverView: View {
                 do {
                     if self.store.selectedMediaType == .movie {
                         // Use random pages to avoid predictable patterns
-                        let randomPages = Array(1...10).shuffled().prefix(4)
+                        let randomPages = Array(1...20).shuffled().prefix(6)
                         var allMovies: [TMDBMovie] = []
                         for page in randomPages {
                             let movies = try await self.tmdbService.getTopRatedMovies(page: page)
                             allMovies.append(contentsOf: movies)
                         }
-                        return allMovies
+                        return allMovies.shuffled()
                     } else {
-                        let randomPages = Array(1...10).shuffled().prefix(4)
+                        let randomPages = Array(1...20).shuffled().prefix(6)
                         var allMovies: [TMDBMovie] = []
                         for page in randomPages {
                             let movies = try await self.tmdbService.getTopRatedTVShows(page: page)
                             allMovies.append(contentsOf: movies)
                         }
-                        return allMovies
+                        return allMovies.shuffled()
                     }
                 } catch {
                     print("DEBUG: Failed to load top rated movies: \(error)")
@@ -916,21 +923,21 @@ struct DiscoverView: View {
                 do {
                     if self.store.selectedMediaType == .movie {
                         // Use random pages to avoid predictable patterns
-                        let randomPages = Array(1...10).shuffled().prefix(4)
+                        let randomPages = Array(1...20).shuffled().prefix(6)
                         var allMovies: [TMDBMovie] = []
                         for page in randomPages {
                             let movies = try await self.tmdbService.getMostRatedMovies(page: page)
                             allMovies.append(contentsOf: movies)
                         }
-                        return allMovies
+                        return allMovies.shuffled()
                     } else {
-                        let randomPages = Array(1...10).shuffled().prefix(4)
+                        let randomPages = Array(1...20).shuffled().prefix(6)
                         var allMovies: [TMDBMovie] = []
                         for page in randomPages {
                             let movies = try await self.tmdbService.getMostRatedTVShows(page: page)
                             allMovies.append(contentsOf: movies)
                         }
-                        return allMovies
+                        return allMovies.shuffled()
                     }
                 } catch {
                     print("DEBUG: Failed to load most rated movies: \(error)")
@@ -942,9 +949,11 @@ struct DiscoverView: View {
             group.addTask {
                 do {
                     if self.store.selectedMediaType == .movie {
-                        return try await self.tmdbService.getPopularMovies()
+                        let movies = try await self.tmdbService.getPopularMovies()
+                        return movies.shuffled()
                     } else {
-                        return try await self.tmdbService.getPopularTVShows()
+                        let movies = try await self.tmdbService.getPopularTVShows()
+                        return movies.shuffled()
                     }
                 } catch {
                     print("DEBUG: Failed to load popular movies: \(error)")
@@ -956,9 +965,11 @@ struct DiscoverView: View {
             group.addTask {
                 do {
                     if self.store.selectedMediaType == .movie {
-                        return try await self.tmdbService.getTrendingMovies()
+                        let movies = try await self.tmdbService.getTrendingMovies()
+                        return movies.shuffled()
                     } else {
-                        return try await self.tmdbService.getTrendingTVShows()
+                        let movies = try await self.tmdbService.getTrendingTVShows()
+                        return movies.shuffled()
                     }
                 } catch {
                     print("DEBUG: Failed to load trending movies: \(error)")
@@ -983,11 +994,11 @@ struct DiscoverView: View {
         
         // Increment page numbers for next load (but use random increments to avoid patterns)
         if store.selectedMediaType == .movie {
-            topRatedMoviesPage += Int.random(in: 2...5)
-            mostRatedMoviesPage += Int.random(in: 2...5)
+            topRatedMoviesPage += Int.random(in: 5...15)
+            mostRatedMoviesPage += Int.random(in: 5...15)
         } else {
-            topRatedMoviesPage += Int.random(in: 2...5)
-            mostRatedMoviesPage += Int.random(in: 2...5)
+            topRatedMoviesPage += Int.random(in: 5...15)
+            mostRatedMoviesPage += Int.random(in: 5...15)
         }
         
         print("DEBUG: Loaded \(allMovies.count) movies from multiple endpoints")
@@ -1205,14 +1216,18 @@ struct DiscoverView: View {
                                 name: globalRating.title,
                                 overview: "",
                                 posterPath: nil,
+                                backdropPath: nil,
                                 releaseDate: nil,
                                 firstAirDate: nil,
                                 voteAverage: globalRating.confidenceAdjustedScore,
                                 voteCount: globalRating.numberOfRatings,
+                                popularity: nil,
                                 genres: nil,
                                 mediaType: globalRating.mediaType == .movie ? "Movie" : "TV Show",
                                 runtime: nil,
-                                episodeRunTime: nil
+                                episodeRunTime: nil,
+                                credits: nil,
+                                productionCompanies: nil
                             )
                         }
                     }
@@ -1256,15 +1271,18 @@ struct DiscoverView: View {
                 }
                 
                 // Then by a combination of vote count and popularity for better variety
-                let movie1Score = (movie1.voteCount ?? 0) + (movie1.popularity ?? 0) * 10
-                let movie2Score = (movie2.voteCount ?? 0) + (movie2.popularity ?? 0) * 10
+                let movie1Score = (movie1.voteCount ?? 0) + Int((movie1.popularity ?? 0) * 10)
+                let movie2Score = (movie2.voteCount ?? 0) + Int((movie2.popularity ?? 0) * 10)
                 
                 return movie1Score > movie2Score
             }
             
+            // Add final randomization to ensure different starting points
+            let randomizedMovies = sortedMovies.shuffled()
+            
             await MainActor.run {
                 // Replace the movie list with fresh content
-                discoverMovies = sortedMovies
+                discoverMovies = randomizedMovies
                 
                 // Keep current index if it's valid, otherwise reset to 0
                 if currentIndex >= discoverMovies.count {
@@ -1274,14 +1292,14 @@ struct DiscoverView: View {
                 isLoading = false
                 
                 // Add current movies to seen set
-                for movie in sortedMovies {
+                for movie in randomizedMovies {
                     seenMovieIds.insert(movie.id)
                 }
                 
                 // Save current state
                 saveCurrentState()
                 
-                print("DEBUG: Refresh - Loaded \(sortedMovies.count) fresh movies")
+                print("DEBUG: Refresh - Loaded \(randomizedMovies.count) fresh movies")
                 print("DEBUG: Refresh - Current index: \(currentIndex)")
             }
             

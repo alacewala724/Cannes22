@@ -120,14 +120,18 @@ struct AddMovieView: View {
                         name: existingMovie!.title,
                         overview: nil,
                         poster_path: nil,
+                        backdrop_path: nil,
                         release_date: nil,
                         first_air_date: nil,
                         vote_average: nil,
                         vote_count: nil,
+                        popularity: nil,
                         genres: existingMovie!.genres,
                         media_type: existingMovie!.mediaType == .movie ? "movie" : "tv",
                         runtime: nil,
-                        episode_run_time: nil
+                        episode_run_time: nil,
+                        credits: nil,
+                        productionCompanies: nil
                     )
                 } else if discoverMovie != nil {
                     currentStep = 1
@@ -138,14 +142,18 @@ struct AddMovieView: View {
                         name: discoverMovie!.title,
                         overview: nil,
                         poster_path: nil,
+                        backdrop_path: nil,
                         release_date: nil,
                         first_air_date: nil,
                         vote_average: nil,
                         vote_count: nil,
+                        popularity: nil,
                         genres: discoverMovie!.genres,
                         media_type: discoverMovie!.mediaType == .movie ? "movie" : "tv",
                         runtime: nil,
-                        episode_run_time: nil
+                        episode_run_time: nil,
+                        credits: nil,
+                        productionCompanies: nil
                     )
                 }
             }
@@ -250,14 +258,46 @@ struct AddMovieView: View {
                         name: tmdbMovie.name,
                         overview: tmdbMovie.overview,
                         poster_path: tmdbMovie.posterPath,
+                        backdrop_path: tmdbMovie.backdropPath,
                         release_date: tmdbMovie.releaseDate,
                         first_air_date: tmdbMovie.firstAirDate,
                         vote_average: tmdbMovie.voteAverage,
                         vote_count: tmdbMovie.voteCount,
+                        popularity: tmdbMovie.popularity,
                         genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) },
                         media_type: searchType == .movie ? "movie" : "tv",
                         runtime: tmdbMovie.runtime,
-                        episode_run_time: tmdbMovie.episodeRunTime
+                        episode_run_time: tmdbMovie.episodeRunTime,
+                        credits: tmdbMovie.credits.map { credits in
+                            AppModels.TMDBMovieCredits(
+                                cast: credits.cast?.map { castMember in
+                                    AppModels.TMDBCastMember(
+                                        id: castMember.id,
+                                        name: castMember.name,
+                                        character: castMember.character,
+                                        profilePath: castMember.profilePath,
+                                        order: castMember.order
+                                    )
+                                },
+                                crew: credits.crew?.map { crewMember in
+                                    AppModels.TMDBCrewMember(
+                                        id: crewMember.id,
+                                        name: crewMember.name,
+                                        job: crewMember.job,
+                                        department: crewMember.department,
+                                        profilePath: crewMember.profilePath
+                                    )
+                                }
+                            )
+                        },
+                        productionCompanies: tmdbMovie.productionCompanies?.map { company in
+                            AppModels.TMDBProductionCompany(
+                                id: company.id,
+                                name: company.name,
+                                logoPath: company.logoPath,
+                                originCountry: company.originCountry
+                            )
+                        }
                     )
                 }
                 isSearching = false
