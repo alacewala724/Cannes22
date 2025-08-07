@@ -258,6 +258,7 @@ struct RecommendationsView: View {
             tmdbId: tmdbMovie.id,
             mediaType: tmdbMovie.mediaType == "Movie" ? .movie : .tv,
             genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+            collection: nil, // TODO: Add collection support for recommendations
             score: tmdbMovie.voteAverage ?? 0.0
         )
     }
@@ -665,7 +666,8 @@ struct SearchView: View {
                         logoPath: company.logoPath,
                         originCountry: company.originCountry
                     )
-                }
+                },
+                belongsToCollection: nil
             )
             
             print("DEBUG: Created TMDBMovie: \(tmdbMovie.title ?? tmdbMovie.name ?? "Unknown")")

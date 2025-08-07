@@ -361,15 +361,20 @@ struct AddMovieView: View {
                                     }
                                     
                                     await MainActor.run {
-                                        newMovie = Movie(
-                                            title: selectedMovie?.displayTitle ?? searchText,
-                                            sentiment: self.sentiment,
-                                            tmdbId: tmdbId,
-                                            mediaType: selectedMovie?.mediaType ?? .movie,
-                                            genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
-                                            score: self.sentiment.midpoint,
-                                            comparisonsCount: 0
-                                        )
+                                        if let details = details {
+                                            newMovie = Movie.from(tmdbMovie: details, sentiment: self.sentiment, score: self.sentiment.midpoint)
+                                        } else {
+                                            newMovie = Movie(
+                                                title: selectedMovie?.displayTitle ?? searchText,
+                                                sentiment: self.sentiment,
+                                                tmdbId: tmdbId,
+                                                mediaType: selectedMovie?.mediaType ?? .movie,
+                                                genres: details?.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                                                collection: nil, // TODO: Add collection support for search results
+                                                score: self.sentiment.midpoint,
+                                                comparisonsCount: 0
+                                            )
+                                        }
                                     }
                                 } else {
                                     // Handle case where there's no TMDB ID
@@ -378,6 +383,7 @@ struct AddMovieView: View {
                                             title: selectedMovie?.displayTitle ?? searchText,
                                             sentiment: self.sentiment,
                                             mediaType: selectedMovie?.mediaType ?? .movie,
+                                            collection: nil, // TODO: Add collection support for movies without TMDB ID
                                             score: self.sentiment.midpoint
                                         )
                                     }

@@ -47,7 +47,8 @@ class TMDBService {
                 runtime: movies[i].runtime,
                 episodeRunTime: movies[i].episodeRunTime,
                 credits: movies[i].credits,
-                productionCompanies: movies[i].productionCompanies
+                productionCompanies: movies[i].productionCompanies,
+                belongsToCollection: movies[i].belongsToCollection
             )
         }
         
@@ -84,7 +85,8 @@ class TMDBService {
                 runtime: tvShows[i].runtime,
                 episodeRunTime: tvShows[i].episodeRunTime,
                 credits: tvShows[i].credits,
-                productionCompanies: tvShows[i].productionCompanies
+                productionCompanies: tvShows[i].productionCompanies,
+                belongsToCollection: tvShows[i].belongsToCollection
             )
         }
         
@@ -119,7 +121,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -152,7 +155,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -186,7 +190,8 @@ class TMDBService {
             runtime: movie.runtime,
             episodeRunTime: movie.episodeRunTime,
             credits: movie.credits,
-            productionCompanies: movie.productionCompanies
+            productionCompanies: movie.productionCompanies,
+            belongsToCollection: movie.belongsToCollection
         )
         
         return movie
@@ -221,7 +226,8 @@ class TMDBService {
             runtime: tvShow.runtime,
             episodeRunTime: tvShow.episodeRunTime,
             credits: tvShow.credits,
-            productionCompanies: tvShow.productionCompanies
+            productionCompanies: tvShow.productionCompanies,
+            belongsToCollection: tvShow.belongsToCollection
         )
         
         return tvShow
@@ -255,7 +261,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -288,7 +295,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -322,7 +330,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -356,7 +365,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -390,7 +400,8 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
@@ -424,22 +435,103 @@ class TMDBService {
                 runtime: movie.runtime,
                 episodeRunTime: movie.episodeRunTime,
                 credits: movie.credits,
-                productionCompanies: movie.productionCompanies
+                productionCompanies: movie.productionCompanies,
+                belongsToCollection: movie.belongsToCollection
             )
         }
     }
     
+    // MARK: - Collection API Endpoints
+    
+    // Get collection details by ID
+    func getCollectionDetails(id: Int) async throws -> TMDBCollection {
+        let urlString = "\(baseURL)/collection/\(id)?api_key=\(apiKey)&language=en-US"
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return try JSONDecoder().decode(TMDBCollection.self, from: data)
+    }
+    
+    // Get collection images by ID
+    func getCollectionImages(id: Int) async throws -> [String] {
+        let urlString = "\(baseURL)/collection/\(id)/images?api_key=\(apiKey)"
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        
+        // Extract poster paths from the response
+        if let posters = response?["posters"] as? [[String: Any]] {
+            return posters.compactMap { poster in
+                poster["file_path"] as? String
+            }
+        }
+        
+        return []
+    }
+    
+    // Get movie details with collection information
+    func getMovieDetailsWithCollection(id: Int) async throws -> (TMDBMovie, TMDBCollection?) {
+        let urlString = "\(baseURL)/movie/\(id)?api_key=\(apiKey)&append_to_response=collection"
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        
+        // Decode the movie
+        let movie = try JSONDecoder().decode(TMDBMovie.self, from: data)
+        
+        // Extract collection information if present
+        var collection: TMDBCollection?
+        if let collectionData = response?["belongs_to_collection"] as? [String: Any] {
+            let collectionJson = try JSONSerialization.data(withJSONObject: collectionData)
+            collection = try JSONDecoder().decode(TMDBCollection.self, from: collectionJson)
+        }
+        
+        return (movie, collection)
+    }
+    
+    // Get all collections that contain movies from a list of TMDB IDs
+    func getCollectionsForMovies(movieIds: [Int]) async throws -> [TMDBCollection] {
+        var collections: [TMDBCollection] = []
+        var seenCollectionIds: Set<Int> = []
+        
+        for movieId in movieIds {
+            do {
+                let (_, collection) = try await getMovieDetailsWithCollection(id: movieId)
+                if let collection = collection, !seenCollectionIds.contains(collection.id) {
+                    collections.append(collection)
+                    seenCollectionIds.insert(collection.id)
+                }
+            } catch {
+                // Continue with next movie if one fails
+                print("Failed to get collection for movie \(movieId): \(error)")
+            }
+        }
+        
+        return collections.sorted { $0.name < $1.name }
+    }
+    
     func getMovieDetails(id: Int) async throws -> TMDBMovie {
-        let urlString = "\(baseURL)/movie/\(id)?api_key=\(apiKey)"
+        let urlString = "\(baseURL)/movie/\(id)?api_key=\(apiKey)&append_to_response=collection"
         
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
         }
         
         let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        
+        // Decode the movie
         var movie = try JSONDecoder().decode(TMDBMovie.self, from: data)
         
-        // Set mediaType for movie
+        // Set mediaType for movies
         movie = TMDBMovie(
             id: movie.id,
             title: movie.title,
@@ -457,20 +549,24 @@ class TMDBService {
             runtime: movie.runtime,
             episodeRunTime: movie.episodeRunTime,
             credits: movie.credits,
-            productionCompanies: movie.productionCompanies
+            productionCompanies: movie.productionCompanies,
+            belongsToCollection: movie.belongsToCollection
         )
         
         return movie
     }
     
     func getTVShowDetails(id: Int) async throws -> TMDBMovie {
-        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)"
+        let urlString = "\(baseURL)/tv/\(id)?api_key=\(apiKey)&append_to_response=collection"
         
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
         }
         
         let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        
+        // Decode the movie
         var tvShow = try JSONDecoder().decode(TMDBMovie.self, from: data)
         
         // Set mediaType for TV show
@@ -491,7 +587,8 @@ class TMDBService {
             runtime: tvShow.runtime,
             episodeRunTime: tvShow.episodeRunTime,
             credits: tvShow.credits,
-            productionCompanies: tvShow.productionCompanies
+            productionCompanies: tvShow.productionCompanies,
+            belongsToCollection: tvShow.belongsToCollection
         )
         
         return tvShow

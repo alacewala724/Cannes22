@@ -92,6 +92,31 @@ enum AppModels {
         let name: String
     }
     
+    // MARK: - Collection Models
+    struct Collection: Codable, Hashable, Identifiable {
+        let id: Int
+        let name: String
+        let overview: String?
+        let posterPath: String?
+        let backdropPath: String?
+        
+        init(id: Int, name: String, overview: String?, posterPath: String?, backdropPath: String?) {
+            self.id = id
+            self.name = name
+            self.overview = overview
+            self.posterPath = posterPath
+            self.backdropPath = backdropPath
+        }
+        
+        init(from tmdbCollection: TMDBCollection) {
+            self.id = tmdbCollection.id
+            self.name = tmdbCollection.name
+            self.overview = tmdbCollection.overview
+            self.posterPath = tmdbCollection.posterPath
+            self.backdropPath = tmdbCollection.backdropPath
+        }
+    }
+    
     // NEW: Cast and crew information
     struct TMDBMovieCredits: Codable {
         let cast: [TMDBCastMember]?
@@ -155,17 +180,19 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     let tmdbId: Int?
     let mediaType: AppModels.MediaType
     let genres: [AppModels.Genre]
+    let collection: AppModels.Collection? // NEW: Collection information
     var score: Double
     var originalScore: Double // Track the original user-assigned score
     var comparisonsCount: Int
     
-    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = [], score: Double, comparisonsCount: Int = 0) {
+    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = [], collection: AppModels.Collection? = nil, score: Double, comparisonsCount: Int = 0) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
         self.tmdbId = tmdbId
         self.mediaType = mediaType
         self.genres = genres
+        self.collection = collection
         self.score = score
         self.originalScore = score // Initialize original score to the same value
         self.comparisonsCount = comparisonsCount
@@ -179,6 +206,7 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
         case tmdbId
         case mediaType
         case genres
+        case collection
         case score
         case originalScore
         case comparisonsCount
@@ -195,6 +223,28 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     }
 
     var displayScore: Double { score }
+}
+
+// MARK: - TMDBMovie to Movie Conversion Helper
+extension Movie {
+    static func from(tmdbMovie: TMDBMovie, sentiment: MovieSentiment, score: Double = 0.0) -> Movie {
+        let collection: AppModels.Collection?
+        if let tmdbCollection = tmdbMovie.belongsToCollection {
+            collection = AppModels.Collection(from: tmdbCollection)
+        } else {
+            collection = nil
+        }
+        
+        return Movie(
+            title: tmdbMovie.displayTitle,
+            sentiment: sentiment,
+            tmdbId: tmdbMovie.id,
+            mediaType: tmdbMovie.mediaType == "Movie" ? .movie : .tv,
+            genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+            collection: collection,
+            score: score
+        )
+    }
 }
 
 struct MovieComparison: Codable {

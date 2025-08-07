@@ -9,6 +9,27 @@ struct TMDBGenre: Codable {
     let name: String
 }
 
+// MARK: - Collection Models
+struct TMDBCollection: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let overview: String?
+    let posterPath: String?
+    let backdropPath: String?
+    let parts: [TMDBMovie]?
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name, overview
+        case posterPath = "poster_path"
+        case backdropPath = "backdrop_path"
+        case parts
+    }
+}
+
+struct TMDBCollectionResponse: Codable {
+    let results: [TMDBCollection]
+}
+
 struct TMDBTVShow: Codable {
     let id: Int
     let seasons: [TMDBSeason]
@@ -94,6 +115,7 @@ struct TMDBMovie: Codable, Identifiable {
     let episodeRunTime: [Int]?  // for TV shows
     let credits: TMDBMovieCredits? // NEW: Cast and crew information
     let productionCompanies: [TMDBProductionCompany]? // NEW: Production companies
+    let belongsToCollection: TMDBCollection? // NEW: Collection information
 
     enum CodingKeys: String, CodingKey {
         case id, title, name, overview
@@ -109,10 +131,11 @@ struct TMDBMovie: Codable, Identifiable {
         case episodeRunTime = "episode_run_time"
         case credits
         case productionCompanies = "production_companies"
+        case belongsToCollection = "belongs_to_collection"
     }
     
     // Custom initializer to create new instances
-    init(id: Int, title: String?, name: String?, overview: String, posterPath: String?, backdropPath: String?, releaseDate: String?, firstAirDate: String?, voteAverage: Double?, voteCount: Int?, popularity: Double?, genres: [TMDBGenre]?, mediaType: String?, runtime: Int?, episodeRunTime: [Int]?, credits: TMDBMovieCredits?, productionCompanies: [TMDBProductionCompany]?) {
+    init(id: Int, title: String?, name: String?, overview: String, posterPath: String?, backdropPath: String?, releaseDate: String?, firstAirDate: String?, voteAverage: Double?, voteCount: Int?, popularity: Double?, genres: [TMDBGenre]?, mediaType: String?, runtime: Int?, episodeRunTime: [Int]?, credits: TMDBMovieCredits?, productionCompanies: [TMDBProductionCompany]?, belongsToCollection: TMDBCollection?) {
         self.id = id
         self.title = title
         self.name = name
@@ -130,6 +153,7 @@ struct TMDBMovie: Codable, Identifiable {
         self.episodeRunTime = episodeRunTime
         self.credits = credits
         self.productionCompanies = productionCompanies
+        self.belongsToCollection = belongsToCollection
     }
 
     var displayTitle: String {

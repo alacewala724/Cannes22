@@ -122,7 +122,12 @@ struct ContentView: View {
             AddMovieView(store: store, existingMovie: nil)
         }
         .sheet(isPresented: $showingFilter) {
-            FilterView(selectedGenres: $store.selectedGenres, availableGenres: availableGenres)
+            FilterView(
+                selectedGenres: $store.selectedGenres,
+                selectedCollections: $store.selectedCollections,
+                availableGenres: availableGenres,
+                availableCollections: store.getAllAvailableCollections()
+            )
         }
         .sheet(isPresented: $showingFriendSearch) {
             FriendSearchView(store: store)
@@ -723,6 +728,7 @@ struct ContentView: View {
                             tmdbId: item.movie.id,
                             mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
                             genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                            collection: nil, // TODO: Add collection support for Future Cannes items
                             score: item.movie.voteAverage ?? 0.0
                         )
                         showingMovieDetail = movie
@@ -753,6 +759,7 @@ struct ContentView: View {
                             tmdbId: item.movie.id,
                             mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
                             genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                            collection: nil, // TODO: Add collection support for Future Cannes items
                             score: item.movie.voteAverage ?? 0.0
                         )
                         showingMovieDetail = movie

@@ -16,6 +16,7 @@ final class MovieStore: ObservableObject {
     
     // Published properties for filtering
     @Published var selectedGenres: Set<AppModels.Genre> = []
+    @Published var selectedCollections: Set<AppModels.Collection> = [] // NEW: Collection filtering
     
     // Error handling
     @Published var errorMessage: String?
@@ -205,6 +206,9 @@ final class MovieStore: ObservableObject {
             if !loadedMovies.isEmpty {
                 await recalculateScoresOnLoad()
             }
+            
+            // Fetch collection information for movies that don't have it
+            await fetchCollectionInfoForMovies()
         } catch {
             showError(message: handleError(error))
         }
@@ -817,15 +821,20 @@ final class MovieStore: ObservableObject {
     func getMovies() -> [Movie] {
         let movies = selectedMediaType == .movie ? self.movies : tvShows
         
-        if selectedGenres.isEmpty {
+        if selectedGenres.isEmpty && selectedCollections.isEmpty {
             return movies
         }
         
         return movies.filter { movie in
             // Check if the movie has any of the selected genres
-            return movie.genres.contains { genre in
+            let hasSelectedGenres = selectedGenres.isEmpty || movie.genres.contains { genre in
                 selectedGenres.contains(genre)
             }
+            
+            // Check if the movie belongs to any of the selected collections
+            let hasSelectedCollections = selectedCollections.isEmpty || (movie.collection != nil && selectedCollections.contains(movie.collection!))
+            
+            return hasSelectedGenres && hasSelectedCollections
         }
     }
 
@@ -1201,15 +1210,17 @@ final class MovieStore: ObservableObject {
     func getGlobalRatings() -> [GlobalRating] {
         let ratings = selectedMediaType == .movie ? globalMovieRatings : globalTVRatings
         
-        if selectedGenres.isEmpty {
+        if selectedGenres.isEmpty && selectedCollections.isEmpty {
             return ratings
         }
         
-        // Filter global ratings based on TMDB ID matching with personal movies that have the selected genres
+        // Filter global ratings based on TMDB ID matching with personal movies that have the selected genres/collections
         let filteredMovieIds = Set(getAllMovies().filter { movie in
-            movie.genres.contains { genre in
+            let hasSelectedGenres = selectedGenres.isEmpty || movie.genres.contains { genre in
                 selectedGenres.contains(genre)
             }
+            let hasSelectedCollections = selectedCollections.isEmpty || (movie.collection != nil && selectedCollections.contains(movie.collection!))
+            return hasSelectedGenres && hasSelectedCollections
         }.compactMap { $0.tmdbId })
         
         return ratings.filter { rating in
@@ -1229,6 +1240,88 @@ final class MovieStore: ObservableObject {
         let personalMovies = movies + tvShows
         let allGenres = personalMovies.flatMap { $0.genres }
         return Array(Set(allGenres)).sorted { $0.name < $1.name }
+    }
+    
+    func getAllAvailableCollections() -> [AppModels.Collection] {
+        // Get collections from personal movies
+        let personalMovies = movies + tvShows
+        
+        // Count how many movies belong to each collection
+        var collectionCounts: [AppModels.Collection: Int] = [:]
+        
+        for movie in personalMovies {
+            if let collection = movie.collection {
+                collectionCounts[collection, default: 0] += 1
+            }
+        }
+        
+        // Only return collections that have more than one movie
+        let multiMovieCollections = collectionCounts.filter { $0.value > 1 }.keys
+        
+        return Array(multiMovieCollections).sorted { $0.name < $1.name }
+    }
+    
+    // MARK: - Collection Enhancement
+    
+    // Fetch collection information for movies that don't have it
+    func fetchCollectionInfoForMovies() async {
+        let tmdbService = TMDBService()
+        let allMovies = movies + tvShows
+        
+        // Find movies without collection information
+        let moviesWithoutCollections = allMovies.filter { $0.collection == nil && $0.tmdbId != nil }
+        
+        print("Found \(moviesWithoutCollections.count) movies without collection information")
+        
+        for movie in moviesWithoutCollections {
+            guard let tmdbId = movie.tmdbId else { continue }
+            
+            do {
+                let (tmdbMovie, collection) = try await tmdbService.getMovieDetailsWithCollection(id: tmdbId)
+                
+                if let collection = collection {
+                    // Create updated movie with collection information
+                    var updatedMovie = Movie(
+                        id: movie.id,
+                        title: movie.title,
+                        sentiment: movie.sentiment,
+                        tmdbId: movie.tmdbId,
+                        mediaType: movie.mediaType,
+                        genres: movie.genres,
+                        collection: AppModels.Collection(from: collection),
+                        score: movie.score,
+                        comparisonsCount: movie.comparisonsCount
+                    )
+                    updatedMovie.originalScore = movie.originalScore
+                    
+                    // Update the movie in the appropriate list
+                    await MainActor.run {
+                        if movie.mediaType == .movie {
+                            if let index = movies.firstIndex(where: { $0.id == movie.id }) {
+                                movies[index] = updatedMovie
+                            }
+                        } else {
+                            if let index = tvShows.firstIndex(where: { $0.id == movie.id }) {
+                                tvShows[index] = updatedMovie
+                            }
+                        }
+                    }
+                    
+                    // Save to Firebase
+                    if let userId = AuthenticationService.shared.currentUser?.uid {
+                        try await firestoreService.updateMovieRanking(
+                            userId: userId,
+                            movie: updatedMovie,
+                            state: .scoreUpdate
+                        )
+                    }
+                    
+                    print("Updated movie '\(movie.title)' with collection: \(collection.name)")
+                }
+            } catch {
+                print("Failed to fetch collection for movie '\(movie.title)': \(error)")
+            }
+        }
     }
     
     // MARK: - Future Cannes Integration

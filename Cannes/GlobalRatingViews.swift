@@ -754,6 +754,7 @@ struct UnifiedMovieDetailView: View {
                     sentiment: .likedIt,
                     tmdbId: displayTmdbId,
                     mediaType: displayMediaType,
+                    collection: nil, // TODO: Add collection support for takes
                     score: displayAverageRating ?? 0.0
                 ),
                 takeText: $newTakeText,
@@ -774,6 +775,7 @@ struct UnifiedMovieDetailView: View {
                     sentiment: .likedIt,
                     tmdbId: displayTmdbId,
                     mediaType: displayMediaType,
+                    collection: nil, // TODO: Add collection support for takes
                     score: displayAverageRating ?? 0.0
                 ),
                 onSave: {
@@ -817,6 +819,7 @@ struct UnifiedMovieDetailView: View {
                             tmdbId: tmdbId,
                             mediaType: displayMediaType,
                             genres: [],
+                            collection: nil, // TODO: Add collection support for fallback movies
                             score: userScore
                         )
                         AddMovieView(store: store, existingMovie: fallbackMovie)
@@ -2518,7 +2521,8 @@ struct UnifiedMovieDetailView: View {
                         logoPath: company.logoPath,
                         originCountry: company.originCountry
                     )
-                }
+                },
+                belongsToCollection: nil
             )
             
             try await firestoreService.addToFutureCannes(movie: tmdbMovie)

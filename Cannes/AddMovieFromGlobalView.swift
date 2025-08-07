@@ -96,6 +96,7 @@ struct AddMovieFromGlobalView: View {
                                 tmdbId: tmdbMovie.id,
                                 mediaType: tmdbMovie.mediaType,
                                 genres: tmdbMovie.genres ?? [],
+                                collection: nil, // TODO: Add collection support for global movies
                                 score: self.sentiment.midpoint,
                                 comparisonsCount: 0
                             )

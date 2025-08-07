@@ -71,6 +71,20 @@ class FirestoreService: ObservableObject {
             let score = data["score"] as? Double ?? 0.0
             let originalScore = data["originalScore"] as? Double ?? score // Fallback to score if originalScore doesn't exist
             
+            // Parse collection data if present
+            var collection: AppModels.Collection?
+            if let collectionData = data["collection"] as? [String: Any],
+               let id = collectionData["id"] as? Int,
+               let name = collectionData["name"] as? String {
+                collection = AppModels.Collection(
+                    id: id,
+                    name: name,
+                    overview: collectionData["overview"] as? String,
+                    posterPath: collectionData["posterPath"] as? String,
+                    backdropPath: collectionData["backdropPath"] as? String
+                )
+            }
+            
             var movie = Movie(
                 id: UUID(uuidString: data["id"] as? String ?? "") ?? UUID(),
                 title: data["title"] as? String ?? "",
@@ -82,6 +96,7 @@ class FirestoreService: ObservableObject {
                           let name = genreData["name"] as? String else { return nil }
                     return AppModels.Genre(id: id, name: name)
                 } ?? [],
+                collection: collection,
                 score: score,
                 comparisonsCount: data["comparisonsCount"] as? Int ?? 0
             )
@@ -343,6 +358,20 @@ class FirestoreService: ObservableObject {
         let score = data["score"] as? Double ?? 0.0
         let originalScore = data["originalScore"] as? Double ?? score
         
+        // Parse collection data if present
+        var collection: AppModels.Collection?
+        if let collectionData = data["collection"] as? [String: Any],
+           let id = collectionData["id"] as? Int,
+           let name = collectionData["name"] as? String {
+            collection = AppModels.Collection(
+                id: id,
+                name: name,
+                overview: collectionData["overview"] as? String,
+                posterPath: collectionData["posterPath"] as? String,
+                backdropPath: collectionData["backdropPath"] as? String
+            )
+        }
+        
         var movie = Movie(
             id: UUID(uuidString: data["id"] as? String ?? "") ?? UUID(),
             title: data["title"] as? String ?? "",
@@ -354,6 +383,7 @@ class FirestoreService: ObservableObject {
                       let name = genreData["name"] as? String else { return nil }
                 return AppModels.Genre(id: id, name: name)
             } ?? [],
+            collection: collection,
             score: score,
             comparisonsCount: data["comparisonsCount"] as? Int ?? 0
         )
@@ -385,6 +415,13 @@ class FirestoreService: ObservableObject {
             "tmdbId": movie.tmdbId as Any,
             "mediaType": movie.mediaType.rawValue,
             "genres": movie.genres.map { ["id": $0.id, "name": $0.name] },
+            "collection": movie.collection.map { [
+                "id": $0.id,
+                "name": $0.name,
+                "overview": $0.overview as Any,
+                "posterPath": $0.posterPath as Any,
+                "backdropPath": $0.backdropPath as Any
+            ] } as Any,
             "score": movie.score,
             "originalScore": movie.originalScore,
             "comparisonsCount": movie.comparisonsCount,
@@ -1248,6 +1285,13 @@ extension FirestoreService {
                 "tmdbId": update.movie.tmdbId as Any,
                 "mediaType": update.movie.mediaType.rawValue,
                 "genres": update.movie.genres.map { ["id": $0.id, "name": $0.name] },
+                "collection": update.movie.collection.map { [
+                    "id": $0.id,
+                    "name": $0.name,
+                    "overview": $0.overview as Any,
+                    "posterPath": $0.posterPath as Any,
+                    "backdropPath": $0.backdropPath as Any
+                ] } as Any,
                 "score": update.newScore,
                 "originalScore": update.movie.originalScore, // Preserve the original score
                 "comparisonsCount": update.movie.comparisonsCount,
@@ -3032,7 +3076,8 @@ extension FirestoreService {
                 runtime: runtime,
                 episodeRunTime: episodeRunTime,
                 credits: nil,
-                productionCompanies: nil
+                productionCompanies: nil,
+                belongsToCollection: nil
             )
             
             return FutureCannesItem(

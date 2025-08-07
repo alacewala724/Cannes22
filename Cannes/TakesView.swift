@@ -269,6 +269,7 @@ struct TakesView_Previews: PreviewProvider {
             title: "Test Movie",
             sentiment: .likedIt,
             tmdbId: 123,
+            collection: nil, // TODO: Add collection support for preview
             score: 8.5
         ))
     }

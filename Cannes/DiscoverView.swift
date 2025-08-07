@@ -250,6 +250,7 @@ struct DiscoverView: View {
                             tmdbId: movie.id,
                             mediaType: movie.mediaType == "TV Show" ? .tv : .movie,
                             genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                            collection: nil, // TODO: Add collection support for discover movies
                             score: movie.voteAverage ?? 0.0
                         ))
                     }
@@ -261,6 +262,7 @@ struct DiscoverView: View {
                         tmdbId: movie.id,
                         mediaType: movie.mediaType == "TV Show" ? .tv : .movie,
                         genres: movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                        collection: nil, // TODO: Add collection support for discover movies
                         score: movie.voteAverage ?? 0.0
                     )
                     AddMovieView(store: store, existingMovie: nil, discoverMovie: discoverMovie)
@@ -772,7 +774,8 @@ struct DiscoverView: View {
                                 runtime: nil,
                                 episodeRunTime: nil,
                                 credits: nil,
-                                productionCompanies: nil
+                                productionCompanies: nil,
+                                belongsToCollection: nil
                             )
                         }
                     }
@@ -1227,7 +1230,8 @@ struct DiscoverView: View {
                                 runtime: nil,
                                 episodeRunTime: nil,
                                 credits: nil,
-                                productionCompanies: nil
+                                productionCompanies: nil,
+                                belongsToCollection: nil
                             )
                         }
                     }
