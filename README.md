@@ -145,6 +145,27 @@ A sophisticated iOS app for ranking and discovering movies and TV shows with fri
 - Firebase configuration in `GoogleService-Info.plist` (ignored by Git)
 - Secure key management with fallback mechanisms
 
+### ⚠️ IMPORTANT: Google API Key Security
+**If you received a security alert about a publicly accessible Google API key:**
+
+1. **Immediate Action Required:**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Navigate to APIs & Services → Credentials
+   - Find the exposed API key: `AIzaSyAzKiKsTEdsjEpZALEM5CRbHKIB_KZSGtI`
+   - **DELETE or RESTRICT** this key immediately
+   - Create a new API key with proper restrictions
+
+2. **Firebase Configuration:**
+   - Download a fresh `GoogleService-Info.plist` from your Firebase Console
+   - Place it in the `Cannes/` directory
+   - Ensure it's in `.gitignore` (already configured)
+   - Never commit this file to version control
+
+3. **API Key Restrictions:**
+   - Restrict the new API key to your app's bundle ID
+   - Limit to specific Firebase services only
+   - Set up proper authentication methods
+
 ### Firebase Security Rules
 ```javascript
 // Users can read/write their own data
