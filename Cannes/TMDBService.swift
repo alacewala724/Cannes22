@@ -11,9 +11,8 @@ class TMDBService {
            let key = config["TMDB_API_KEY"] as? String {
             self.apiKey = key
         } else {
-            // Fallback for development - you should replace this with your actual key
-            self.apiKey = "1b707e00ba3e60f3b0bbcb81a6ae5f21"
-            print("⚠️ WARNING: Using fallback API key. Make sure Config.plist is properly configured.")
+            // No fallback key for security - Config.plist must be properly configured
+            fatalError("⚠️ ERROR: TMDB_API_KEY not found in Config.plist. Please configure your API key properly.")
         }
     }
     
