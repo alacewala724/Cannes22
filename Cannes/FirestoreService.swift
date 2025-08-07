@@ -97,6 +97,11 @@ class FirestoreService: ObservableObject {
                     return AppModels.Genre(id: id, name: name)
                 } ?? [],
                 collection: collection,
+                keywords: (data["keywords"] as? [[String: Any]])?.compactMap { keywordData in
+                    guard let id = keywordData["id"] as? Int,
+                          let name = keywordData["name"] as? String else { return nil }
+                    return Keyword(id: id, name: name)
+                } ?? [],
                 score: score,
                 comparisonsCount: data["comparisonsCount"] as? Int ?? 0
             )
@@ -384,6 +389,11 @@ class FirestoreService: ObservableObject {
                 return AppModels.Genre(id: id, name: name)
             } ?? [],
             collection: collection,
+            keywords: (data["keywords"] as? [[String: Any]])?.compactMap { keywordData in
+                guard let id = keywordData["id"] as? Int,
+                      let name = keywordData["name"] as? String else { return nil }
+                return Keyword(id: id, name: name)
+            } ?? [],
             score: score,
             comparisonsCount: data["comparisonsCount"] as? Int ?? 0
         )
@@ -422,6 +432,7 @@ class FirestoreService: ObservableObject {
                 "posterPath": $0.posterPath as Any,
                 "backdropPath": $0.backdropPath as Any
             ] } as Any,
+            "keywords": movie.keywords.map { ["id": $0.id, "name": $0.name] },
             "score": movie.score,
             "originalScore": movie.originalScore,
             "comparisonsCount": movie.comparisonsCount,
@@ -1292,6 +1303,7 @@ extension FirestoreService {
                     "posterPath": $0.posterPath as Any,
                     "backdropPath": $0.backdropPath as Any
                 ] } as Any,
+                "keywords": update.movie.keywords.map { ["id": $0.id, "name": $0.name] },
                 "score": update.newScore,
                 "originalScore": update.movie.originalScore, // Preserve the original score
                 "comparisonsCount": update.movie.comparisonsCount,

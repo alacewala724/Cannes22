@@ -181,11 +181,12 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
     let mediaType: AppModels.MediaType
     let genres: [AppModels.Genre]
     let collection: AppModels.Collection? // NEW: Collection information
+    let keywords: [Keyword] // NEW: Keywords from TMDB
     var score: Double
     var originalScore: Double // Track the original user-assigned score
     var comparisonsCount: Int
     
-    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = [], collection: AppModels.Collection? = nil, score: Double, comparisonsCount: Int = 0) {
+    init(id: UUID = UUID(), title: String, sentiment: MovieSentiment, tmdbId: Int? = nil, mediaType: AppModels.MediaType = .movie, genres: [AppModels.Genre] = [], collection: AppModels.Collection? = nil, keywords: [Keyword] = [], score: Double, comparisonsCount: Int = 0) {
         self.id = id
         self.title = title
         self.sentiment = sentiment
@@ -193,6 +194,7 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
         self.mediaType = mediaType
         self.genres = genres
         self.collection = collection
+        self.keywords = keywords
         self.score = score
         self.originalScore = score // Initialize original score to the same value
         self.comparisonsCount = comparisonsCount
@@ -207,6 +209,7 @@ struct Movie: Identifiable, Codable, Equatable, Hashable {
         case mediaType
         case genres
         case collection
+        case keywords
         case score
         case originalScore
         case comparisonsCount
@@ -242,6 +245,7 @@ extension Movie {
             mediaType: tmdbMovie.mediaType == "Movie" ? .movie : .tv,
             genres: tmdbMovie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
             collection: collection,
+            keywords: [], // Will be populated later when keywords are fetched
             score: score
         )
     }

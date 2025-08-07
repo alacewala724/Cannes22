@@ -624,4 +624,83 @@ class TMDBService {
         let episodesData = try JSONSerialization.data(withJSONObject: episodesArray)
         return try JSONDecoder().decode([TMDBEpisode].self, from: episodesData)
     }
+    
+    // MARK: - Keyword Search
+    
+    func searchKeywords(query: String) async throws -> [Keyword] {
+        let urlString = "\(baseURL)/search/keyword?api_key=\(apiKey)&query=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
+        
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(TMDBKeywordResponse.self, from: data)
+        
+        return response.results
+    }
+    
+    // Get keywords for a specific movie
+    func getMovieKeywords(id: Int) async throws -> [Keyword] {
+        let urlString = "\(baseURL)/movie/\(id)/keywords?api_key=\(apiKey)"
+        
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        print("DEBUG: Fetching movie keywords from: \(urlString)")
+        
+        let (data, httpResponse) = try await URLSession.shared.data(from: url)
+        
+        if let httpResponse = httpResponse as? HTTPURLResponse {
+            print("DEBUG: Movie keywords API response status: \(httpResponse.statusCode)")
+            
+            if httpResponse.statusCode != 200 {
+                print("DEBUG: Movie keywords API error status: \(httpResponse.statusCode)")
+                let errorString = String(data: data, encoding: .utf8)
+                print("DEBUG: Movie keywords API error response: \(errorString ?? "nil")")
+                throw URLError(.badServerResponse)
+            }
+        }
+        
+        let responseString = String(data: data, encoding: .utf8)
+        print("DEBUG: Movie keywords API response: \(responseString ?? "nil")")
+        
+        // Try to parse as JSON first to see the structure
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("DEBUG: Movie keywords JSON structure: \(json)")
+        }
+        
+        // Movie keywords use a different response format with 'keywords' key
+        let movieKeywordResponse = try JSONDecoder().decode(TMDBMovieKeywordsResponse.self, from: data)
+        print("DEBUG: Decoded \(movieKeywordResponse.keywords.count) movie keywords")
+        
+        return movieKeywordResponse.keywords
+    }
+    
+    // Get keywords for a specific TV show
+    func getTVShowKeywords(id: Int) async throws -> [Keyword] {
+        let urlString = "\(baseURL)/tv/\(id)/keywords?api_key=\(apiKey)"
+        
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+        
+        print("DEBUG: Fetching TV show keywords from: \(urlString)")
+        
+        let (data, httpResponse) = try await URLSession.shared.data(from: url)
+        
+        if let httpResponse = httpResponse as? HTTPURLResponse {
+            print("DEBUG: TV show keywords API response status: \(httpResponse.statusCode)")
+        }
+        
+        let responseString = String(data: data, encoding: .utf8)
+        print("DEBUG: TV show keywords API response: \(responseString ?? "nil")")
+        
+        let keywordResponse = try JSONDecoder().decode(TMDBKeywordResponse.self, from: data)
+        
+        print("DEBUG: Decoded \(keywordResponse.results.count) TV show keywords")
+        
+        return keywordResponse.results
+    }
 } 

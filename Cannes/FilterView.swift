@@ -1,19 +1,40 @@
 import SwiftUI
 
+// MARK: - Keyword Model
+struct Keyword: Codable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    
+    static func == (lhs: Keyword, rhs: Keyword) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 struct FilterView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedGenres: Set<AppModels.Genre>
     @Binding var selectedCollections: Set<AppModels.Collection>
+    @Binding var selectedKeywords: Set<Keyword>
     let availableGenres: [AppModels.Genre]
     let availableCollections: [AppModels.Collection]
+    let availableKeywords: [Keyword]
+    let store: MovieStore // Add store to access user's movies
     
     @State private var filterMode: FilterMode = .genres
     @State private var genreSearchText = ""
     @State private var collectionSearchText = ""
+    @State private var keywordSearchText = ""
+    @State private var keywordSearchResults: [Keyword] = []
+    @State private var isSearchingKeywords = false
     
     enum FilterMode {
         case genres
         case collections
+        case keywords
     }
     
     var filteredGenres: [AppModels.Genre] {
@@ -44,6 +65,7 @@ struct FilterView: View {
                 Picker("Filter Mode", selection: $filterMode) {
                     Text("Genres").tag(FilterMode.genres)
                     Text("Collections").tag(FilterMode.collections)
+                    Text("Keywords").tag(FilterMode.keywords)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding()
@@ -51,13 +73,26 @@ struct FilterView: View {
                 // Content based on selected mode
                 if filterMode == .genres {
                     genresView
-                } else {
+                } else if filterMode == .collections {
                     collectionsView
+                } else {
+                    keywordsView
                 }
             }
             .navigationTitle("Filters")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Clear") {
+                        selectedGenres.removeAll()
+                        selectedCollections.removeAll()
+                        selectedKeywords.removeAll()
+                    }
+                    .font(.headline)
+                    .foregroundColor(.red)
+                    .disabled(selectedGenres.isEmpty && selectedCollections.isEmpty && selectedKeywords.isEmpty)
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Spacer()
                     
@@ -151,6 +186,119 @@ struct FilterView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+    
+    private var keywordsView: some View {
+        VStack(spacing: 0) {
+            // Search bar for keywords
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                TextField("Search keywords...", text: $keywordSearchText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: keywordSearchText) { newValue in
+                        Task {
+                            await searchKeywords(query: newValue)
+                        }
+                    }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            
+            if isSearchingKeywords {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Searching keywords...")
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+            }
+            
+            List {
+                if !keywordSearchText.isEmpty {
+                    Section("Search Results (\(keywordSearchResults.count))") {
+                        ForEach(keywordSearchResults) { keyword in
+                            Button(action: {
+                                if selectedKeywords.contains(keyword) {
+                                    selectedKeywords.remove(keyword)
+                                } else {
+                                    selectedKeywords.insert(keyword)
+                                }
+                            }) {
+                                HStack {
+                                    Text(keyword.name)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    if selectedKeywords.contains(keyword) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.accentColor)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if !selectedKeywords.isEmpty {
+                    Section("Selected Keywords (\(selectedKeywords.count))") {
+                        ForEach(Array(selectedKeywords)) { keyword in
+                            Button(action: {
+                                selectedKeywords.remove(keyword)
+                            }) {
+                                HStack {
+                                    Text(keyword.name)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func searchKeywords(query: String) async {
+        guard !query.isEmpty else {
+            await MainActor.run {
+                keywordSearchResults = []
+                isSearchingKeywords = false
+            }
+            return
+        }
+        
+        await MainActor.run {
+            isSearchingKeywords = true
+        }
+        
+        do {
+            // Get all keywords from both movies and TV shows (not just selected media type)
+            let allMovies = store.movies + store.tvShows
+            let allKeywords = Set(allMovies.flatMap { $0.keywords })
+            
+            print("DEBUG: Found \(allKeywords.count) unique keywords from user's movies and TV shows")
+            
+            // Filter keywords that match the search query
+            let matchingKeywords = allKeywords.filter { keyword in
+                keyword.name.localizedCaseInsensitiveContains(query)
+            }
+            
+            await MainActor.run {
+                keywordSearchResults = Array(matchingKeywords).sorted { $0.name < $1.name }
+                isSearchingKeywords = false
+            }
+            
+            print("DEBUG: Found \(matchingKeywords.count) keywords matching '\(query)'")
+        } catch {
+            print("DEBUG: Failed to search keywords: \(error)")
+            await MainActor.run {
+                keywordSearchResults = []
+                isSearchingKeywords = false
             }
         }
     }

@@ -17,6 +17,7 @@ final class MovieStore: ObservableObject {
     // Published properties for filtering
     @Published var selectedGenres: Set<AppModels.Genre> = []
     @Published var selectedCollections: Set<AppModels.Collection> = [] // NEW: Collection filtering
+    @Published var selectedKeywords: Set<Keyword> = [] // NEW: Keyword filtering
     
     // Error handling
     @Published var errorMessage: String?
@@ -209,6 +210,9 @@ final class MovieStore: ObservableObject {
             
             // Fetch collection information for movies that don't have it
             await fetchCollectionInfoForMovies()
+            
+            // Fetch keywords for movies that don't have them
+            await fetchKeywordsForMovies()
         } catch {
             showError(message: handleError(error))
         }
@@ -821,7 +825,7 @@ final class MovieStore: ObservableObject {
     func getMovies() -> [Movie] {
         let movies = selectedMediaType == .movie ? self.movies : tvShows
         
-        if selectedGenres.isEmpty && selectedCollections.isEmpty {
+        if selectedGenres.isEmpty && selectedCollections.isEmpty && selectedKeywords.isEmpty {
             return movies
         }
         
@@ -834,7 +838,98 @@ final class MovieStore: ObservableObject {
             // Check if the movie belongs to any of the selected collections
             let hasSelectedCollections = selectedCollections.isEmpty || (movie.collection != nil && selectedCollections.contains(movie.collection!))
             
-            return hasSelectedGenres && hasSelectedCollections
+            // Check if the movie has any of the selected keywords
+            let hasSelectedKeywords = selectedKeywords.isEmpty || movie.keywords.contains { keyword in
+                selectedKeywords.contains(keyword)
+            }
+            
+            return hasSelectedGenres && hasSelectedCollections && hasSelectedKeywords
+        }
+    }
+    
+    // Fetch keywords for movies that don't have them
+    func fetchKeywordsForMovies() async {
+        let tmdbService = TMDBService()
+        let allMovies = movies + tvShows
+        
+        // Find movies without keywords
+        let moviesWithoutKeywords = allMovies.filter { $0.keywords.isEmpty && $0.tmdbId != nil }
+        
+        print("DEBUG: Found \(moviesWithoutKeywords.count) movies without keywords")
+        print("DEBUG: Total movies: \(movies.count), TV shows: \(tvShows.count)")
+        print("DEBUG: Movies with keywords: \(allMovies.filter { !$0.keywords.isEmpty }.count)")
+        
+        // Only fetch if there are movies without keywords
+        guard !moviesWithoutKeywords.isEmpty else {
+            print("DEBUG: All movies already have keywords, skipping fetch")
+            return
+        }
+        
+        for movie in moviesWithoutKeywords {
+            guard let tmdbId = movie.tmdbId else { continue }
+            
+            print("DEBUG: Fetching keywords for '\(movie.title)' (ID: \(tmdbId), Type: \(movie.mediaType))")
+            
+            do {
+                let keywords: [Keyword]
+                if movie.mediaType == .movie {
+                    print("DEBUG: Using getMovieKeywords for movie")
+                    keywords = try await tmdbService.getMovieKeywords(id: tmdbId)
+                } else {
+                    print("DEBUG: Using getTVShowKeywords for TV show")
+                    keywords = try await tmdbService.getTVShowKeywords(id: tmdbId)
+                }
+                
+                print("DEBUG: Fetched \(keywords.count) keywords for '\(movie.title)'")
+                if !keywords.isEmpty {
+                    print("DEBUG: Keywords: \(keywords.map { $0.name }.joined(separator: ", "))")
+                }
+                
+                if !keywords.isEmpty {
+                    // Create updated movie with keywords
+                    var updatedMovie = Movie(
+                        id: movie.id,
+                        title: movie.title,
+                        sentiment: movie.sentiment,
+                        tmdbId: movie.tmdbId,
+                        mediaType: movie.mediaType,
+                        genres: movie.genres,
+                        collection: movie.collection,
+                        keywords: keywords,
+                        score: movie.score,
+                        comparisonsCount: movie.comparisonsCount
+                    )
+                    updatedMovie.originalScore = movie.originalScore
+                    
+                    // Update the movie in the appropriate list
+                    await MainActor.run {
+                        if movie.mediaType == .movie {
+                            if let index = movies.firstIndex(where: { $0.id == movie.id }) {
+                                movies[index] = updatedMovie
+                                print("DEBUG: Updated movie in movies list")
+                            }
+                        } else {
+                            if let index = tvShows.firstIndex(where: { $0.id == movie.id }) {
+                                tvShows[index] = updatedMovie
+                                print("DEBUG: Updated movie in TV shows list")
+                            }
+                        }
+                    }
+                    
+                    // Save to Firebase
+                    if let userId = AuthenticationService.shared.currentUser?.uid {
+                        try await firestoreService.updateMovieRanking(
+                            userId: userId,
+                            movie: updatedMovie,
+                            state: .scoreUpdate
+                        )
+                    }
+                    
+                    print("Updated movie '\(movie.title)' with \(keywords.count) keywords")
+                }
+            } catch {
+                print("Failed to fetch keywords for movie '\(movie.title)': \(error)")
+            }
         }
     }
 
@@ -1210,17 +1305,20 @@ final class MovieStore: ObservableObject {
     func getGlobalRatings() -> [GlobalRating] {
         let ratings = selectedMediaType == .movie ? globalMovieRatings : globalTVRatings
         
-        if selectedGenres.isEmpty && selectedCollections.isEmpty {
+        if selectedGenres.isEmpty && selectedCollections.isEmpty && selectedKeywords.isEmpty {
             return ratings
         }
         
-        // Filter global ratings based on TMDB ID matching with personal movies that have the selected genres/collections
+        // Filter global ratings based on TMDB ID matching with personal movies that have the selected genres/collections/keywords
         let filteredMovieIds = Set(getAllMovies().filter { movie in
             let hasSelectedGenres = selectedGenres.isEmpty || movie.genres.contains { genre in
                 selectedGenres.contains(genre)
             }
             let hasSelectedCollections = selectedCollections.isEmpty || (movie.collection != nil && selectedCollections.contains(movie.collection!))
-            return hasSelectedGenres && hasSelectedCollections
+            let hasSelectedKeywords = selectedKeywords.isEmpty || movie.keywords.contains { keyword in
+                selectedKeywords.contains(keyword)
+            }
+            return hasSelectedGenres && hasSelectedCollections && hasSelectedKeywords
         }.compactMap { $0.tmdbId })
         
         return ratings.filter { rating in

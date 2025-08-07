@@ -125,8 +125,11 @@ struct ContentView: View {
             FilterView(
                 selectedGenres: $store.selectedGenres,
                 selectedCollections: $store.selectedCollections,
+                selectedKeywords: $store.selectedKeywords,
                 availableGenres: availableGenres,
-                availableCollections: store.getAllAvailableCollections()
+                availableCollections: store.getAllAvailableCollections(),
+                availableKeywords: [], // Empty for now, will be populated by search
+                store: store
             )
         }
         .sheet(isPresented: $showingFriendSearch) {

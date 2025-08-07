@@ -30,6 +30,14 @@ struct TMDBCollectionResponse: Codable {
     let results: [TMDBCollection]
 }
 
+struct TMDBKeywordResponse: Codable {
+    let results: [Keyword]
+}
+
+struct TMDBMovieKeywordsResponse: Codable {
+    let keywords: [Keyword]
+}
+
 struct TMDBTVShow: Codable {
     let id: Int
     let seasons: [TMDBSeason]
