@@ -50,6 +50,7 @@ struct SettingsView: View {
     
     @State private var isUpdatingMyPoster = false
     @State private var posterUpdateMessage: String?
+    @State private var showingAttribution = false
     
     var body: some View {
         NavigationView {
@@ -535,6 +536,32 @@ struct SettingsView: View {
                             .padding(.top, 4)
                     }
                     .padding(.vertical, 4)
+                    
+                    // Attribution Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Third-Party Services")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        Text("This app uses data and services from third-party providers. We comply with all attribution requirements and terms of service.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Button(action: { showingAttribution = true }) {
+                            HStack {
+                                Image(systemName: "info.circle")
+                                    .foregroundColor(.accentColor)
+                                Text("View Attributions")
+                                    .foregroundColor(.accentColor)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 4)
                 }
                 
                 // Sign Out Section
@@ -557,6 +584,9 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showingAttribution) {
+            AttributionView()
         }
         .alert("Sign Out", isPresented: $showingSignOutAlert) {
             Button("Cancel", role: .cancel) { }

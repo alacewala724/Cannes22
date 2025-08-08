@@ -136,35 +136,54 @@ final class MovieStore: ObservableObject {
     }
     
     func loadMovies(forceRefresh: Bool = false) async {
-        guard !isLoading else {
-            print("loadMovies: Already loading, skipping")
-            return
+        guard !isLoading else { return }
+        
+        await MainActor.run {
+            isLoading = true
+        }
+        
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
         }
         
         guard let userId = AuthenticationService.shared.currentUser?.uid else { return }
         
-        isLoading = true
-        defer { isLoading = false }
-        
-        // Always try to load from cache first (unless force refresh)
-        if !forceRefresh {
-            await loadFromCache(userId: userId)
-        }
-        
-        // If online, try to load from server
-        if networkMonitor.isConnected {
-            await loadFromServer(userId: userId)
-        } else {
-            // We're offline - make sure we loaded from cache
-            if movies.isEmpty && tvShows.isEmpty {
-                // Try loading from cache even if we already tried (in case of issues)
-                await loadFromCache(userId: userId)
-                
-                // If still no data, show error
-                if movies.isEmpty && tvShows.isEmpty {
-                    showError(message: "No internet connection. Unable to load your rankings.")
-                }
+        do {
+            // Try to load from cache first to avoid blanking
+            if !forceRefresh {
+                await loadMoviesFromCache(userId: userId)
             }
+            
+            // Load fresh data from server in background
+            let loadedMovies = try await firestoreService.getUserRankings(userId: userId)
+            
+            await MainActor.run {
+                // Update movies and TV shows
+                self.movies = loadedMovies.filter { $0.mediaType == .movie }
+                self.tvShows = loadedMovies.filter { $0.mediaType == .tv }
+                
+                // Clean up duplicates
+                cleanupDuplicateMovies()
+                
+                // Cache the fresh data
+                cacheManager.cachePersonalMovies(self.movies, userId: userId)
+                cacheManager.cachePersonalTVShows(self.tvShows, userId: userId)
+            }
+            
+            // Recalculate scores after loading (only if we actually loaded movies)
+            if !loadedMovies.isEmpty {
+                await recalculateScoresOnLoad()
+            }
+            
+            // Fetch collection information for movies that don't have it
+            await fetchCollectionInfoForMovies()
+            
+            // Fetch keywords for movies that don't have them
+            await fetchKeywordsForMovies()
+        } catch {
+            showError(message: handleError(error))
         }
     }
     
@@ -1155,34 +1174,25 @@ final class MovieStore: ObservableObject {
     }
     
     func loadGlobalRatings(forceRefresh: Bool = false) async {
-        guard !isLoadingGlobalRatings else {
-            print("loadGlobalRatings: Already loading, skipping")
-            return
+        guard !isLoadingGlobalRatings else { return }
+        
+        await MainActor.run {
+            isLoadingGlobalRatings = true
         }
         
-        isLoadingGlobalRatings = true
-        defer { isLoadingGlobalRatings = false }
+        defer {
+            Task { @MainActor in
+                isLoadingGlobalRatings = false
+            }
+        }
         
-        // Always try to load from cache first (unless force refresh)
+        // Try to load from cache first to avoid blanking
         if !forceRefresh {
             await loadGlobalRatingsFromCache()
         }
         
-        // If online, try to load from server
-        if networkMonitor.isConnected {
-            await loadGlobalRatingsFromServer()
-        } else {
-            // We're offline - make sure we loaded from cache
-            if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
-                // Try loading from cache even if we already tried (in case of issues)
-                await loadGlobalRatingsFromCache()
-                
-                // If still no data, show error
-                if globalMovieRatings.isEmpty && globalTVRatings.isEmpty {
-                    showError(message: "No internet connection. Unable to load community rankings.")
-                }
-            }
-        }
+        // Load fresh data from server in background
+        await loadGlobalRatingsFromServer()
     }
     
     private func loadGlobalRatingsFromCache() async {
@@ -1419,6 +1429,18 @@ final class MovieStore: ObservableObject {
             } catch {
                 print("Failed to fetch collection for movie '\(movie.title)': \(error)")
             }
+        }
+    }
+    
+    // MARK: - Cache Loading Functions
+    
+    private func loadMoviesFromCache(userId: String) async {
+        let cachedMovies = cacheManager.getCachedPersonalMovies(userId: userId) ?? []
+        let cachedTVShows = cacheManager.getCachedPersonalTVShows(userId: userId) ?? []
+        
+        await MainActor.run {
+            self.movies = cachedMovies
+            self.tvShows = cachedTVShows
         }
     }
     

@@ -148,8 +148,20 @@ struct UpdatesView: View {
         isLoading = true
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
-            // Filter out follow notifications, keep only movie-related activities
-            let movieActivities = fetchedActivities.filter { $0.type != .userFollowed }
+            print("DEBUG: Loaded \(fetchedActivities.count) total activities from Firestore")
+            
+            // Log each activity type for debugging
+            let activityTypeCounts = Dictionary(grouping: fetchedActivities, by: { $0.type })
+                .mapValues { $0.count }
+            print("DEBUG: Activity type counts: \(activityTypeCounts)")
+            
+            // Filter out follow notifications only (movieUpdated already filtered in FirestoreService)
+            let movieActivities = fetchedActivities.filter { activity in
+                activity.type != .userFollowed
+            }
+            
+            print("DEBUG: After filtering, showing \(movieActivities.count) activities")
+            
             await MainActor.run {
                 activities = movieActivities
                 isLoading = false
@@ -166,7 +178,9 @@ struct UpdatesView: View {
     private func loadActivitiesWithAnimation() async {
         do {
             let fetchedActivities = try await firestoreService.getFriendActivities()
-            let movieActivities = fetchedActivities.filter { $0.type != .userFollowed }
+            let movieActivities = fetchedActivities.filter { activity in
+                activity.type != .userFollowed
+            }
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     activities = movieActivities

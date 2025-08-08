@@ -175,20 +175,13 @@ struct ContentView: View {
                 store.selectedMediaType = mediaType
             }
             
-            // Clear cache and load wishlist data
-            if let userId = AuthenticationService.shared.currentUser?.uid {
-                CacheManager.shared.clearFutureCannesCache(userId: userId)
-            }
+            // Load wishlist data without clearing cache first
             Task {
                 await loadFutureCannesList()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshWishlist"))) { _ in
-            // Always refresh the wishlist data when notification is received
-            // Clear cache first to ensure fresh data
-            if let userId = AuthenticationService.shared.currentUser?.uid {
-                CacheManager.shared.clearFutureCannesCache(userId: userId)
-            }
+            // Load wishlist data without aggressive cache clearing
             Task {
                 await loadFutureCannesList()
             }
@@ -197,13 +190,13 @@ struct ContentView: View {
             // Only load if we have no data at all (don't conflict with task loading)
         }
         .onChange(of: selectedTab) { _, newTab in
-            // Only refresh when switching TO global tab, and only if we have internet
+            // Only refresh when switching TO global tab, and only if we have no data
             if newTab == 0 {
                 Task {
                     // Wait a moment to avoid conflicts with other loading
                     try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
                     if store.getGlobalRatings().isEmpty {
-                        await store.loadGlobalRatings(forceRefresh: true)
+                        await store.loadGlobalRatings(forceRefresh: false) // Don't force refresh to avoid blanking
                     }
                 }
             }
@@ -555,14 +548,20 @@ struct ContentView: View {
     }
     
     private var movieListView: some View {
-        LazyVStack(spacing: UI.vGap) {
-            ForEach(Array(store.getMovies().enumerated()), id: \.element.id) { index, movie in
-                MovieRow(movie: movie, position: index + 1, store: store, isEditing: isEditing)
+        VStack(spacing: 16) {
+            LazyVStack(spacing: UI.vGap) {
+                ForEach(Array(store.getMovies().enumerated()), id: \.element.id) { index, movie in
+                    MovieRow(movie: movie, position: index + 1, store: store, isEditing: isEditing)
+                }
+                .onDelete(perform: isEditing ? deleteMovies : nil)
             }
-            .onDelete(perform: isEditing ? deleteMovies : nil)
+            .padding(.horizontal, 4)
+            .padding(.vertical, UI.vGap)
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, UI.vGap)
     }
     
     private func deleteMovies(at offsets: IndexSet) {
@@ -570,20 +569,26 @@ struct ContentView: View {
     }
     
     private var globalRatingListView: some View {
-        LazyVStack(spacing: UI.vGap) {
-            ForEach(Array(globalRatings.enumerated()), id: \.element.id) { index, rating in
-                GlobalRatingRow(
-                    rating: rating,
-                    position: index + 1,
-                    onTap: { 
-                        showingGlobalRatingDetail = rating
-                    },
-                    store: store
-                )
+        VStack(spacing: 16) {
+            LazyVStack(spacing: UI.vGap) {
+                ForEach(Array(globalRatings.enumerated()), id: \.element.id) { index, rating in
+                    GlobalRatingRow(
+                        rating: rating,
+                        position: index + 1,
+                        onTap: { 
+                            showingGlobalRatingDetail = rating
+                        },
+                        store: store
+                    )
+                }
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, UI.vGap)
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, UI.vGap)
     }
     
     private var globalRatingGridView: some View {
@@ -622,12 +627,18 @@ struct ContentView: View {
             isLoadingFutureCannes = true
         }
         
-        // Clear cache first to ensure fresh data
+        // Try to load from cache first to avoid blanking
         if let userId = AuthenticationService.shared.currentUser?.uid {
-            CacheManager.shared.clearFutureCannesCache(userId: userId)
+            let cacheManager = CacheManager.shared
+            if let cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
+                await MainActor.run {
+                    futureCannesList = cachedItems
+                    isLoadingFutureCannes = false
+                }
+            }
         }
         
-        // Load fresh data from Firebase (don't rely on cache for this)
+        // Load fresh data from Firebase in background
         do {
             let firestoreService = FirestoreService()
             let items = try await firestoreService.getFutureCannesList()
@@ -642,20 +653,11 @@ struct ContentView: View {
                 }
             }
         } catch {
-            // Try to load from cache as fallback
-            if let userId = AuthenticationService.shared.currentUser?.uid {
-                let cacheManager = CacheManager.shared
-                if let cachedItems = cacheManager.getCachedFutureCannes(userId: userId) {
-                    await MainActor.run {
-                        futureCannesList = cachedItems
-                        isLoadingFutureCannes = false
-                    }
-                    return
+            // If we failed to load fresh data, keep the cached data if we have it
+            if futureCannesList.isEmpty {
+                await MainActor.run {
+                    isLoadingFutureCannes = false
                 }
-            }
-            
-            await MainActor.run {
-                isLoadingFutureCannes = false
             }
         }
     }
@@ -718,63 +720,75 @@ struct ContentView: View {
     }
     
     private var futureCannesListView: some View {
-        LazyVStack(spacing: UI.vGap) {
-            ForEach(Array(filteredFutureCannesList.enumerated()), id: \.element.id) { index, item in
-                FutureCannesRow(
-                    item: item,
-                    position: index + 1,
-                    onTap: {
-                        // Show movie detail view for Future Cannes item
-                        let movie = Movie(
-                            title: item.movie.title ?? item.movie.name ?? "Unknown",
-                            sentiment: .likedIt,
-                            tmdbId: item.movie.id,
-                            mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
-                            genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
-                            collection: nil, // TODO: Add collection support for Future Cannes items
-                            score: item.movie.voteAverage ?? 0.0
-                        )
-                        showingMovieDetail = movie
-                    },
-                    onRemove: {
-                        Task {
-                            await removeFromFutureCannes(item: item)
-                        }
-                    },
-                    isEditing: isEditing
-                )
+        VStack(spacing: 16) {
+            LazyVStack(spacing: UI.vGap) {
+                ForEach(Array(filteredFutureCannesList.enumerated()), id: \.element.id) { index, item in
+                    FutureCannesRow(
+                        item: item,
+                        position: index + 1,
+                        onTap: {
+                            // Show movie detail view for Future Cannes item
+                            let movie = Movie(
+                                title: item.movie.title ?? item.movie.name ?? "Unknown",
+                                sentiment: .likedIt,
+                                tmdbId: item.movie.id,
+                                mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
+                                genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                                collection: nil, // TODO: Add collection support for Future Cannes items
+                                score: item.movie.voteAverage ?? 0.0
+                            )
+                            showingMovieDetail = movie
+                        },
+                        onRemove: {
+                            Task {
+                                await removeFromFutureCannes(item: item)
+                            }
+                        },
+                        isEditing: isEditing
+                    )
+                }
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, UI.vGap)
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, UI.vGap)
     }
     
     private var futureCannesGridView: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
-            ForEach(filteredFutureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
-                FutureCannesGridItem(
-                    item: item,
-                    onTap: {
-                        // Show movie detail view for Future Cannes item
-                        let movie = Movie(
-                            title: item.movie.title ?? item.movie.name ?? "Unknown",
-                            sentiment: .likedIt,
-                            tmdbId: item.movie.id,
-                            mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
-                            genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
-                            collection: nil, // TODO: Add collection support for Future Cannes items
-                            score: item.movie.voteAverage ?? 0.0
-                        )
-                        showingMovieDetail = movie
-                    },
-                    onRemove: {
-                        Task {
-                            await removeFromFutureCannes(item: item)
-                        }
-                    },
-                    isEditing: isEditing
-                )
+        VStack(spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+                ForEach(filteredFutureCannesList.sorted { $0.dateAdded > $1.dateAdded }, id: \.id) { item in
+                    FutureCannesGridItem(
+                        item: item,
+                        onTap: {
+                            // Show movie detail view for Future Cannes item
+                            let movie = Movie(
+                                title: item.movie.title ?? item.movie.name ?? "Unknown",
+                                sentiment: .likedIt,
+                                tmdbId: item.movie.id,
+                                mediaType: item.movie.mediaType == "Movie" ? .movie : .tv,
+                                genres: item.movie.genres?.map { AppModels.Genre(id: $0.id, name: $0.name) } ?? [],
+                                collection: nil, // TODO: Add collection support for Future Cannes items
+                                score: item.movie.voteAverage ?? 0.0
+                            )
+                            showingMovieDetail = movie
+                        },
+                        onRemove: {
+                            Task {
+                                await removeFromFutureCannes(item: item)
+                            }
+                        },
+                        isEditing: isEditing
+                    )
+                }
             }
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
     }
     

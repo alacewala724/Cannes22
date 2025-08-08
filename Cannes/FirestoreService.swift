@@ -2508,6 +2508,12 @@ extension FirestoreService {
     func createActivityUpdate(type: ActivityUpdate.ActivityType, movie: Movie, comment: String? = nil) async throws {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return }
         
+        // Block movieUpdated activities at the source - they should not be created anymore
+        if type == .movieUpdated {
+            print("BLOCKED: Attempted to create movieUpdated activity for '\(movie.title)' - this activity type is deprecated")
+            return
+        }
+        
         // Get current user's username
         let userDoc = try await db.collection("users").document(currentUserId).getDocument()
         let username = userDoc.get("username") as? String ?? "Unknown User"
@@ -2582,7 +2588,7 @@ extension FirestoreService {
         print("Created follow activity update: \(username) followed \(followedUsername)")
     }
     
-    func getFriendActivities(limit: Int = 50) async throws -> [ActivityUpdate] {
+    func getFriendActivities(limit: Int = 200) async throws -> [ActivityUpdate] {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return [] }
         
         // Get list of users we're following
@@ -2598,6 +2604,8 @@ extension FirestoreService {
             return []
         }
         
+        print("FirestoreService: Getting activities from \(followingIds.count) friends")
+        
         // Get recent activities from friends (Firestore 'in' query supports up to 10 items)
         let batchSize = 10
         var allActivities: [ActivityUpdate] = []
@@ -2609,8 +2617,7 @@ extension FirestoreService {
             let snapshot = try await db.collection("activities")
                 .whereField("userId", in: batch)
                 .order(by: "timestamp", descending: true)
-                .limit(to: limit)
-                .getDocuments()
+                .getDocuments() // Removed limit from individual batches
             
             let batchActivities = snapshot.documents.compactMap { doc -> ActivityUpdate? in
                 let data = doc.data()
@@ -2651,6 +2658,7 @@ extension FirestoreService {
             }
             
             allActivities.append(contentsOf: batchActivities)
+            print("FirestoreService: Batch \(i/batchSize + 1) returned \(batchActivities.count) activities")
         }
         
         // Also get follow activities where the current user is mentioned
@@ -2747,6 +2755,13 @@ extension FirestoreService {
         allActivities.append(contentsOf: followActivities)
         allActivities.sort { $0.timestamp > $1.timestamp }
         
+        print("FirestoreService: Combined \(allActivities.count) activities before deduplication")
+        
+        // Log activity type distribution before deduplication
+        let typeCountsBefore = Dictionary(grouping: allActivities, by: { $0.type })
+            .mapValues { $0.count }
+        print("FirestoreService: Activity types before deduplication: \(typeCountsBefore)")
+        
         // Deduplicate follow notifications - keep only the most recent follow from each user
         var deduplicatedActivities: [ActivityUpdate] = []
         var seenFollowUsers: Set<String> = []
@@ -2764,9 +2779,18 @@ extension FirestoreService {
             }
         }
         
+        // Log activity type distribution after deduplication
+        let typeCountsAfter = Dictionary(grouping: deduplicatedActivities, by: { $0.type })
+            .mapValues { $0.count }
+        print("FirestoreService: Activity types after deduplication: \(typeCountsAfter)")
+        
         print("FirestoreService: Returning \(deduplicatedActivities.count) total activities (deduplicated from \(allActivities.count) total)")
         
-        return Array(deduplicatedActivities.prefix(limit))
+        // Filter out movieUpdated activities before applying limit
+        let filteredActivities = deduplicatedActivities.filter { $0.type != .movieUpdated }
+        print("FirestoreService: After filtering out movieUpdated: \(filteredActivities.count) activities")
+        
+        return Array(filteredActivities.prefix(limit))
     }
     
     // Get community rating for a specific movie

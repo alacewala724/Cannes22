@@ -153,19 +153,25 @@ struct GlobalRatingGridView: View {
     @ObservedObject var store: MovieStore
     
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
-            ForEach(Array(ratings.enumerated()), id: \.element.id) { index, rating in
-                GlobalRatingGridItem(
-                    rating: rating,
-                    position: index + 1,
-                    onTap: {
-                        onTap(rating)
-                    },
-                    store: store
-                )
+        VStack(spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+                ForEach(Array(ratings.enumerated()), id: \.element.id) { index, rating in
+                    GlobalRatingGridItem(
+                        rating: rating,
+                        position: index + 1,
+                        onTap: {
+                            onTap(rating)
+                        },
+                        store: store
+                    )
+                }
             }
+            .padding(.horizontal, 0)
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 0)
     }
 }
 
@@ -352,20 +358,26 @@ struct PersonalMovieGridView: View {
     let isEditing: Bool
     
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
-            ForEach(Array(movies.enumerated()), id: \.element.id) { index, movie in
-                PersonalMovieGridItem(
-                    movie: movie,
-                    position: index + 1,
-                    onTap: {
-                        onTap(movie)
-                    },
-                    store: store,
-                    isEditing: isEditing
-                )
+        VStack(spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+                ForEach(Array(movies.enumerated()), id: \.element.id) { index, movie in
+                    PersonalMovieGridItem(
+                        movie: movie,
+                        position: index + 1,
+                        onTap: {
+                            onTap(movie)
+                        },
+                        store: store,
+                        isEditing: isEditing
+                    )
+                }
             }
+            .padding(.horizontal, 0)
+            
+            // TMDB Attribution
+            TMDBAttributionView(style: .compact)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 0)
     }
 }
 
@@ -861,7 +873,8 @@ struct UnifiedMovieDetailView: View {
                     "backdrop": false,
                     "cast": false,
                     "crew": false,
-                    "production": false
+                    "production": false,
+                    "attribution": false
                 ]
                 
                 // Stagger section appearances
@@ -966,7 +979,7 @@ struct UnifiedMovieDetailView: View {
     }
     
     private func staggerContentSections() {
-        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes", "backdrop", "cast", "crew", "production"]
+        let sections = ["poster", "title", "rating", "friends", "runtime", "overview", "takes", "backdrop", "cast", "crew", "production", "attribution"]
         
         for (index, section) in sections.enumerated() {
             let delay = Double(index) * 0.1 + 0.3 // Start after 0.3s, then 0.1s between each
@@ -2233,6 +2246,12 @@ struct UnifiedMovieDetailView: View {
                     }
                 }
             }
+            
+            // TMDB Attribution Footer
+            TMDBAttributionView(style: .footer)
+                .opacity(contentSections["attribution"] ?? false ? 1 : 0)
+                .offset(y: contentSections["attribution"] ?? false ? 0 : 20)
+                .animation(.easeOut(duration: 0.4), value: contentSections["attribution"])
         }
         .padding(.vertical, 20)
         .opacity(isAppearing ? 1 : 0)
