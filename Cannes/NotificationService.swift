@@ -184,16 +184,19 @@ class NotificationService: NSObject, ObservableObject {
         let now = Date()
         let key = "\(userId)_\(type)"
         
-        // Add current timestamp
-        var timestamps = notificationTimestamps[key] ?? []
-        timestamps.append(now)
-        notificationTimestamps[key] = timestamps
-        
-        // Update count
-        let currentCount = notificationCounts[key] ?? 0
-        notificationCounts[key] = currentCount + 1
-        
-        print("📱 Rate limit: Tracked notification to user \(userId) (type: \(type), total: \(currentCount + 1))")
+        // Update on main thread to avoid publishing changes from background threads
+        DispatchQueue.main.async {
+            // Add current timestamp
+            var timestamps = self.notificationTimestamps[key] ?? []
+            timestamps.append(now)
+            self.notificationTimestamps[key] = timestamps
+            
+            // Update count
+            let currentCount = self.notificationCounts[key] ?? 0
+            self.notificationCounts[key] = currentCount + 1
+            
+            print("📱 Rate limit: Tracked notification to user \(userId) (type: \(type), total: \(currentCount + 1))")
+        }
     }
     
     private func getRateLimitStatus(for userId: String, type: String) -> (hourly: Int, daily: Int, weekly: Int) {
@@ -226,19 +229,22 @@ class NotificationService: NSObject, ObservableObject {
     }
     
     func clearRateLimitData(for userId: String? = nil) {
-        if let userId = userId {
-            // Clear data for specific user
-            let keysToRemove = notificationTimestamps.keys.filter { $0.hasPrefix("\(userId)_") }
-            for key in keysToRemove {
-                notificationTimestamps.removeValue(forKey: key)
-                notificationCounts.removeValue(forKey: key)
+        // Update on main thread to avoid publishing changes from background threads
+        DispatchQueue.main.async {
+            if let userId = userId {
+                // Clear data for specific user
+                let keysToRemove = self.notificationTimestamps.keys.filter { $0.hasPrefix("\(userId)_") }
+                for key in keysToRemove {
+                    self.notificationTimestamps.removeValue(forKey: key)
+                    self.notificationCounts.removeValue(forKey: key)
+                }
+                print("📱 Rate limit: Cleared data for user \(userId)")
+            } else {
+                // Clear all data
+                self.notificationTimestamps.removeAll()
+                self.notificationCounts.removeAll()
+                print("📱 Rate limit: Cleared all rate limit data")
             }
-            print("📱 Rate limit: Cleared data for user \(userId)")
-        } else {
-            // Clear all data
-            notificationTimestamps.removeAll()
-            notificationCounts.removeAll()
-            print("📱 Rate limit: Cleared all rate limit data")
         }
     }
     

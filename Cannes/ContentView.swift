@@ -160,7 +160,7 @@ struct ContentView: View {
             // Test following collection access
             let firestoreService = FirestoreService()
             do {
-                let canAccess = try await firestoreService.testFollowingAccess()
+                let _ = try await firestoreService.testFollowingAccess()
             } catch {
                 // Handle error silently
             }
@@ -1189,7 +1189,7 @@ struct MovieRow: View {
             .disabled(isEditing)
         }
         .sheet(isPresented: $showingDetail) {
-            if let tmdbId = movie.tmdbId {
+            if movie.tmdbId != nil {
                 UnifiedMovieDetailView(movie: movie, store: store)
             }
         }

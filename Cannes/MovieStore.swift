@@ -57,6 +57,7 @@ final class MovieStore: ObservableObject {
                 if user != nil {
                     Task {
                         await self?.loadMovies()
+                        await self?.loadGlobalRatings()
                     }
                 } else {
                     self?.movies = []
@@ -661,12 +662,14 @@ final class MovieStore: ObservableObject {
                 
                 // Add deletion tasks to the group
                 for (index, movie) in zip(indicesToDelete, moviesToDelete) {
+                    let firestoreService = self.firestoreService
+                    let movieTitle = movie.title
                     group.addTask {
                         do {
-                            try await self.firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
+                            try await firestoreService.deleteMovieRanking(userId: userId, movieId: movie.id.uuidString)
                             return (index: index, success: true)
                         } catch {
-                            print("Error deleting movie \(movie.title): \(error)")
+                            print("Error deleting movie \(movieTitle): \(error)")
                             return (index: index, success: false)
                         }
                     }
@@ -920,16 +923,23 @@ final class MovieStore: ObservableObject {
                     )
                     updatedMovie.originalScore = movie.originalScore
                     
+                    // Create a local copy to avoid capture issues
+                    let localUpdatedMovie = updatedMovie
+                    
                     // Update the movie in the appropriate list
                     await MainActor.run {
                         if movie.mediaType == .movie {
                             if let index = movies.firstIndex(where: { $0.id == movie.id }) {
-                                movies[index] = updatedMovie
+                                var updatedMovies = movies
+                                updatedMovies[index] = localUpdatedMovie
+                                movies = updatedMovies
                                 print("DEBUG: Updated movie in movies list")
                             }
                         } else {
                             if let index = tvShows.firstIndex(where: { $0.id == movie.id }) {
-                                tvShows[index] = updatedMovie
+                                var updatedTVShows = tvShows
+                                updatedTVShows[index] = localUpdatedMovie
+                                tvShows = updatedTVShows
                                 print("DEBUG: Updated movie in TV shows list")
                             }
                         }
@@ -1402,15 +1412,22 @@ final class MovieStore: ObservableObject {
                     )
                     updatedMovie.originalScore = movie.originalScore
                     
+                    // Create a local copy to avoid capture issues
+                    let localUpdatedMovie = updatedMovie
+                    
                     // Update the movie in the appropriate list
                     await MainActor.run {
                         if movie.mediaType == .movie {
                             if let index = movies.firstIndex(where: { $0.id == movie.id }) {
-                                movies[index] = updatedMovie
+                                var updatedMovies = movies
+                                updatedMovies[index] = localUpdatedMovie
+                                movies = updatedMovies
                             }
                         } else {
                             if let index = tvShows.firstIndex(where: { $0.id == movie.id }) {
-                                tvShows[index] = updatedMovie
+                                var updatedTVShows = tvShows
+                                updatedTVShows[index] = localUpdatedMovie
+                                tvShows = updatedTVShows
                             }
                         }
                     }

@@ -642,7 +642,7 @@ class AuthenticationService: ObservableObject {
             delegate = PhoneAuthProviderDelegate()
             self.recaptchaDelegate = delegate
             print("🔵 PHONE AUTH DEBUG: Using reCAPTCHA delegate for real phone number (APNs not configured)")
-            print("🔵 PHONE AUTH DEBUG: reCAPTCHA delegate created: \(delegate)")
+            print("🔵 PHONE AUTH DEBUG: reCAPTCHA delegate created: \(String(describing: delegate))")
         } else if !isTestNumber {
             print("🔵 PHONE AUTH DEBUG: Using APNs-based verification for real phone number")
         } else {
@@ -656,7 +656,7 @@ class AuthenticationService: ObservableObject {
             print("🔵 PHONE AUTH DEBUG: Calling verifyPhoneNumber with uiDelegate: \(shouldUseRecaptcha ? "YES" : "NO")")
             let verificationID = try await provider.verifyPhoneNumber(
                 formattedPhoneNumber,
-                uiDelegate: shouldUseRecaptcha ? (delegate as? AuthUIDelegate) : nil
+                uiDelegate: shouldUseRecaptcha ? delegate : nil
             )
             
             print("✅ PHONE AUTH SUCCESS: Received verification ID: \(verificationID)")

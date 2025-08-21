@@ -1039,8 +1039,8 @@ struct DiscoverView: View {
             let wishlistItems = try await firestoreService.getFutureCannesList()
             let wishlistIds = Set(wishlistItems.compactMap { $0.movie.id })
             
-            // Get global ratings for the selected media type
-            let globalRatings = store.getAllGlobalRatings()
+            // Get global ratings for the selected media type (not used in load more)
+            let _ = store.getAllGlobalRatings()
             
             // Load from multiple TMDB endpoints with pagination for endless supply
             let newMovies = await loadFromMultipleEndpoints(
@@ -1130,33 +1130,29 @@ struct DiscoverView: View {
     }
 
     private func refreshRankedMovies() async {
-        do {
-            // Get user's current ranked movies
-            let userRatedIds = Set(store.getAllMovies().compactMap { $0.tmdbId })
-            
-            print("DEBUG: Refreshing ranked movies, user has \(userRatedIds.count) ranked movies")
-            
-            // Update the current movie list to remove ranked movies
-            await MainActor.run {
-                let originalCount = discoverMovies.count
-                discoverMovies = discoverMovies.filter { movie in
-                    !userRatedIds.contains(movie.id)
-                }
-                let newCount = discoverMovies.count
-                
-                // If we removed the current movie, move to next
-                if currentIndex >= discoverMovies.count {
-                    currentIndex = max(0, discoverMovies.count - 1)
-                }
-                
-                // Update saved state to reflect current progress
-                saveCurrentState()
-                
-                print("DEBUG: Filtered ranked movies from \(originalCount) to \(newCount)")
-                print("DEBUG: Current index: \(currentIndex)")
+        // Get user's current ranked movies
+        let userRatedIds = Set(store.getAllMovies().compactMap { $0.tmdbId })
+        
+        print("DEBUG: Refreshing ranked movies, user has \(userRatedIds.count) ranked movies")
+        
+        // Update the current movie list to remove ranked movies
+        await MainActor.run {
+            let originalCount = discoverMovies.count
+            discoverMovies = discoverMovies.filter { movie in
+                !userRatedIds.contains(movie.id)
             }
-        } catch {
-            print("DEBUG: Error refreshing ranked movies: \(error)")
+            let newCount = discoverMovies.count
+            
+            // If we removed the current movie, move to next
+            if currentIndex >= discoverMovies.count {
+                currentIndex = max(0, discoverMovies.count - 1)
+            }
+            
+            // Update saved state to reflect current progress
+            saveCurrentState()
+            
+            print("DEBUG: Filtered ranked movies from \(originalCount) to \(newCount)")
+            print("DEBUG: Current index: \(currentIndex)")
         }
     }
     

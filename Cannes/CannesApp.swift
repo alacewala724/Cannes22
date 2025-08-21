@@ -42,9 +42,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         
         // Log Firebase project info
         if let app = FirebaseApp.app() {
-            print("🔵 Firebase Project ID: \(app.options.projectID ?? "unknown")")
-            print("🔵 Firebase Bundle ID: \(app.options.bundleID ?? "unknown")")
-            print("🔵 Firebase GCM Sender ID: \(app.options.gcmSenderID ?? "unknown")")
+            print("🔵 Firebase Project ID: \(app.options.projectID)")
+            print("🔵 Firebase Bundle ID: \(app.options.bundleID)")
+            print("🔵 Firebase GCM Sender ID: \(app.options.gcmSenderID)")
         }
         
         // Request permission for push notifications (required for phone auth)
@@ -180,7 +180,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         }
         
         // Handle other notifications
-        completionHandler([.alert, .sound])
+        completionHandler([.banner, .sound])
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -236,8 +236,12 @@ struct CannesApp: App {
     }
     
     private func clearNotificationBadges() {
-        // Clear the app badge count
-        UIApplication.shared.applicationIconBadgeNumber = 0
+        // Clear the app badge count using the new API
+        UNUserNotificationCenter.current().setBadgeCount(0) { error in
+            if let error = error {
+                print("❌ Error clearing badge count: \(error)")
+            }
+        }
         
         // Clear all delivered notifications from notification center
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()

@@ -661,7 +661,7 @@ struct ComparisonView: View {
         }
         
         // Get the appropriate list based on media type (after deletion if re-ranking)
-        var targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
+        let targetList = newMovie.mediaType == .movie ? store.movies : store.tvShows
         
         // Find the start and end indices for this sentiment section
         let sectionStart = targetList.firstIndex { $0.sentiment == newMovie.sentiment } ?? targetList.count
@@ -775,7 +775,7 @@ struct ComparisonView: View {
                                     print("insertMovie: Updating community rating for '\(movie.title)' (score: \(beforeScore) → \(afterScore))")
                                     
                                     // Remove from wishlist after ranking
-                                    try await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
+                                    await store.removeFromWishlistAfterRanking(tmdbId: tmdbId)
                                     
                                     // Use finalInsertion for new movies and re-ranking (since we delete old movie)
                                     // Use scoreUpdate only for existing movies that didn't get deleted
@@ -1032,12 +1032,7 @@ struct ComparisonView: View {
                     
                     // Remove from Future Cannes if it was there (with better error handling)
                     if let tmdbId = finalMovie.tmdbId {
-                        do {
-                            await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
-                        } catch {
-                            print("Too close to call: Error removing from Future Cannes: \(error)")
-                            // Don't fail the entire operation for this
-                        }
+                        await store.removeFromFutureCannesIfRanked(tmdbId: tmdbId)
                     }
                     
                     // Refresh global ratings to show the newly added movie

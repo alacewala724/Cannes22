@@ -748,7 +748,7 @@ struct UnifiedMovieDetailView: View {
                             // Reload the movie data to reflect the new ranking
                             await store.loadGlobalRatings()
                             // Refresh this movie's details to show it's now ranked
-                            await loadAllDataOptimized()
+                            loadAllDataOptimized()
                         }
                     }
                 )
@@ -1499,7 +1499,7 @@ struct UnifiedMovieDetailView: View {
                     ratingCircle(value: roundedUserScore, color: .accentColor, size: side)
                 }
             }
-            .frame(height: 96)
+            .frame(height: 120)
         }
         .frame(minHeight: 120)
         .layoutPriority(1)

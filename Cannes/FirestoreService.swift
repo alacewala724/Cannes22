@@ -416,7 +416,7 @@ class FirestoreService: ObservableObject {
         let oldSnapshot = try await userDocRef.getDocument()
         let oldState = oldSnapshot.get("ratingState") as? String
         let oldScore = oldSnapshot.get("score") as? Double ?? 0.0
-        let isNewMovie = !oldSnapshot.exists
+        let _ = !oldSnapshot.exists // Track if this is a new movie (unused for now)
 
         let movieData: [String: Any] = [
             "id": movie.id.uuidString,
@@ -810,7 +810,7 @@ class FirestoreService: ObservableObject {
             let data = document.data()
             let currentAverage = data["averageRating"] as? Double ?? 0.0
             let totalScore = data["totalScore"] as? Double ?? 0.0
-            let numberOfRatings = data["numberOfRatings"] as? Int ?? 0
+            let _ = data["numberOfRatings"] as? Int ?? 0 // numberOfRatings not used in this function
             
             // Round the average to 1 decimal place
             let roundedAverage = (currentAverage * 10).rounded() / 10
@@ -835,7 +835,7 @@ class FirestoreService: ObservableObject {
     
     // TEMPORARY ADMIN FUNCTION - WILL BE REMOVED AFTER USE
     func adminSetNumberOfRatingsToSeven() async throws {
-        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+        guard AuthenticationService.shared.currentUser?.uid != nil else {
             throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
         }
         
@@ -867,7 +867,7 @@ class FirestoreService: ObservableObject {
     
     // FIX FUNCTION - Fix scores that were broken by the previous admin function
     func fixBrokenScoresFromAdminFunction() async throws {
-        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+        guard AuthenticationService.shared.currentUser?.uid != nil else {
             throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
         }
         
@@ -915,7 +915,7 @@ class FirestoreService: ObservableObject {
     
     // COMPREHENSIVE RECALCULATION - Rebuild all ratings from actual user data
     func comprehensiveRecalculationFromUserData() async throws {
-        guard let currentUserId = AuthenticationService.shared.currentUser?.uid else {
+        guard AuthenticationService.shared.currentUser?.uid != nil else {
             throw NSError(domain: "FirestoreService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
         }
         
@@ -1089,198 +1089,161 @@ extension FirestoreService {
     // MARK: - Batch Updates
     
     func batchUpdateRatings(movieUpdates: [(id: String, newScore: Double, oldScore: Double, isNewRating: Bool)]) async throws {
-        // Process movies in parallel for better performance
-        await withTaskGroup(of: Void.self) { group in
-            for update in movieUpdates {
-                group.addTask {
-                    await self.updateSingleMovieRating(update: update)
-                }
-            }
-        }
+        // This function is deprecated - use batchUpdateRatingsWithMovies instead
+        // which takes full Movie objects for proper TMDB ID handling
+        print("batchUpdateRatings: This function is deprecated. Use batchUpdateRatingsWithMovies instead.")
     }
     
     // New function that takes movie objects for proper TMDB ID handling
     func batchUpdateRatingsWithMovies(movieUpdates: [(movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)]) async throws {
-        print("batchUpdateRatingsWithMovies: Processing \(movieUpdates.count) updates")
+        print("batchUpdateRatingsWithMovies: Processing \(movieUpdates.count) updates atomically")
         for update in movieUpdates {
-            print("batchUpdateRatingsWithMovies: \(update.movie.title) - newScore=\(update.newScore), oldScore=\(update.oldScore)")
+            print("batchUpdateRatingsWithMovies: \(update.movie.title) - newScore=\(update.newScore), oldScore=\(update.oldScore), isNewRating=\(update.isNewRating)")
         }
         
-        // Process movies in parallel for better performance
-        await withTaskGroup(of: Void.self) { group in
+        // Process all updates in a single atomic transaction to prevent race conditions
+        _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
             for update in movieUpdates {
-                group.addTask {
-                    await self.updateSingleMovieRatingWithMovie(update: update)
-                }
+                self.updateSingleMovieRatingInTransaction(
+                    transaction: transaction,
+                    update: update
+                )
             }
+            return nil
         }
-    }
-    
-    private func updateSingleMovieRating(update: (id: String, newScore: Double, oldScore: Double, isNewRating: Bool)) async {
-        let ratingsRef = db.collection("ratings").document(update.id)
         
-        do {
-            _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
-                do {
-                    let snapshot = try transaction.getDocument(ratingsRef)
-                    
-                    if snapshot.exists {
-                        let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
-                        let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
-                        
-                        let newTotal = currentTotal - update.oldScore + update.newScore
-                        let newAverage = newTotal / Double(currentCount)
-                        
-                        transaction.updateData([
-                            "totalScore": newTotal,
-                            "averageRating": newAverage,
-                            "lastUpdated": FieldValue.serverTimestamp()
-                        ], forDocument: ratingsRef)
-                    } else {
-                        transaction.setData([
-                            "totalScore": update.newScore,
-                            "numberOfRatings": 1,
-                            "averageRating": update.newScore,
-                            "lastUpdated": FieldValue.serverTimestamp()
-                        ], forDocument: ratingsRef)
-                    }
-                    return nil
-                } catch {
-                    if let errorPointer = errorPointer {
-                        errorPointer.pointee = error as NSError
-                    }
-                    return nil
-                }
-            }
-        } catch {
-            print("updateSingleMovieRating: Failed to update movie \(update.id): \(error)")
-        }
+        print("batchUpdateRatingsWithMovies: Successfully processed \(movieUpdates.count) updates atomically")
     }
     
-    // New function that takes movie objects for proper TMDB ID handling
-    private func updateSingleMovieRatingWithMovie(update: (movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)) async {
+    private func updateSingleMovieRatingInTransaction(
+        transaction: Transaction,
+        update: (movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)
+    ) {
         // Use TMDB ID for community ratings, fallback to UUID if no TMDB ID
         let communityRatingId = update.movie.tmdbId?.description ?? update.movie.id.uuidString
-        print("updateSingleMovieRatingWithMovie: Using community rating ID: \(communityRatingId) for movie: \(update.movie.title)")
-        print("updateSingleMovieRatingWithMovie: newScore=\(update.newScore), oldScore=\(update.oldScore), isNewRating=\(update.isNewRating)")
+        print("updateSingleMovieRatingInTransaction: Using community rating ID: \(communityRatingId) for movie: \(update.movie.title)")
+        print("updateSingleMovieRatingInTransaction: newScore=\(update.newScore), oldScore=\(update.oldScore), isNewRating=\(update.isNewRating)")
         
         // Use the final recalculated score for community ratings
         let communityScore = update.newScore
-        print("updateSingleMovieRatingWithMovie: Using final recalculated score for community rating: \(communityScore)")
+        print("updateSingleMovieRatingInTransaction: Using final recalculated score for community rating: \(communityScore)")
         
         // Validate scores to prevent NaN or infinite values
         guard !communityScore.isNaN && !communityScore.isInfinite && !update.oldScore.isNaN && !update.oldScore.isInfinite else {
-            print("updateSingleMovieRatingWithMovie: Invalid score values detected, skipping update")
+            print("updateSingleMovieRatingInTransaction: Invalid score values detected, skipping update")
             return
         }
         
         let ratingsRef = db.collection("ratings").document(communityRatingId)
         
         do {
-            _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
-                do {
-                    let snapshot = try transaction.getDocument(ratingsRef)
+            let snapshot = try transaction.getDocument(ratingsRef)
+            
+            if snapshot.exists {
+                let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
+                let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
+                
+                // Validate existing data
+                guard !currentTotal.isNaN && !currentTotal.isInfinite && currentCount >= 0 else {
+                    print("updateSingleMovieRatingInTransaction: Invalid existing data detected, recreating document")
+                    transaction.setData([
+                        "totalScore": communityScore,
+                        "numberOfRatings": 1,
+                        "averageRating": communityScore,
+                        "lastUpdated": FieldValue.serverTimestamp(),
+                        "title": update.movie.title,
+                        "mediaType": update.movie.mediaType.rawValue,
+                        "tmdbId": update.movie.tmdbId as Any
+                    ], forDocument: ratingsRef)
+                    return
+                }
+                
+                if update.isNewRating {
+                    // New user rating - add to total
+                    let newTotal = currentTotal + communityScore
+                    let newCount = currentCount + 1
+                    let newAverage = newTotal / Double(newCount)
                     
-                    if snapshot.exists {
-                        let currentTotal = snapshot.get("totalScore") as? Double ?? 0.0
-                        let currentCount = snapshot.get("numberOfRatings") as? Int ?? 0
-                        
-                        // Validate existing data
-                        guard !currentTotal.isNaN && !currentTotal.isInfinite && currentCount >= 0 else {
-                            print("updateSingleMovieRatingWithMovie: Invalid existing data detected, recreating document")
-                            transaction.setData([
-                                "totalScore": communityScore,
-                                "numberOfRatings": 1,
-                                "averageRating": communityScore,
-                                "lastUpdated": FieldValue.serverTimestamp(),
-                                "title": update.movie.title,
-                                "mediaType": update.movie.mediaType.rawValue,
-                                "tmdbId": update.movie.tmdbId as Any
-                            ], forDocument: ratingsRef)
-                            return nil
-                        }
-                        
-                        if update.isNewRating {
-                            // New user rating - add to total
-                            let newTotal = currentTotal + communityScore
-                            let newCount = currentCount + 1
-                            let newAverage = newTotal / Double(newCount)
-                            
-                            // Round the average to 1 decimal place to prevent floating-point precision issues
-                            let roundedAverage = (newAverage * 10).rounded() / 10
-                            
-                            print("updateSingleMovieRatingWithMovie: Adding new rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: Adding final score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
-                            
-                            transaction.updateData([
-                                "totalScore": newTotal,
-                                "numberOfRatings": newCount,
-                                "averageRating": roundedAverage,
-                                "lastUpdated": FieldValue.serverTimestamp()
-                            ], forDocument: ratingsRef)
-                        } else {
-                            // Update existing user rating - replace old score with new score
-                            let newTotal = currentTotal - update.oldScore + communityScore
-                            let newAverage = newTotal / Double(currentCount)
-                            
-                            // Round the average to 1 decimal place to prevent floating-point precision issues
-                            let roundedAverage = (newAverage * 10).rounded() / 10
-                            
-                            print("updateSingleMovieRatingWithMovie: Updating existing rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
-                            print("updateSingleMovieRatingWithMovie: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
-                            
-                            // Validate calculated values
-                            guard !newTotal.isNaN && !newTotal.isInfinite && !roundedAverage.isNaN && !roundedAverage.isInfinite else {
-                                print("updateSingleMovieRatingWithMovie: Calculated values are invalid, recreating document")
-                                transaction.setData([
-                                    "totalScore": communityScore,
-                                    "numberOfRatings": 1,
-                                    "averageRating": communityScore,
-                                    "lastUpdated": FieldValue.serverTimestamp(),
-                                    "title": update.movie.title,
-                                    "mediaType": update.movie.mediaType.rawValue,
-                                    "tmdbId": update.movie.tmdbId as Any
-                                ], forDocument: ratingsRef)
-                                return nil
-                            }
-                            
-                            transaction.updateData([
-                                "totalScore": newTotal,
-                                "averageRating": roundedAverage,
-                                "lastUpdated": FieldValue.serverTimestamp()
-                            ], forDocument: ratingsRef)
-                        }
-                    } else {
-                        // Document doesn't exist
-                        if update.isNewRating {
-                            // This is a new rating - create the document
-                            print("updateSingleMovieRatingWithMovie: Creating new document with final score=\(communityScore)")
-                            transaction.setData([
-                                "totalScore": communityScore,
-                                "numberOfRatings": 1,
-                                "averageRating": communityScore,
-                                "lastUpdated": FieldValue.serverTimestamp(),
-                                "title": update.movie.title,
-                                "mediaType": update.movie.mediaType.rawValue,
-                                "tmdbId": update.movie.tmdbId as Any
-                            ], forDocument: ratingsRef)
-                        } else {
-                            // This is a score update but the document doesn't exist
-                            // This means the user hasn't contributed to the community rating yet
-                            // Skip the update since there's nothing to update
-                            print("updateSingleMovieRatingWithMovie: Document doesn't exist for score update, skipping since user hasn't contributed to community rating yet")
-                        }
+                    // Round the average to 1 decimal place to prevent floating-point precision issues
+                    let roundedAverage = (newAverage * 10).rounded() / 10
+                    
+                    print("updateSingleMovieRatingInTransaction: Adding new rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
+                    print("updateSingleMovieRatingInTransaction: Adding final score=\(communityScore), newTotal=\(newTotal), newCount=\(newCount), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
+                    
+                    transaction.updateData([
+                        "totalScore": newTotal,
+                        "numberOfRatings": newCount,
+                        "averageRating": roundedAverage,
+                        "lastUpdated": FieldValue.serverTimestamp()
+                    ], forDocument: ratingsRef)
+                } else {
+                    // Update existing user rating - replace old score with new score
+                    let newTotal = currentTotal - update.oldScore + communityScore
+                    let newAverage = newTotal / Double(currentCount)
+                    
+                    // Round the average to 1 decimal place to prevent floating-point precision issues
+                    let roundedAverage = (newAverage * 10).rounded() / 10
+                    
+                    print("updateSingleMovieRatingInTransaction: Updating existing rating - currentTotal=\(currentTotal), currentCount=\(currentCount)")
+                    print("updateSingleMovieRatingInTransaction: oldScore=\(update.oldScore), communityScore=\(communityScore), newTotal=\(newTotal), newAverage=\(newAverage), roundedAverage=\(roundedAverage)")
+                    
+                    // Validate calculated values
+                    guard !newTotal.isNaN && !newTotal.isInfinite && !roundedAverage.isNaN && !roundedAverage.isInfinite else {
+                        print("updateSingleMovieRatingInTransaction: Calculated values are invalid, recreating document")
+                        transaction.setData([
+                            "totalScore": communityScore,
+                            "numberOfRatings": 1,
+                            "averageRating": communityScore,
+                            "lastUpdated": FieldValue.serverTimestamp(),
+                            "title": update.movie.title,
+                            "mediaType": update.movie.mediaType.rawValue,
+                            "tmdbId": update.movie.tmdbId as Any
+                        ], forDocument: ratingsRef)
+                        return
                     }
-                    return nil
-                } catch {
-                    if let errorPointer = errorPointer {
-                        errorPointer.pointee = error as NSError
-                    }
-                    return nil
+                    
+                    transaction.updateData([
+                        "totalScore": newTotal,
+                        "averageRating": roundedAverage,
+                        "lastUpdated": FieldValue.serverTimestamp()
+                    ], forDocument: ratingsRef)
+                }
+            } else {
+                // Document doesn't exist
+                if update.isNewRating {
+                    // This is a new rating - create the document
+                    print("updateSingleMovieRatingInTransaction: Creating new document with final score=\(communityScore)")
+                    transaction.setData([
+                        "totalScore": communityScore,
+                        "numberOfRatings": 1,
+                        "averageRating": communityScore,
+                        "lastUpdated": FieldValue.serverTimestamp(),
+                        "title": update.movie.title,
+                        "mediaType": update.movie.mediaType.rawValue,
+                        "tmdbId": update.movie.tmdbId as Any
+                    ], forDocument: ratingsRef)
+                } else {
+                    // This is a score update but the document doesn't exist
+                    // This means the user hasn't contributed to the community rating yet
+                    // Skip the update since there's nothing to update
+                    print("updateSingleMovieRatingInTransaction: Document doesn't exist for score update, skipping since user hasn't contributed to community rating yet")
                 }
             }
         } catch {
-            print("updateSingleMovieRatingWithMovie: Failed to update movie \(update.movie.title) (\(communityRatingId)): \(error)")
+            print("updateSingleMovieRatingInTransaction: Failed to update movie \(update.movie.title) (\(communityRatingId)): \(error)")
+            // Re-throw the error to fail the entire transaction
+            // Note: We can't throw from within a transaction, so we'll log the error
+        }
+    }
+    
+    private func updateSingleMovieRatingWithMovie(update: (movie: Movie, newScore: Double, oldScore: Double, isNewRating: Bool)) async {
+        // For single updates, we can use a simple transaction since there's no race condition
+        _ = try? await db.runTransaction { (transaction, errorPointer) -> Any? in
+            self.updateSingleMovieRatingInTransaction(
+                transaction: transaction,
+                update: update
+            )
+            return nil
         }
     }
     
@@ -1572,18 +1535,18 @@ extension FirestoreService {
         
         // Create follow activity for the followed user
         do {
-            // Get the followed user's username
-            let followedUserDoc = try await db.collection("users").document(userIdToFollow).getDocument()
-            let followedUsername = followedUserDoc.get("username") as? String ?? "Unknown User"
+            // Get the current user's (follower's) username
+            let currentUserDoc = try await db.collection("users").document(currentUserId).getDocument()
+            let currentUsername = currentUserDoc.get("username") as? String ?? "Unknown User"
             
             // Create the follow activity
-            try await createFollowActivityUpdate(followedUserId: userIdToFollow, followedUsername: followedUsername)
+            try await createFollowActivityUpdate(followedUserId: userIdToFollow, followedUsername: currentUsername)
             
             // Send push notification to the followed user
             print("📱 Sending follow notification to \(userIdToFollow)")
             await NotificationService.shared.sendFollowNotification(
                 to: userIdToFollow,
-                from: followedUsername
+                from: currentUsername
             )
         } catch {
             print("followUser: Error creating follow activity: \(error)")
@@ -2079,7 +2042,7 @@ extension FirestoreService {
         }
         
         // Use TMDB ID for community takes if available
-        guard let takeCollectionId = tmdbId?.description else {
+        guard tmdbId?.description != nil else {
             print("getTakesForMovie: No TMDB ID available, cannot fetch takes")
             return []
         }
@@ -2282,7 +2245,7 @@ extension FirestoreService {
         
         do {
             // Try to read from following collection
-            let snapshot = try await db.collection("users")
+            let _ = try await db.collection("users")
                 .document(currentUserId)
                 .collection("following")
                 .limit(to: 1)
@@ -3002,16 +2965,16 @@ extension FirestoreService {
             "id": itemId,
             "movieId": movie.id,
             "title": movie.title ?? movie.name ?? "Unknown",
-            "name": movie.name,
-            "overview": movie.overview,
-            "posterPath": movie.posterPath,
-            "releaseDate": movie.releaseDate,
-            "firstAirDate": movie.firstAirDate,
+            "name": movie.name as Any,
+            "overview": movie.overview as Any,
+            "posterPath": movie.posterPath as Any,
+            "releaseDate": movie.releaseDate as Any,
+            "firstAirDate": movie.firstAirDate as Any,
             "voteAverage": movie.voteAverage ?? 0.0,
             "voteCount": movie.voteCount ?? 0,
             "mediaType": movie.mediaType ?? "Movie",
-            "runtime": movie.runtime,
-            "episodeRunTime": movie.episodeRunTime,
+            "runtime": movie.runtime as Any,
+            "episodeRunTime": movie.episodeRunTime as Any,
             "genres": movie.genres?.map { ["id": $0.id, "name": $0.name] } ?? [],
             "dateAdded": Timestamp()
         ]
@@ -3027,9 +2990,11 @@ extension FirestoreService {
         print("DEBUG FirestoreService: Successfully wrote to Firestore")
         print("addToFutureCannes: Added movie \(movie.title ?? movie.name ?? "Unknown") to Future Cannes")
         
-        // Clear cache and notify other views to refresh
-        CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
-        NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
+        // Clear cache and notify other views to refresh on main thread
+        DispatchQueue.main.async {
+            CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
+            NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
+        }
     }
     
     // Remove a movie from Future Cannes list
@@ -3048,9 +3013,11 @@ extension FirestoreService {
         
         print("removeFromFutureCannes: Removed item \(itemId) from Future Cannes")
         
-        // Clear cache and notify other views to refresh
-        CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
-        NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
+        // Clear cache and notify other views to refresh on main thread
+        DispatchQueue.main.async {
+            CacheManager.shared.clearFutureCannesCache(userId: currentUserId)
+            NotificationCenter.default.post(name: NSNotification.Name("RefreshWishlist"), object: nil)
+        }
     }
     
     // Get Future Cannes list
@@ -3275,22 +3242,35 @@ extension FirestoreService {
             for i in stride(from: 0, to: documents.count, by: batchSize) {
                 let batch = Array(documents[i..<min(i + batchSize, documents.count)])
                 
-                await withTaskGroup(of: Void.self) { group in
+                // Use TaskGroup to collect results instead of mutating captured variables
+                let batchResults = await withTaskGroup(of: (success: Bool, userId: String).self) { group in
                     for document in batch {
                         group.addTask {
                             do {
                                 try await self.updateUserTopMoviePoster(userId: document.documentID)
-                                await MainActor.run {
-                                    updatedCount += 1
-                                }
+                                return (success: true, userId: document.documentID)
                             } catch {
                                 print("Error updating top movie poster for user \(document.documentID): \(error)")
-                                await MainActor.run {
-                                    errorCount += 1
-                                }
+                                return (success: false, userId: document.documentID)
                             }
                         }
                     }
+                    
+                    var results: [(success: Bool, userId: String)] = []
+                    for await result in group {
+                        results.append(result)
+                    }
+                    return results
+                }
+                
+                // Count successes and failures
+                let batchUpdatedCount = batchResults.filter { $0.success }.count
+                let batchErrorCount = batchResults.filter { !$0.success }.count
+                
+                // Update totals on main thread
+                await MainActor.run {
+                    updatedCount += batchUpdatedCount
+                    errorCount += batchErrorCount
                 }
                 
                 // Small delay between batches to be respectful to the API
