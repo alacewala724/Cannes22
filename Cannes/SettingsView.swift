@@ -36,6 +36,10 @@ struct SettingsView: View {
     @State private var showingSignOutAlert = false
     @State private var showingUnlinkEmailAlert = false
     @State private var showingUnlinkPhoneAlert = false
+    @State private var showingDeleteAccountAlert = false
+    @State private var showingDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountErrorMessage: String?
     
     // Email linking states
     @State private var emailToLink = ""
@@ -379,43 +383,45 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Password Change Section
-                Section("Security") {
-                    VStack(spacing: 12) {
-                        SecureField("Current Password", text: $currentPassword)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                        
-                        SecureField("New Password", text: $newPassword)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                        
-                        SecureField("Confirm New Password", text: $confirmPassword)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                        
-                        if let errorMessage = passwordErrorMessage {
-                            Text(errorMessage)
-                                .foregroundColor(.red)
-                                .font(.caption)
-                        }
-                        
-                        if let successMessage = passwordSuccessMessage {
-                            Text(successMessage)
-                                .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
-                                .font(.caption)
-                        }
-                        
-                        Button(action: changePassword) {
-                            HStack {
-                                if isChangingPassword {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                }
-                                Text("Change Password")
+                // Password Change Section (only for email users with passwords)
+                if authService.isEmailUser && authService.currentUser?.email != nil {
+                    Section("Security") {
+                        VStack(spacing: 12) {
+                            SecureField("Current Password", text: $currentPassword)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                            
+                            SecureField("New Password", text: $newPassword)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                            
+                            SecureField("Confirm New Password", text: $confirmPassword)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                            
+                            if let errorMessage = passwordErrorMessage {
+                                Text(errorMessage)
+                                    .foregroundColor(.red)
+                                    .font(.caption)
                             }
+                            
+                            if let successMessage = passwordSuccessMessage {
+                                Text(successMessage)
+                                    .foregroundColor(Color.adaptiveSentiment(for: 8.0, colorScheme: colorScheme))
+                                    .font(.caption)
+                            }
+                            
+                            Button(action: changePassword) {
+                                HStack {
+                                    if isChangingPassword {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                    }
+                                    Text("Change Password")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isChangingPassword || currentPassword.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(isChangingPassword || currentPassword.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
                 }
                 
                 // Username Change Section
@@ -564,6 +570,57 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
                 
+                // Account Deletion Section
+                Section("Advanced Settings") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Delete Account")
+                            .font(.headline)
+                            .foregroundColor(.red)
+                        
+                        Text("Permanently delete your account and all associated data. This action cannot be undone.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("This will delete:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("• All your movie ratings and rankings")
+                            Text("• Your comments and takes")
+                            Text("• Your following/followers relationships")
+                            Text("• Your profile and personal data")
+                            Text("• Your wishlist and preferences")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        
+                        if let errorMessage = deleteAccountErrorMessage {
+                            Text(errorMessage)
+                                .foregroundColor(.red)
+                                .font(.caption)
+                        }
+                        
+                        Button(action: { showingDeleteAccountAlert = true }) {
+                            HStack {
+                                if isDeletingAccount {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Image(systemName: "trash")
+                                Text("Delete My Account")
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.red)
+                            .cornerRadius(10)
+                        }
+                        .disabled(isDeletingAccount)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
                 // Sign Out Section
                 Section {
                     Button(action: { showingSignOutAlert = true }) {
@@ -611,6 +668,22 @@ struct SettingsView: View {
             }
         } message: {
             Text("Are you sure you want to unlink your phone number? You'll need to use your email to sign in.")
+        }
+        .alert("Delete Account", isPresented: $showingDeleteAccountAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Continue", role: .destructive) {
+                showingDeleteAccountConfirmation = true
+            }
+        } message: {
+            Text("Are you sure you want to delete your account? This will permanently remove all your data and cannot be undone.")
+        }
+        .alert("Final Confirmation", isPresented: $showingDeleteAccountConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete Forever", role: .destructive) {
+                deleteAccount()
+            }
+        } message: {
+            Text("This is your final warning. Your account and all data will be permanently deleted. This action cannot be undone. Are you absolutely sure?")
         }
     }
     
@@ -876,6 +949,29 @@ struct SettingsView: View {
                 await MainActor.run {
                     posterUpdateMessage = "Error updating poster: \(error.localizedDescription)"
                     isUpdatingMyPoster = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Account Deletion
+    
+    private func deleteAccount() {
+        isDeletingAccount = true
+        deleteAccountErrorMessage = nil
+        
+        Task {
+            do {
+                try await authService.deleteCurrentAccountForLegalReasons(reason: "User requested account deletion")
+                await MainActor.run {
+                    isDeletingAccount = false
+                    // The user will be automatically signed out and the view will dismiss
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeletingAccount = false
+                    deleteAccountErrorMessage = "Failed to delete account: \(error.localizedDescription)"
                 }
             }
         }

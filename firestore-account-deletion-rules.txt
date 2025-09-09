@@ -1,0 +1,43 @@
+# Firestore Security Rules for Account Deletion
+
+# Add these rules to your existing firestore.rules file
+
+# Allow users to create audit trail documents for their own account deletion
+match /accountDeletions/{userId} {
+  allow create: if request.auth != null && request.auth.uid == userId;
+  allow read: if false; // Only for audit purposes - no reading allowed
+  allow update: if false; // No updates allowed
+  allow delete: if false; // No deletion allowed
+}
+
+# Allow users to remove themselves from other users' following/followers/friends lists during account deletion
+# This is necessary for complete account deletion while maintaining security
+match /users/{userId}/following/{targetUserId} {
+  allow delete: if request.auth != null && request.auth.uid == targetUserId;
+}
+
+match /users/{userId}/followers/{targetUserId} {
+  allow delete: if request.auth != null && request.auth.uid == targetUserId;
+}
+
+match /users/{userId}/friends/{targetUserId} {
+  allow delete: if request.auth != null && request.auth.uid == targetUserId;
+}
+
+# Example of how to add this to your existing rules:
+# 
+# rules_version = '2';
+# service cloud.firestore {
+#   match /databases/{database}/documents {
+#     
+#     # Your existing rules here...
+#     
+#     # Account deletion audit trail
+#     match /accountDeletions/{userId} {
+#       allow create: if request.auth != null && request.auth.uid == userId;
+#       allow read: if false; // Only for audit purposes
+#       allow update: if false; // No updates allowed
+#       allow delete: if false; // No deletion allowed
+#     }
+#   }
+# }

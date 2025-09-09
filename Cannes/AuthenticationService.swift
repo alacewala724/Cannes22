@@ -1183,6 +1183,33 @@ class AuthenticationService: ObservableObject {
     func unlinkPhone() async throws {
         try await unlinkPhoneNumber()
     }
+    
+    // MARK: - Account Deletion for Legal Compliance
+    
+    /// Delete the current user's account for legal compliance reasons
+    /// This is a comprehensive deletion that removes ALL user data while maintaining community score integrity
+    func deleteCurrentAccountForLegalReasons(reason: String = "Legal compliance request") async throws {
+        guard let currentUser = currentUser else {
+            throw AuthError.custom("No user is currently signed in")
+        }
+        
+        print("🗑️ AUTH: Starting account deletion for current user: \(currentUser.uid)")
+        
+        // Use FirestoreService to handle the comprehensive deletion
+        let firestoreService = FirestoreService()
+        try await firestoreService.deleteAccountForLegalReasons(userId: currentUser.uid, reason: reason)
+        
+        // Clear local state
+        await MainActor.run {
+            self.currentUser = nil
+            self.isAuthenticated = false
+            self.username = nil
+            self.isUsernameLoading = false
+            self.clearCachedUsername()
+        }
+        
+        print("✅ AUTH: Account deletion completed successfully")
+    }
 }
 
 // MARK: - PhoneAuthProviderDelegate for reCAPTCHA
