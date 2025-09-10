@@ -61,6 +61,14 @@ struct ContentView: View {
     @State private var showingRankings = true // true for personal rankings, false for Future Cannes
     @State private var futureCannesList: [FutureCannesItem] = []
     @State private var isLoadingFutureCannes = false
+    @State private var showingShareView = false
+    @State private var showingSystemShareSheet = false
+    @State private var systemShareItems: [Any] = []
+    @State private var pendingShareImage: UIImage? = nil
+    @State private var showActivityInShareModal = false
+    @State private var activityItemsInShareModal: [Any] = []
+    @State private var showSaveSuccess = false
+    @State private var photoSaver: PhotoSaver? = nil
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -170,12 +178,38 @@ struct ContentView: View {
         .sheet(isPresented: $showingFriendSearch) {
             FriendSearchView(store: store)
         }
+        .sheet(isPresented: $showingShareView) {
+            shareModalView
+        }
+        .sheet(isPresented: $showingSystemShareSheet) {
+            if !systemShareItems.isEmpty {
+                ActivityView(activityItems: systemShareItems)
+            }
+        }
+        .onChange(of: showingShareView) { _, isShowing in
+            // When the custom share modal is dismissed, present the system share sheet if queued
+            if !isShowing, let image = pendingShareImage {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    systemShareItems = [image]
+                    showingSystemShareSheet = true
+                    pendingShareImage = nil
+                }
+            }
+        }
         .sheet(item: $showingGlobalRatingDetail) { rating in
             NavigationView {
                 UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: nil)
             }
         }
         .preferredColorScheme(selectedTab == 0 ? .dark : .light) // Apply dark mode to entire TabView when Global tab is selected
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            // Only show share view if on Rankings tab and showing personal rankings (not wishlist)
+            if selectedTab == 1 && showingRankings {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showingShareView = true
+                }
+            }
+        }
         .sheet(item: $showingMovieDetail) { movie in
             NavigationView {
                 UnifiedMovieDetailView(movie: movie, store: store, isFromWishlist: !showingRankings)
@@ -239,6 +273,542 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - Share Modal View (Spotify-style)
+    @ViewBuilder
+    private var shareModalView: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Share preview card (scaled down screenshot)
+                sharePreviewCard
+                    .cornerRadius(16)
+                    .shadow(radius: 10)
+                
+                // Share options
+                shareOptionsView
+                
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Share My Rankings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showingShareView = false
+                    }
+                }
+            }
+        }
+        .background(ActivityPresenter(isPresented: $showActivityInShareModal, items: activityItemsInShareModal))
+        .overlay(
+            Group {
+                if showSaveSuccess { CheckmarkOverlay(isVisible: $showSaveSuccess) }
+            }
+        )
+    }
+    
+    @ViewBuilder
+    private var sharePreviewCard: some View {
+        // Scaled preview of the full-resolution canvas with matched layout size
+        let fullW: CGFloat = 1080
+        let fullH: CGFloat = 1920
+        let previewScale: CGFloat = 0.2
+        return shareCanvas
+            .frame(width: fullW, height: fullH)
+            .scaleEffect(previewScale, anchor: .topLeading)
+            .frame(width: fullW * previewScale, height: fullH * previewScale, alignment: .topLeading)
+    }
+
+    // Unscaled, full-resolution 1080x1920 canvas used for export
+    @ViewBuilder
+    private var shareCanvas: some View {
+        let baseWidth = UIScreen.main.bounds.width
+        let scale = 1080.0 / max(baseWidth, 1.0)
+        let titleSize = 38.0 * scale
+        let usernameSize = 16.0 * scale
+        let hPad = 16.0 * scale
+        let vTop = 28.0 * scale
+        let vBottom = 16.0 * scale
+        let posterHeight: CGFloat = (1080.0 / 3.0) * (3.0/2.0) // 360 x 540 per cell
+
+        return VStack(spacing: 16 * scale) {
+            // Header section (matches personal rankings but without buttons)
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text("My Cannes")
+                    .font(.custom("PlayfairDisplay-Bold", size: titleSize))
+                        .foregroundColor(.primary)
+                    
+                Text("@\(authService.username ?? "user")")
+                    .font(.system(size: usernameSize))
+                            .foregroundColor(.secondary)
+                    }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, hPad)
+            .padding(.top, vTop)
+            .padding(.bottom, vBottom)
+            
+            // 3x3 Movie Grid (exactly like PersonalMovieGridView - no spacing between columns)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+                let movies = Array(store.getMovies().prefix(9))
+                ForEach(0..<9, id: \.self) { i in
+                    if i < movies.count {
+                        ShareMovieGridItem(movie: movies[i], position: i + 1, posterHeightOverride: posterHeight)
+                    } else {
+                        ShareMoviePlaceholderCell(position: i + 1, posterHeightOverride: posterHeight)
+                    }
+                }
+            }
+            .padding(.horizontal, 0)
+            
+            Spacer(minLength: 0)
+        }
+        .background(Color(.systemBackground))
+        .frame(width: 1080, height: 1920)
+    }
+    
+    @ViewBuilder
+    private func shareMovieItem(movie: Movie, index: Int) -> some View {
+        ShareMovieGridItem(movie: movie, position: index + 1)
+    }
+    
+    @ViewBuilder
+    private var shareOptionsView: some View {
+        VStack(spacing: 16) {
+            Text("Share your movie rankings")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            HStack(spacing: 20) {
+                // Share button
+                Button(action: shareImage) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 50, height: 50)
+                            .background(Color.accentColor)
+                            .clipShape(Circle())
+                        
+                        Text("Share")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                    }
+                }
+                
+                // Save to Photos button
+                Button(action: saveImage) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 50, height: 50)
+                            .background(Color.green)
+                            .clipShape(Circle())
+                        
+                        Text("Save")
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+        }
+    }
+    
+    private func shareImage() {
+        Task { @MainActor in
+            let items = await buildShareSnapshotItems()
+            if let uiImage = renderShareUIImage(items: items) {
+                // Present native iOS share sheet from the current sheet (bottom sheet style)
+                activityItemsInShareModal = [uiImage]
+                showActivityInShareModal = true
+            }
+        }
+    }
+    
+    private func saveImage() {
+        Task { @MainActor in
+            let items = await buildShareSnapshotItems()
+            if let uiImage = renderShareUIImage(items: items) {
+                // Flatten alpha by drawing on an opaque white background for JPEG-like storage in Photos
+                let format = UIGraphicsImageRendererFormat.default()
+                format.scale = 1
+                format.opaque = true
+                let size = CGSize(width: 1080, height: 1920)
+                let flattened = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                    UIColor.white.setFill()
+                    ctx.fill(CGRect(origin: .zero, size: size))
+                    uiImage.draw(in: CGRect(origin: .zero, size: size))
+                }
+                // Save with completion feedback
+                self.photoSaver = PhotoSaver(onComplete: { success in
+                    if success {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                            showSaveSuccess = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            withAnimation(.easeInOut(duration: 0.2)) { showSaveSuccess = false }
+                        }
+                    }
+                })
+                self.photoSaver?.save(image: flattened)
+            }
+        }
+    }
+
+    // Build share snapshot items with pre-fetched poster UIImages to avoid AsyncImage blanks during offscreen rendering
+    private func buildShareSnapshotItems() async -> [ShareSnapshotItem] {
+        // Respect current media type selection (Movies or TV Shows)
+        let movies = Array(store.getMovies().prefix(9))
+        return await withTaskGroup(of: ShareSnapshotItem?.self) { group in
+            for movie in movies {
+                group.addTask {
+                    let poster = await fetchPosterUIImage(for: movie)
+                    return ShareSnapshotItem(movie: movie, poster: poster)
+                }
+            }
+            var results: [ShareSnapshotItem] = []
+            for await item in group {
+                if let item = item { results.append(item) }
+            }
+            // Preserve original order
+            return movies.map { movie in
+                results.first(where: { $0.movie.id == movie.id }) ?? ShareSnapshotItem(movie: movie, poster: nil)
+            }
+        }
+    }
+
+    private func fetchPosterUIImage(for movie: Movie) async -> UIImage? {
+        guard let tmdbId = movie.tmdbId else { return nil }
+        do {
+            let tmdbService = TMDBService()
+            let tmdbMovie: TMDBMovie
+            if movie.mediaType == .tv {
+                tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+            } else {
+                tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+            }
+            if let path = tmdbMovie.posterPath, let url = URL(string: "https://image.tmdb.org/t/p/w500\(path)") {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                return UIImage(data: data)
+            }
+        } catch {
+            // Ignore; will use placeholder
+        }
+        return nil
+    }
+    
+    private func renderShareUIImage(items: [ShareSnapshotItem]) -> UIImage? {
+        let content = ShareCanvasPreparedView(items: items)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 1.0
+        return renderer.uiImage
+    }
+}
+
+// MARK: - Share Movie Grid Item (exactly like PersonalMovieGridItem but for sharing)
+struct ShareMovieGridItem: View {
+    let movie: Movie
+    let position: Int
+    @State private var posterPath: String?
+    @State private var isLoadingPoster = true
+    @Environment(\.colorScheme) private var colorScheme
+    var posterHeightOverride: CGFloat? = nil
+    
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            let h = posterHeightOverride ?? 200
+            let auraDiameter = h * 0.20 // matches ~40 when h=200
+            let bubbleDiameter = h * 0.16 // matches ~32 when h=200
+            let overlayOffset = h * 0.04 // matches ~8 when h=200
+            let goatFont = bubbleDiameter * 0.62 // ~20 when bubble=32
+            let scoreFont = bubbleDiameter * 0.38 // ~12 when bubble=32
+            // Movie poster (exactly like PersonalMovieGridItem)
+            AsyncImage(url: posterPath != nil ? URL(string: "https://image.tmdb.org/t/p/w500\(posterPath!)") : nil) { phase in
+                switch phase {
+                case .empty:
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(Color(.systemGray5))
+                        .opacity(0.6)
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure:
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(Color(.systemGray5))
+                        .opacity(0.6)
+                @unknown default:
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(Color(.systemGray5))
+                        .opacity(0.6)
+                }
+            }
+            .frame(height: posterHeightOverride ?? 200)
+            .clipped()
+            .cornerRadius(0)
+            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+            
+            // Score bubble or goat (exactly like PersonalMovieGridItem)
+            ZStack {
+                if position <= 5 && movie.score >= 9.0 {
+                    Circle()
+                        .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
+                        .frame(width: auraDiameter, height: auraDiameter)
+                        .blur(radius: max(2, auraDiameter * 0.05))
+                }
+                
+                Circle()
+                    .fill(position <= 5 && movie.score >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: movie.score, colorScheme: colorScheme))
+                    .frame(width: bubbleDiameter, height: bubbleDiameter)
+                    .shadow(color: .black.opacity(0.25), radius: max(2, bubbleDiameter * 0.07), x: 0, y: 1)
+                
+                if position == 1 {
+                    Text("🐐")
+                        .font(.system(size: goatFont))
+                } else {
+                    Text(String(format: "%.1f", roundToTenths(movie.score)))
+                        .font(.system(size: scoreFont, weight: .bold))
+                        .foregroundColor(position <= 5 && movie.score >= 9.0 ? .black : .white)
+                }
+            }
+            .offset(x: overlayOffset, y: overlayOffset)
+        }
+        .onAppear { loadPosterPath() }
+    }
+    
+    private func loadPosterPath() {
+        guard let tmdbId = movie.tmdbId else { return }
+        
+        Task {
+            do {
+                let tmdbService = TMDBService()
+                let tmdbMovie: TMDBMovie
+                
+                if movie.mediaType == .tv {
+                    tmdbMovie = try await tmdbService.getTVShowDetails(id: tmdbId)
+                } else {
+                    tmdbMovie = try await tmdbService.getMovieDetails(id: tmdbId)
+                }
+                
+                await MainActor.run {
+                    posterPath = tmdbMovie.posterPath
+                    isLoadingPoster = false
+                }
+            } catch {
+                print("Error loading poster for \(movie.title): \(error)")
+                await MainActor.run {
+                    isLoadingPoster = false
+                }
+            }
+        }
+    }
+}
+
+// Data prepared for offscreen share rendering
+struct ShareSnapshotItem {
+    let movie: Movie
+    let poster: UIImage?
+}
+
+// Offscreen canvas that uses preloaded UIImages to avoid AsyncImage blanks
+struct ShareCanvasPreparedView: View {
+    let items: [ShareSnapshotItem]
+    var body: some View {
+        let baseWidth = UIScreen.main.bounds.width
+        let scale = 1080.0 / max(baseWidth, 1.0)
+        let titleSize = 38.0 * scale
+        let usernameSize = 16.0 * scale
+        let hPad = 16.0 * scale
+        let vTop = 28.0 * scale
+        let vBottom = 16.0 * scale
+        let posterHeight: CGFloat = (1080.0 / 3.0) * (3.0/2.0)
+
+        return VStack(spacing: 16 * scale) {
+            VStack(alignment: .leading, spacing: 4 * scale) {
+                Text("My Cannes")
+                    .font(.custom("PlayfairDisplay-Bold", size: titleSize))
+                Text("@\(AuthenticationService.shared.username ?? "user")")
+                    .font(.system(size: usernameSize))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, hPad)
+            .padding(.top, vTop)
+            .padding(.bottom, vBottom)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 3), spacing: 0) {
+                ForEach(0..<9, id: \.self) { i in
+                    if i < items.count {
+                        SharePreparedCell(item: items[i], posterHeight: posterHeight, position: i + 1)
+                    } else {
+                        ShareMoviePlaceholderCell(position: i + 1, posterHeightOverride: posterHeight)
+                    }
+                }
+            }
+            .padding(.horizontal, 0)
+
+            Spacer(minLength: 0)
+        }
+        .background(Color(.systemBackground))
+        .frame(width: 1080, height: 1920)
+    }
+}
+
+struct SharePreparedCell: View {
+    let item: ShareSnapshotItem
+    let posterHeight: CGFloat
+    let position: Int
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let poster = item.poster {
+                Image(uiImage: poster)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(height: posterHeight)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(Color(.systemGray6))
+                    .frame(height: posterHeight)
+                    .clipped()
+            }
+
+            let auraDiameter = posterHeight * 0.20
+            let bubbleDiameter = posterHeight * 0.16
+            let overlayOffset = posterHeight * 0.04
+            let goatFont = bubbleDiameter * 0.62
+            let scoreFont = bubbleDiameter * 0.38
+
+            ZStack {
+                if position <= 5 && item.movie.score >= 9.0 {
+                    Circle()
+                        .fill(Color.adaptiveGolden(for: colorScheme).opacity(0.3))
+                        .frame(width: auraDiameter, height: auraDiameter)
+                        .blur(radius: max(2, auraDiameter * 0.05))
+                }
+                Circle()
+                    .fill(position <= 5 && item.movie.score >= 9.0 ? Color.adaptiveGolden(for: colorScheme) : Color.adaptiveSentiment(for: item.movie.score, colorScheme: colorScheme))
+                    .frame(width: bubbleDiameter, height: bubbleDiameter)
+                if position == 1 {
+                    Text("🐐").font(.system(size: goatFont))
+                } else {
+                    Text(String(format: "%.1f", roundToTenths(item.movie.score)))
+                        .font(.system(size: scoreFont, weight: .bold))
+                        .foregroundColor(position <= 5 && item.movie.score >= 9.0 ? .black : .white)
+                }
+            }
+            .offset(x: overlayOffset, y: overlayOffset)
+        }
+    }
+}
+
+// UIKit wrapper for UIActivityViewController to avoid presenting over an existing sheet
+struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// Helper to present ActivityView from inside an existing SwiftUI sheet without stacking another SwiftUI sheet
+struct ActivityPresenter: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIViewController {
+        let vc = UIViewController()
+        vc.view.backgroundColor = .clear
+        return vc
+    }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        if isPresented && uiViewController.presentedViewController == nil {
+            let av = UIActivityViewController(activityItems: items, applicationActivities: nil)
+            uiViewController.present(av, animated: true) {
+                DispatchQueue.main.async { isPresented = false }
+            }
+        }
+    }
+}
+
+// Visually animated checkmark overlay
+struct CheckmarkOverlay: View {
+    @Binding var isVisible: Bool
+    @State private var scale: CGFloat = 0.6
+    @State private var opacity: Double = 0
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.2)
+                .ignoresSafeArea()
+                .opacity(opacity)
+            ZStack {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 110, height: 110)
+                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .scaleEffect(scale)
+            .opacity(opacity)
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                scale = 1.0
+                opacity = 1.0
+            }
+        }
+        .onChange(of: isVisible) { _, newVal in
+            if !newVal {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    opacity = 0
+                }
+            }
+        }
+    }
+}
+
+// Helper to save to Photos with completion
+final class PhotoSaver: NSObject {
+    private var onComplete: (Bool) -> Void
+    init(onComplete: @escaping (Bool) -> Void) {
+        self.onComplete = onComplete
+    }
+    func save(image: UIImage) {
+        UIImageWriteToSavedPhotosAlbum(image, self, #selector(saveCompleted(_:didFinishSavingWithError:contextInfo:)), nil)
+    }
+    @objc private func saveCompleted(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeMutableRawPointer?) {
+        onComplete(error == nil)
+    }
+}
+// MARK: - Share Movie Placeholder Cell
+struct ShareMoviePlaceholderCell: View {
+    let position: Int
+    var posterHeightOverride: CGFloat? = nil
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color(.systemGray6))
+                .frame(height: posterHeightOverride ?? 200)
+                .clipped()
+            // Position number bubble for placeholders too, matching style lightly
+            Circle()
+                .fill(Color(.systemGray4))
+                .frame(width: 24, height: 24)
+                .overlay(
+                    Text("\(position)")
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                )
+                .offset(x: 8, y: 8)
+        }
+    }
+}
+
+// MARK: - ContentView Extension
+extension ContentView {
     // Global content view
     @ViewBuilder
     private var globalContentView: some View {
@@ -1232,39 +1802,9 @@ struct MovieRow: View {
                 showingNumber = true
             }
             
-            // Start the score calculating animation
-            startScoreAnimation()
         }
     }
     
-    private func startScoreAnimation() {
-        let targetScore = roundToTenths(movie.score)
-        calculatingScore = true
-        
-        // Start with a random number
-        displayScore = Double.random(in: 0...10)
-        
-        // Create a timer that cycles through numbers
-        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
-            if calculatingScore {
-                // Cycle through random numbers around the target
-                let randomOffset = Double.random(in: -2...2)
-                displayScore = max(0, min(10, targetScore + randomOffset))
-            } else {
-                // Settle on the final value
-                displayScore = targetScore
-                timer.invalidate()
-            }
-        }
-        
-        // Stop calculating after 0.8 seconds and settle on final value
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            calculatingScore = false
-            withAnimation(.easeOut(duration: 0.2)) {
-                displayScore = targetScore
-            }
-        }
-    }
 }
 
 struct GlobalRatingRowSkeleton: View {
