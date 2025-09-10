@@ -1,4 +1,38 @@
 import SwiftUI
+
+// Custom view modifier for status bar appearance
+struct StatusBarStyleModifier: ViewModifier {
+    let style: UIStatusBarStyle
+    
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                setStatusBarStyle(style)
+            }
+    }
+    
+    private func setStatusBarStyle(_ style: UIStatusBarStyle) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        
+        // Try multiple approaches to set status bar style
+        DispatchQueue.main.async {
+            // Method 1: Direct application call (might work in some iOS versions)
+            UIApplication.shared.setStatusBarStyle(style, animated: true)
+            
+            // Method 2: Try to access the key window's root view controller
+            if let window = windowScene.windows.first(where: { $0.isKeyWindow }),
+               let rootViewController = window.rootViewController {
+                rootViewController.setNeedsStatusBarAppearanceUpdate()
+            }
+        }
+    }
+}
+
+extension View {
+    func statusBarStyle(_ style: UIStatusBarStyle) -> some View {
+        self.modifier(StatusBarStyleModifier(style: style))
+    }
+}
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
@@ -43,6 +77,7 @@ struct ContentView: View {
                     
                     // Global content view (above starry background)
                     globalContentView
+                        .clipped()
                         .zIndex(1)
                         .animation(.easeInOut(duration: 0.3), value: store.selectedMediaType)
                 }
@@ -63,7 +98,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark) // Only Global tab uses dark mode
             .tabItem {
                 Image(systemName: "globe")
                 Text("Global")
@@ -79,6 +113,7 @@ struct ContentView: View {
                     
                     // Personal content view
                     personalContentView
+                        .clipped()
                         .animation(.easeInOut(duration: 0.3), value: store.selectedMediaType)
                 }
                 .navigationBarHidden(true)
@@ -140,6 +175,7 @@ struct ContentView: View {
                 UnifiedMovieDetailView(rating: rating, store: store, notificationSenderRating: nil)
             }
         }
+        .preferredColorScheme(selectedTab == 0 ? .dark : .light) // Apply dark mode to entire TabView when Global tab is selected
         .sheet(item: $showingMovieDetail) { movie in
             NavigationView {
                 UnifiedMovieDetailView(movie: movie, store: store, isFromWishlist: !showingRankings)
@@ -206,42 +242,46 @@ struct ContentView: View {
     // Global content view
     @ViewBuilder
     private var globalContentView: some View {
-        VStack(spacing: 0) {
-            // Global header
-            globalHeaderView
-            
-            // Global content
+        GeometryReader { geometry in
             ScrollView {
-                let ratingsCount = store.getGlobalRatings().count
-                let isLoading = store.isLoadingFromCache
-                
-                if isLoading {
-                    loadingView
-                } else if ratingsCount == 0 {
-                    VStack(spacing: 20) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 60))
-                            .foregroundColor(Color.gold)
-                        
-                        Text("No community ratings yet")
-                            .font(.title2)
-                            .fontWeight(.medium)
-                            .foregroundColor(Color.gold)
-                        
-                        Text("Community ratings will appear here once people start ranking movies")
-                            .font(.subheadline)
-                            .foregroundColor(Color.gold.opacity(0.8))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                } else {
-                    if showingGrid {
-                        globalRatingGridView
+                VStack(spacing: 0) {
+                    // Global header (scrolls with content)
+                    globalHeaderView
+                    
+                    // Global content
+                    let ratingsCount = store.getGlobalRatings().count
+                    let isLoading = store.isLoadingFromCache
+                    
+                    if isLoading {
+                        loadingView
+                    } else if ratingsCount == 0 {
+                        VStack(spacing: 20) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 60))
+                                .foregroundColor(Color.gold)
+                            
+                            Text("No community ratings yet")
+                                .font(.title2)
+                                .fontWeight(.medium)
+                                .foregroundColor(Color.gold)
+                            
+                            Text("Community ratings will appear here once people start ranking movies")
+                                .font(.subheadline)
+                                .foregroundColor(Color.gold.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding()
                     } else {
-                        globalRatingListView
+                        if showingGrid {
+                            globalRatingGridView
+                        } else {
+                            globalRatingListView
+                        }
                     }
                 }
+                .padding(.top, geometry.safeAreaInsets.top)
             }
+            .ignoresSafeArea(edges: .top)
             .refreshable {
                 // Refresh global ratings
                 await refreshGlobalRatings()
@@ -256,40 +296,44 @@ struct ContentView: View {
     // Personal content view (Rankings)
     @ViewBuilder
     private var personalContentView: some View {
-        VStack(spacing: 0) {
-            // Personal header
-            personalHeaderView
-            
-            // Personal content
+        GeometryReader { geometry in
             ScrollView {
-                if showingRankings {
-                    // Show personal rankings
-                    if store.isLoadingFromCache {
-                        loadingView
-                    } else if store.getMovies().isEmpty {
-                        emptyStateView
-                    } else {
-                        if showingGrid {
-                            personalGridView
+                VStack(spacing: 0) {
+                    // Personal header (scrolls with content)
+                    personalHeaderView
+                    
+                    // Personal content
+                    if showingRankings {
+                        // Show personal rankings
+                        if store.isLoadingFromCache {
+                            loadingView
+                        } else if store.getMovies().isEmpty {
+                            emptyStateView
                         } else {
-                            movieListView
+                            if showingGrid {
+                                personalGridView
+                            } else {
+                                movieListView
+                            }
                         }
-                    }
-                } else {
-                    // Show Future Cannes (wishlist)
-                    if isLoadingFutureCannes {
-                        futureCannesLoadingView
-                    } else if futureCannesList.isEmpty {
-                        futureCannesEmptyView
                     } else {
-                        if showingGrid {
-                            futureCannesGridView
+                        // Show Future Cannes (wishlist)
+                        if isLoadingFutureCannes {
+                            futureCannesLoadingView
+                        } else if futureCannesList.isEmpty {
+                            futureCannesEmptyView
                         } else {
-                            futureCannesListView
+                            if showingGrid {
+                                futureCannesGridView
+                            } else {
+                                futureCannesListView
+                            }
                         }
                     }
                 }
+                .padding(.top, geometry.safeAreaInsets.top)
             }
+            .ignoresSafeArea(edges: .top)
         }
         .background(Color(.systemBackground))
     }
@@ -374,17 +418,6 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.2), value: store.selectedMediaType)
         }
         .padding(.vertical, 8)
-        .background(
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color.black.opacity(0.7),
-                    Color.black.opacity(0.3),
-                    Color.clear
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
     }
     
     private var personalHeaderView: some View {
